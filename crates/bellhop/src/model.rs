@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use num_complex::Complex64;
+
 /// A fully loaded and validated two-dimensional BELLHOP input case.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Case {
@@ -9,6 +11,7 @@ pub struct Case {
     pub bathymetry: Option<BoundaryShape>,
     pub bottom_reflection: Option<ReflectionCoefficientTable>,
     pub top_reflection: Option<ReflectionCoefficientTable>,
+    pub internal_reflection: Option<InternalReflectionCoefficientTable>,
     pub source_beam_pattern: Option<SourceBeamPattern>,
 }
 
@@ -152,6 +155,22 @@ pub struct ReflectionCoefficientPoint {
     pub angle_degrees: f64,
     pub magnitude: f64,
     pub phase_radians: f64,
+}
+
+/// Impedance-function table stored by the Acoustics Toolbox `.irc` format.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InternalReflectionCoefficientTable {
+    pub title: String,
+    pub frequency_hz: f64,
+    pub points: Vec<InternalReflectionCoefficientPoint>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct InternalReflectionCoefficientPoint {
+    pub horizontal_wavenumber_squared: f64,
+    pub f: Complex64,
+    pub g: Complex64,
+    pub decimal_power: i32,
 }
 
 #[derive(Clone, Debug, PartialEq)]

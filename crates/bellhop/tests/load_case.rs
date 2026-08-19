@@ -52,6 +52,44 @@ fn collects_independent_missing_auxiliary_files() {
 }
 
 #[test]
+fn loads_precalculated_internal_reflection_table() {
+    let directory = TemporaryDirectory::new();
+    let environment = directory.join("internal.env");
+    fs::write(
+        &environment,
+        "'Internal reflection table'\n\
+         100.0\n\
+         1\n\
+         'CVW'\n\
+         0 0.0 100.0\n\
+         0.0 1500.0 /\n\
+         100.0 1500.0 /\n\
+         'P' 0.0\n\
+         1\n\
+         50.0 /\n\
+         1\n\
+         50.0 /\n\
+         2\n\
+         0.0 1.0 /\n\
+         'R'\n\
+         1\n\
+         10.0 /\n\
+         10.0 101.0 1.0\n",
+    )
+    .unwrap();
+    fs::write(
+        directory.join("internal.irc"),
+        "'generated table' 100\n2\n0.0 1.0 0.0 1.0 0.0 0\n1.0 2.0 0.0 1.0 0.0 0\n",
+    )
+    .unwrap();
+
+    let case = load_case(&environment).unwrap().value;
+    let table = case.internal_reflection.unwrap();
+    assert_eq!(table.title, "generated table");
+    assert_eq!(table.points.len(), 2);
+}
+
+#[test]
 fn resolves_top_and_bottom_reflection_tables() {
     let directory = TemporaryDirectory::new();
     let environment = directory.join("reflection.env");

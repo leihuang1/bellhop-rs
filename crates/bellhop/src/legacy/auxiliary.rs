@@ -3,14 +3,17 @@
 use std::f64::consts::PI;
 use std::path::Path;
 
+use num_complex::Complex64;
+
 use crate::diagnostic::{Diagnostic, SourceLocation};
 use crate::model::{
     BoundaryInterpolation, BoundaryMaterial, BoundaryShape, BoundaryShapePoint,
+    InternalReflectionCoefficientPoint, InternalReflectionCoefficientTable,
     RangeDependentSoundSpeed, ReflectionCoefficientPoint, ReflectionCoefficientTable,
     SourceBeamPattern, SourceBeamPatternPoint,
 };
 
-use super::records::{Atom, RecordReader, Slot, parse_f64};
+use super::records::{Atom, RecordReader, Slot, parse_f64, parse_i32};
 
 const MAX_AUXILIARY_POINTS: usize = 1_000_000;
 const MAX_SSP_VALUES: usize = 20_000_000;
@@ -315,6 +318,77 @@ pub(super) fn parse_reflection_coefficients(
     Ok(ReflectionCoefficientTable { points })
 }
 
+pub(super) fn parse_internal_reflection_coefficients(
+    source: &str,
+    path: &Path,
+) -> Result<InternalReflectionCoefficientTable, Diagnostic> {
+    const FIELD: &str = "internal_reflection";
+    let mut reader = RecordReader::new(source, path);
+    let header = required_atoms(reader.read_fields(FIELD, 2)?, 2, FIELD, path)?;
+    let title = header[0].text.clone();
+    let frequency_hz = parse_f64(&header[1], FIELD)?;
+    if !frequency_hz.is_finite() || frequency_hz <= 0.0 {
+        return Err(Diagnostic::error(
+            "BH0201",
+            "internal reflection-table frequency must be finite and positive",
+            FIELD,
+            header[1].location.clone(),
+        ));
+    }
+
+    let (point_count, count_location) = reader.read_i32(FIELD)?;
+    let point_count = checked_count(point_count, 2, FIELD, count_location)?;
+    let mut points = Vec::with_capacity(point_count);
+    let mut previous_wavenumber = None;
+    for _ in 0..point_count {
+        let values = required_atoms(
+            reader.read_fixed_width_fields(FIELD, &[15, 15, 15, 15, 15, 5])?,
+            6,
+            FIELD,
+            path,
+        )?;
+        let horizontal_wavenumber_squared = parse_f64(&values[0], FIELD)?;
+        let f = Complex64::new(parse_f64(&values[1], FIELD)?, parse_f64(&values[2], FIELD)?);
+        let g = Complex64::new(parse_f64(&values[3], FIELD)?, parse_f64(&values[4], FIELD)?);
+        let decimal_power = parse_i32(&values[5], FIELD)?;
+        if !horizontal_wavenumber_squared.is_finite()
+            || horizontal_wavenumber_squared < 0.0
+            || !f.re.is_finite()
+            || !f.im.is_finite()
+            || !g.re.is_finite()
+            || !g.im.is_finite()
+        {
+            return Err(Diagnostic::error(
+                "BH0201",
+                "internal reflection-table values must be finite and squared wavenumbers non-negative",
+                FIELD,
+                values[0].location.clone(),
+            ));
+        }
+        if previous_wavenumber.is_some_and(|previous| horizontal_wavenumber_squared <= previous) {
+            return Err(Diagnostic::error(
+                "BH0201",
+                "internal reflection-table squared wavenumbers must be strictly increasing",
+                FIELD,
+                values[0].location.clone(),
+            ));
+        }
+        previous_wavenumber = Some(horizontal_wavenumber_squared);
+        points.push(InternalReflectionCoefficientPoint {
+            horizontal_wavenumber_squared,
+            f,
+            g,
+            decimal_power,
+        });
+    }
+
+    Ok(InternalReflectionCoefficientTable {
+        title,
+        frequency_hz,
+        points,
+    })
+}
+
 pub(super) fn parse_source_beam_pattern(
     source: &str,
     path: &Path,
@@ -446,8 +520,9 @@ mod tests {
     use crate::model::BoundaryInterpolation;
 
     use super::{
-        BoundarySide, parse_boundary_shape, parse_range_dependent_sound_speed,
-        parse_reflection_coefficients, parse_source_beam_pattern,
+        BoundarySide, parse_boundary_shape, parse_internal_reflection_coefficients,
+        parse_range_dependent_sound_speed, parse_reflection_coefficients,
+        parse_source_beam_pattern,
     };
 
     #[test]
@@ -492,6 +567,20 @@ mod tests {
         )
         .unwrap();
         assert!((table.points[1].phase_radians - PI).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn parses_internal_reflection_impedance_functions() {
+        let table = parse_internal_reflection_coefficients(
+            "'generated table' 500\n2\n1 2 3 4 5 -10\n2 6 7 8 9 0\n",
+            Path::new("case.irc"),
+        )
+        .unwrap();
+        assert_eq!(table.title, "generated table");
+        assert!((table.frequency_hz - 500.0).abs() < f64::EPSILON);
+        assert_eq!(table.points[0].f, num_complex::Complex64::new(2.0, 3.0));
+        assert_eq!(table.points[1].g, num_complex::Complex64::new(8.0, 9.0));
+        assert_eq!(table.points[0].decimal_power, -10);
     }
 
     #[test]

@@ -208,3 +208,49 @@ coverage = ["C", "cerveny-ray-centered", "pressure-field"]
 input_sha256 = "fd99307d0f02b4693afd27227fe06db4ca9bd8dc78e8cd8e4fa4fe1337445d43"
 output_sha256 = "7e573583815079e6ad4cae20589b82ce10d4f5293f27230106ef2d4506f0e455"
 
+[[golden]]
+stem = "ElasticReflection"
+provenance = "project-authored Fortran v2023.5 reflection harness"
+modified = true
+coverage = ["R", "acousto-elastic", "reflection-amplitude", "reflection-phase"]
+input_sha256 = "1ba429b96e15db65ddd1251abeb44d85247934f5e7c4330f4f23c0edfd0fbb8f"
+output_sha256 = "4684e491700ccae1b64167b5d77e5f7beae3e05b7314f914f994bedeb4237816"
+
+[[golden]]
+stem = "GrainReflection"
+provenance = "project-authored Fortran v2023.5 reflection harness"
+modified = true
+coverage = ["R", "grain-size", "reflection-amplitude", "reflection-phase"]
+input_sha256 = "e71b42c75e298fb19cf2cb40557b994fa7236adc0ea6b2328a8739a2ed8c5cbb"
+output_sha256 = "f81a1acb01e7dd1e2a701c4729d3f2ab0aa326474e091992aed1852ee0d4088c"
+
+[[golden]]
+stem = "InternalReflection"
+provenance = "tests/TabRefCoef/neggradB.env reduced to seven BOUNCE v2023.5 samples"
+modified = true
+coverage = ["R", "irc", "impedance-interpolation", "reflection-amplitude", "reflection-phase"]
+input_sha256 = "96424c79525e1c37fe66ff546ea7eb4774f7acca92bd07ea8e60d089f38a1435"
+irc_sha256 = "b434b2dbf9f6dcedf980d242a6f2003282eb7ea8d914e452220bfdb01d8c9f0f"
+output_sha256 = "3fe58b2896c16a2bd7d1c1c9eac92b03e52e89901d31559973756695b4a296d8"
+
+[[golden]]
+stem = "DickinsCritical"
+provenance = "tests/Dickins/DickinsBray.env with one selected beam and matching bathymetry stem"
+modified = true
+platform = "linux-x86_64"
+coverage = ["R", "piecewise-boundary", "ssp-interface", "minimum-step-branch"]
+input_sha256 = "021c59147fdfe142bb7b2606ba757ec1580bfaff93fea1a1c37e836d31cbc4ea"
+bty_sha256 = "a8172f9ddab429816d1ce14c50997cb0b462152257e5db51c04e7d4c36f39e44"
+output_sha256 = "b7bb1a085e7052750eedf9a21c01f61983b1f2a976048b853a02233a31bb81a7"
+
+[[golden]]
+stem = "ParaBotCritical"
+provenance = "tests/ParaBot/ParaBot.env with one selected beam"
+modified = true
+platform = "linux-x86_64"
+coverage = ["R", "curvilinear-boundary", "boundary-crossing", "minimum-step-branch"]
+input_sha256 = "7b1f470734ae300fb14e2e784d81104026a360c25b1fc09b0a27b35f0af0a34b"
+ati_sha256 = "79a869352b0e7f89582a07480e740b904a0cccdd3ef129d774c79bf73d8ad484"
+bty_sha256 = "4405a8f99f87ed4de182aa9b67a0caace4002d88496e216c68415d721ab3eb97"
+output_sha256 = "e9d469e7be81629785718b547e5b468ff69f47347e1247e3619458a8caa0a3f3"
+

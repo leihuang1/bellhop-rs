@@ -92,6 +92,54 @@ impl<'a> RecordReader<'a> {
         Ok(slots)
     }
 
+    pub fn read_fixed_width_fields(
+        &mut self,
+        field: &'static str,
+        widths: &[usize],
+    ) -> Result<Vec<Slot>, Diagnostic> {
+        let expected_width: usize = widths.iter().sum();
+        let Some(&line) = self.lines.get(self.next_line) else {
+            return Err(Diagnostic::error(
+                "BH0102",
+                "unexpected end of file in fixed-width record",
+                field,
+                SourceLocation::new(&self.path, self.lines.len().max(1), 1),
+            ));
+        };
+        if line.len() < expected_width || !line.is_char_boundary(expected_width) {
+            return self.read_fields(field, widths.len());
+        }
+
+        let line_number = self.next_line + 1;
+        self.next_line += 1;
+        let mut offset = 0;
+        let mut fields = Vec::with_capacity(widths.len());
+        for &width in widths {
+            let end = offset + width;
+            if !line.is_char_boundary(offset) || !line.is_char_boundary(end) {
+                return Err(Diagnostic::error(
+                    "BH0103",
+                    "fixed-width record contains non-ASCII field boundaries",
+                    field,
+                    SourceLocation::new(&self.path, line_number, offset + 1),
+                ));
+            }
+            let text = line[offset..end].trim();
+            fields.push(Slot {
+                atom: if text.is_empty() {
+                    None
+                } else {
+                    Some(Atom {
+                        text: text.to_owned(),
+                        location: SourceLocation::new(&self.path, line_number, offset + 1),
+                    })
+                },
+            });
+            offset = end;
+        }
+        Ok(fields)
+    }
+
     pub fn read_required_atom(&mut self, field: &'static str) -> Result<Atom, Diagnostic> {
         let slots = self.read_fields(field, 1)?;
         slots
@@ -356,6 +404,20 @@ mod tests {
         assert_eq!(values[3].atom.as_ref().unwrap().text, "3.0");
         assert!(values[4].atom.is_none());
         assert!(values[5].atom.is_none());
+    }
+
+    #[test]
+    fn reads_adjacent_fixed_width_fields() {
+        let line = format!(
+            "{:>15}{:>15}{:>15}{:>15}{:>15}{:>5}\n",
+            "1.2345678E+10", "-2.345678E+10", "3", "-4", "5", "-10"
+        );
+        let mut reader = RecordReader::new(&line, Path::new("case.irc"));
+        let values = reader
+            .read_fixed_width_fields("internal_reflection", &[15, 15, 15, 15, 15, 5])
+            .unwrap();
+        assert_eq!(values[1].atom.as_ref().unwrap().text, "-2.345678E+10");
+        assert_eq!(values[5].atom.as_ref().unwrap().text, "-10");
     }
 
     #[test]

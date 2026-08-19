@@ -13,6 +13,7 @@ Implemented:
 - range-dependent `.ssp` matrices
 - short and long, piecewise-linear and curvilinear `.ati`/`.bty` boundary data
 - `.brc`/`.trc` magnitude and phase tables
+- BOUNCE/KRAKEN `.irc` impedance-function tables for a precalculated bottom reflection condition
 - `.sbp` source beam patterns
 - same-directory, same-stem auxiliary-file resolution through `load_case`
 - semantic validation without invoking the numerical solver
@@ -23,7 +24,7 @@ Numerically implemented:
 - `N/C/P/S/Q/A` sound-speed evaluation and derivatives
 - reference modified polygon/midpoint integration with interface and boundary step reduction
 - flat, piecewise-linear, curvilinear, and range-dependent boundaries
-- vacuum, rigid, acousto-elastic, grain-size, and tabulated reflection conditions
+- vacuum, rigid, acousto-elastic, grain-size, angularly tabulated, and precalculated internal-impedance reflection conditions
 - source beam-pattern weighting and reflection amplitude/phase accumulation
 - `E` eigenray and `A/a` arrival calculations for Cartesian/ray-centered geometric-hat (`G/g`) and Cartesian geometric-Gaussian (`B`) beams
 - simple-Gaussian (`S`) eigenray detection
@@ -32,9 +33,9 @@ Numerically implemented:
 - Cerveny space-filling, minimum-width, and WKB epsilon selection; image beams, windows, branch cuts, and boundary-curvature conditions
 - point and line source scaling, rectilinear and irregular receiver grids, caustic phases, arrival combination, and strongest-arrival retention
 
-Not yet implemented:
+Unavailable because the corresponding reference paths are incomplete:
 
-- precalculated internal `.irc` reflection tables and `W` table generation
+- `W` table generation: BELLHOP v2023.5 only prints that it is writing an IRC file; it has no generator, does not read a layered medium for this option, and reaches its unknown-boundary error if a ray reflects
 - simple-Gaussian arrival influence and Cerveny eigenray/arrival combinations; reference BELLHOP's corresponding influence paths do not emit these products
 - ray-centered geometric-Gaussian (`b`) influence; this option is also explicitly unimplemented by reference BELLHOP
 

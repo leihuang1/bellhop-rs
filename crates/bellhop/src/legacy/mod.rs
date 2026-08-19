@@ -9,8 +9,8 @@ use crate::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome, SourceLocatio
 use crate::model::{BoundaryCondition, Case, EnvironmentCase};
 
 use auxiliary::{
-    BoundarySide, parse_boundary_shape, parse_range_dependent_sound_speed,
-    parse_reflection_coefficients, parse_source_beam_pattern,
+    BoundarySide, parse_boundary_shape, parse_internal_reflection_coefficients,
+    parse_range_dependent_sound_speed, parse_reflection_coefficients, parse_source_beam_pattern,
 };
 
 /// Loads and validates a two-dimensional legacy BELLHOP `.env` file.
@@ -46,7 +46,7 @@ pub fn load_env(path: &Path) -> Result<LoadOutcome<EnvironmentCase>, DiagnosticR
 /// # Errors
 ///
 /// Returns structured diagnostics when the environment or any required
-/// `.ssp`, `.ati`, `.bty`, `.brc`, `.trc`, or `.sbp` input is missing,
+/// `.ssp`, `.ati`, `.bty`, `.brc`, `.trc`, `.irc`, or `.sbp` input is missing,
 /// malformed, inconsistent, or unsupported.
 #[allow(clippy::too_many_lines)]
 pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
@@ -136,6 +136,34 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
         None
     };
 
+    let internal_reflection = if matches!(
+        environment.bottom_boundary.condition,
+        BoundaryCondition::PrecalculatedReflectionCoefficient
+    ) {
+        let table = collect_auxiliary(
+            read_auxiliary(path, "irc", "internal_reflection")
+                .and_then(|(source, path)| parse_internal_reflection_coefficients(&source, &path)),
+            &mut diagnostics,
+        );
+        if let Some(table) = &table
+            && (table.frequency_hz - environment.frequency_hz).abs()
+                > 1.0e-9 * environment.frequency_hz.abs().max(1.0)
+        {
+            diagnostics.push(Diagnostic::warning(
+                "BH1004",
+                format!(
+                    ".irc frequency {} Hz differs from environment frequency {} Hz",
+                    table.frequency_hz, environment.frequency_hz
+                ),
+                "internal_reflection.frequency",
+                SourceLocation::file(path.with_extension("irc")),
+            ));
+        }
+        table
+    } else {
+        None
+    };
+
     let source_beam_pattern = if environment.run.has_source_beam_pattern {
         collect_auxiliary(
             read_auxiliary(path, "sbp", "source_beam_pattern")
@@ -147,16 +175,13 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
     };
 
     if matches!(
-        environment.bottom_boundary.condition,
-        BoundaryCondition::PrecalculatedReflectionCoefficient
-    ) || matches!(
         environment.top_boundary.condition,
         BoundaryCondition::PrecalculatedReflectionCoefficient
     ) {
         diagnostics.push(Diagnostic::error(
             "BH0202",
-            "precalculated .irc reflection tables are not supported",
-            "reflection_coefficients",
+            "the Acoustics Toolbox .irc format defines a bottom impedance and cannot be used for the top boundary",
+            "top_boundary.condition",
             SourceLocation::file(path),
         ));
     }
@@ -173,6 +198,7 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
             bathymetry,
             bottom_reflection,
             top_reflection,
+            internal_reflection,
             source_beam_pattern,
         },
         warnings: diagnostics.diagnostics().to_vec(),

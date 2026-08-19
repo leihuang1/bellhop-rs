@@ -10,7 +10,8 @@
 | `Bellhop/sspMod.f90::Quad` input loading | `bellhop::legacy::auxiliary` | Parser verified |
 | `Bellhop/bdryMod.f90::ReadATI` | `bellhop::legacy::auxiliary` | Parser verified |
 | `Bellhop/bdryMod.f90::ReadBTY` | `bellhop::legacy::auxiliary` | Parser verified |
-| `misc/RefCoef.f90::ReadReflectionCoefficient` (`.brc`/`.trc`) | `bellhop::legacy::auxiliary` | Parser verified |
+| `misc/RefCoef.f90::ReadReflectionCoefficient` (`.brc`/`.trc`/`.irc`) | `bellhop::legacy::auxiliary` | Parser verified |
+| `misc/RefCoef.f90::InterpolateIRC` and `Kraken/bounce.f90` reflection formula | `bellhop::solver::reflection::interpolate_internal_reflection` | BOUNCE golden verified |
 | `misc/beampattern.f90::ReadPat` | `bellhop::legacy::auxiliary` | Parser verified |
 | `Bellhop/Step.f90::Step2D` | `bellhop::solver::integrator::step_2d` | Golden verified |
 | `Bellhop/Step.f90::ReduceStep2D` | `bellhop::solver::integrator::reduce_step` | Golden verified |

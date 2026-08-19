@@ -1,0 +1,72 @@
+reference_commit = "475108519289c6fb488b58980c644ea14eccc604"
+
+[[fixture]]
+file = "calibB.env"
+source = "tests/calib/calibB.env"
+sha256 = "3785410e2bca2bbfb92052feae142981b5ec334f36fc5b79dbbe7c99cbc39f5e"
+
+[[fixture]]
+file = "calibB_Cerveny.env"
+source = "tests/calib/calibB_Cerveny.env"
+sha256 = "fe48da4e33a207c54311ed514ed32e5488201fd251f18c4305ce9ffaa880be6b"
+
+[[fixture]]
+file = "MunkB_OneBeam.env"
+source = "tests/Munk/MunkB_OneBeam.env"
+sha256 = "cb9ed7327f66dce9c283f08642833c8c787fe2f5b694a1da82bd4de433b3fc57"
+
+[[fixture]]
+file = "MunkB_ray.env"
+source = "tests/Munk/MunkB_ray.env"
+sha256 = "50c6048ddbdddcba1e8b4820f4b06de7c74a5598c0d0c3e061f97af080ab22ff"
+
+[[fixture]]
+file = "Gulf_ray_rd.env"
+source = "tests/Gulf/Gulf_ray_rd.env"
+sha256 = "69f5ab89e4ddbfb0b033dd0c4ba7480b36b6abf4388dc07068caa424800ae663"
+
+[[fixture]]
+file = "Gulf_ray_rd.ssp"
+source = "tests/Gulf/Gulf_ray_rd.ssp"
+sha256 = "ea8ef08e631e0ec27e1f4d4eeeba6f5708a54d6d9cf6480c30509231b5b31c0a"
+
+[[fixture]]
+file = "Gulf_ray_rd.bty"
+source = "tests/Gulf/Gulf_ray_rd.bty"
+sha256 = "0df1f9168e791b00ff18412be355e792938d591e9bd3ea21f6d46bee82a3100e"
+
+[[fixture]]
+file = "free_FGB.env"
+source = "tests/VolAtt/free_FGB.env"
+sha256 = "d6060e903ba7a792d16ee4b659035e86ca051ff16c725e6faa91fcdda6d1eabd"
+
+[[fixture]]
+file = "sbcx_Arr_bin.env"
+source = "tests/SBCX/sbcx_Arr_bin.env"
+sha256 = "9e469856bc2e0e2085af86a7ea282d0d2d49985af32e5b760cc31cb81c425e2b"
+
+[[fixture]]
+file = "omni.env"
+source = "tests/BeamPattern/omni.env"
+sha256 = "5a3ecd4de724f99cf388bf803faeb1b212edaacf4fe9941945dedb586a64f464"
+
+[[fixture]]
+file = "shaded.env"
+source = "tests/BeamPattern/shaded.env"
+sha256 = "4ec0cce0cfca86b61e81e20eb614cd4afcc97e70b63377b6083e73c97d9cd44a"
+
+[[fixture]]
+file = "shaded.sbp"
+source = "tests/BeamPattern/shaded.sbp"
+sha256 = "d430840e81a87ca8c76d5ab7a4a035dacdefb8b095945b0dbf8f875846e38a74"
+
+[[fixture]]
+file = "PekerisRDB.env"
+source = "tests/PekerisRD/PekerisRDB.env"
+sha256 = "6cd09e28b337a859d772d35ac565e0a73d05e14633ba29f29417da55d6f92e58"
+
+[[fixture]]
+file = "PekerisRDB.bty"
+source = "tests/PekerisRD/PekerisRDB.bty"
+sha256 = "a9db34dfed12a34563c4d2790d3fbda4031f2332641310dfb04280df41da3250"
+

@@ -63,6 +63,10 @@ pub(crate) fn write_hdf5(
         let eigenrays = file.create_group("eigenrays").map_err(hdf5_error)?;
         write_eigenrays(&eigenrays, &result.eigenray_sources)?;
     }
+    if !result.field_sources.is_empty() {
+        let field = file.create_group("field").map_err(hdf5_error)?;
+        write_field(&field, result)?;
+    }
     file.flush().map_err(hdf5_error)
 }
 
@@ -321,6 +325,40 @@ fn write_eigenrays(group: &Group, sources: &[SourceEigenrays]) -> Result<(), Str
     write_dataset(group, "phase_radians", &phase_radians, "rad")
 }
 
+fn write_field(group: &Group, result: &SimulationResult) -> Result<(), String> {
+    let source_depth_m: Vec<f32> = result
+        .field_sources
+        .iter()
+        .map(|source| source.source_depth_m)
+        .collect();
+    let sample_count: usize = result
+        .field_sources
+        .iter()
+        .map(|source| source.samples.len())
+        .sum();
+    let mut receiver_offset = vec![0_u64];
+    let mut receiver_range_m = Vec::with_capacity(sample_count);
+    let mut receiver_depth_m = Vec::with_capacity(sample_count);
+    let mut pressure_real = Vec::with_capacity(sample_count);
+    let mut pressure_imaginary = Vec::with_capacity(sample_count);
+    for source in &result.field_sources {
+        for sample in &source.samples {
+            receiver_range_m.push(sample.range_m);
+            receiver_depth_m.push(sample.depth_m);
+            pressure_real.push(sample.pressure.re);
+            pressure_imaginary.push(sample.pressure.im);
+        }
+        receiver_offset.push(as_u64(receiver_range_m.len(), "field receiver offset")?);
+    }
+
+    write_dataset(group, "source_depth_m", &source_depth_m, "m")?;
+    write_dataset(group, "receiver_offset", &receiver_offset, "index")?;
+    write_dataset(group, "receiver_range_m", &receiver_range_m, "m")?;
+    write_dataset(group, "receiver_depth_m", &receiver_depth_m, "m")?;
+    write_dataset(group, "pressure_real", &pressure_real, "1")?;
+    write_dataset(group, "pressure_imaginary", &pressure_imaginary, "1")
+}
+
 fn as_u64(value: usize, description: &str) -> Result<u64, String> {
     u64::try_from(value).map_err(|_| format!("{description} does not fit in u64"))
 }
@@ -431,6 +469,7 @@ mod tests {
             }],
             arrival_sources: Vec::new(),
             eigenray_sources: Vec::new(),
+            field_sources: Vec::new(),
         };
 
         write_hdf5(&output, &input, &result).unwrap();
@@ -461,7 +500,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_flattened_arrival_schema() {
+    fn writes_flattened_non_ray_schemas() {
         let directory =
             std::env::temp_dir().join(format!("bellhop-hdf5-arrival-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&directory);
@@ -497,6 +536,26 @@ mod tests {
                 .read_raw::<u64>()
                 .unwrap(),
             vec![0, 106, 208, 314]
+        );
+        drop(file);
+
+        let field_input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../bellhop/tests/fixtures/golden/Field_G.env");
+        let field_output = directory.join("field.h5");
+        let case = bellhop::legacy::load_case(&field_input).unwrap().value;
+        let result = run(&case, SimulationLimits::default()).unwrap();
+        write_hdf5(&field_output, &field_input, &result).unwrap();
+        let file = File::open(&field_output).unwrap();
+        assert_eq!(
+            file.dataset("field/receiver_offset")
+                .unwrap()
+                .read_raw::<u64>()
+                .unwrap(),
+            vec![0, 33]
+        );
+        assert_eq!(
+            file.dataset("field/pressure_real").unwrap().shape(),
+            vec![33]
         );
         drop(file);
         fs::remove_dir_all(directory).unwrap();

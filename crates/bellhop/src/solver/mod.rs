@@ -9,11 +9,12 @@ use crate::model::{BeamFamily, BoundaryCondition, Case, ReceiverGrid, RunKind, S
 
 use boundary::{BoundaryGeometry, BoundarySide};
 use influence::{
-    InfluenceCounts, InfluenceLimits, InfluenceTarget, geo_gaussian_cartesian, geo_hat_cartesian,
-    geo_hat_ray_centered, scale_arrivals, simple_gaussian_eigenrays,
+    InfluenceCounts, InfluenceLimits, InfluenceTarget, cerveny_cartesian, cerveny_ray_centered,
+    geo_gaussian_cartesian, geo_hat_cartesian, geo_hat_ray_centered, scale_arrivals,
+    scale_pressure, simple_gaussian,
 };
 use integrator::{RayState, StepLimits, step_2d};
-use num_complex::Complex64;
+use num_complex::{Complex32, Complex64};
 use reflection::reflect_2d;
 use ssp::{SegmentState, SoundSpeedModel};
 
@@ -27,6 +28,7 @@ pub struct SimulationLimits {
     pub max_total_arrivals: usize,
     pub max_eigenrays: usize,
     pub max_total_eigenray_points: usize,
+    pub max_field_cells: usize,
 }
 
 impl Default for SimulationLimits {
@@ -39,6 +41,7 @@ impl Default for SimulationLimits {
             max_total_arrivals: 20_000_000,
             max_eigenrays: 1_000_000,
             max_total_eigenray_points: 20_000_000,
+            max_field_cells: 20_000_000,
         }
     }
 }
@@ -52,6 +55,7 @@ pub struct SimulationResult {
     pub sources: Vec<SourceRaySet>,
     pub arrival_sources: Vec<SourceArrivals>,
     pub eigenray_sources: Vec<SourceEigenrays>,
+    pub field_sources: Vec<SourceField>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -117,6 +121,19 @@ pub struct ReceiverEigenrays {
     pub eigenrays: Vec<RayTrajectory>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SourceField {
+    pub source_depth_m: f32,
+    pub samples: Vec<FieldSample>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FieldSample {
+    pub range_m: f64,
+    pub depth_m: f32,
+    pub pressure: Complex32,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RayTermination {
     ExitedTraceBox,
@@ -129,9 +146,10 @@ pub enum RayTermination {
 
 /// Runs a loaded case using the deterministic compatibility path.
 ///
-/// The current numerical milestone supports ray traces, eigenrays, and
-/// arrivals with geometric-hat and geometric-Gaussian influence models. Other
-/// run kinds and beam families return a structured unsupported-mode diagnostic.
+/// Runs ray traces, eigenrays, arrivals, or coherent/semi-coherent/incoherent
+/// pressure fields with the supported two-dimensional influence models.
+/// Unsupported run-kind and beam-family combinations return a structured
+/// diagnostic.
 ///
 /// # Errors
 ///
@@ -139,17 +157,6 @@ pub enum RayTermination {
 /// non-finite and otherwise invalid numerical states.
 #[allow(clippy::cast_precision_loss, clippy::too_many_lines)]
 pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, DiagnosticReport> {
-    if !matches!(
-        case.environment.run.kind,
-        RunKind::Rays | RunKind::Eigenrays | RunKind::Arrivals
-    ) {
-        return Err(report(Diagnostic::error(
-            "BH0301",
-            "the numerical solver currently supports R, E, A, and a runs",
-            "run_options.kind",
-            SourceLocation::file(&case.environment.source_path),
-        )));
-    }
     let influence_supported = matches!(
         case.environment.run.beam_family,
         Some(
@@ -159,19 +166,51 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
         )
     ) || (case.environment.run.kind == RunKind::Eigenrays
         && case.environment.run.beam_family == Some(BeamFamily::SimpleGaussian));
-    if matches!(
+    let field_run = matches!(
+        case.environment.run.kind,
+        RunKind::Coherent | RunKind::SemiCoherent | RunKind::Incoherent
+    );
+    let field_influence_supported = matches!(
+        case.environment.run.beam_family,
+        Some(
+            BeamFamily::GeometricHatCartesian
+                | BeamFamily::GeometricHatRayCentered
+                | BeamFamily::GeometricGaussianCartesian
+                | BeamFamily::SimpleGaussian
+                | BeamFamily::CervenyCartesian
+                | BeamFamily::CervenyRayCentered
+        )
+    );
+    if (matches!(
         case.environment.run.kind,
         RunKind::Eigenrays | RunKind::Arrivals
-    ) && !influence_supported
+    ) && !influence_supported)
+        || (field_run && !field_influence_supported)
     {
         return Err(report(Diagnostic::error(
             "BH0301",
-            "the selected influence model is not yet supported for this E, A, or a run",
+            "the selected influence model is not yet supported for this run kind",
             "run_options.beam_family",
             SourceLocation::file(&case.environment.source_path),
         )));
     }
     let ray_count = selected_angles(case).len() * case.environment.positions.source_depths_m.len();
+    let requested_field_cells = if field_run {
+        receiver_count(case)
+            .checked_mul(case.environment.positions.source_depths_m.len())
+            .ok_or_else(|| resource_report(case, "field cell count overflowed"))?
+    } else {
+        0
+    };
+    if requested_field_cells > limits.max_field_cells {
+        return Err(resource_report(
+            case,
+            &format!(
+                "simulation requests {requested_field_cells} field cells; limit is {}",
+                limits.max_field_cells
+            ),
+        ));
+    }
     if ray_count > limits.max_rays {
         return Err(report(Diagnostic::error(
             "BH0303",
@@ -250,6 +289,7 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
     let mut sources = Vec::new();
     let mut arrival_sources = Vec::new();
     let mut eigenray_sources = Vec::new();
+    let mut field_sources = Vec::new();
     for &source_depth_m in &case.environment.positions.source_depths_m {
         let mut rays = Vec::with_capacity(selected_angles(case).len());
         let mut arrival_receivers = if case.environment.run.kind == RunKind::Arrivals {
@@ -262,6 +302,12 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
         } else {
             Vec::new()
         };
+        let mut pressure = if field_run {
+            vec![Complex32::new(0.0, 0.0); receiver_count]
+        } else {
+            Vec::new()
+        };
+        let mut source_speed_mps = 0.0;
         for &launch_angle_degrees in selected_angles(case) {
             let traced = trace_ray(
                 case,
@@ -282,6 +328,7 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
                     SourceLocation::file(&case.environment.source_path),
                 ))
             })?;
+            source_speed_mps = traced.states[0].speed_mps;
             total_points = total_points
                 .checked_add(traced.states.len())
                 .ok_or_else(|| resource_report(case, "total ray-point count overflowed"))?;
@@ -305,6 +352,7 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
                     let mut target = InfluenceTarget::Eigenrays(&mut eigenray_receivers);
                     apply_influence(
                         case,
+                        &sound_speed,
                         &traced.states,
                         launch_angle_degrees.to_radians(),
                         angular_spacing_radians,
@@ -318,6 +366,7 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
                     let mut target = InfluenceTarget::Arrivals(&mut arrival_receivers);
                     apply_influence(
                         case,
+                        &sound_speed,
                         &traced.states,
                         launch_angle_degrees.to_radians(),
                         angular_spacing_radians,
@@ -328,7 +377,21 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
                     .map_err(|message| resource_report(case, message))?;
                 }
                 RunKind::Coherent | RunKind::SemiCoherent | RunKind::Incoherent => {
-                    unreachable!("unsupported run modes were rejected")
+                    let mut target = InfluenceTarget::Field {
+                        pressure: &mut pressure,
+                        coherent: case.environment.run.kind == RunKind::Coherent,
+                    };
+                    apply_influence(
+                        case,
+                        &sound_speed,
+                        &traced.states,
+                        launch_angle_degrees.to_radians(),
+                        angular_spacing_radians,
+                        &mut target,
+                        &influence_limits,
+                        &mut counts,
+                    )
+                    .map_err(|message| resource_report(case, message))?;
                 }
             }
         }
@@ -349,7 +412,23 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
                 });
             }
             RunKind::Coherent | RunKind::SemiCoherent | RunKind::Incoherent => {
-                unreachable!("unsupported run modes were rejected")
+                scale_pressure(
+                    case,
+                    angular_spacing_radians,
+                    source_speed_mps,
+                    &mut pressure,
+                );
+                field_sources.push(SourceField {
+                    source_depth_m,
+                    samples: receiver_coordinates(case)
+                        .zip(pressure)
+                        .map(|((range_m, depth_m), pressure)| FieldSample {
+                            range_m,
+                            depth_m,
+                            pressure,
+                        })
+                        .collect(),
+                });
             }
         }
     }
@@ -360,6 +439,7 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
         sources,
         arrival_sources,
         eigenray_sources,
+        field_sources,
     })
 }
 
@@ -373,6 +453,7 @@ fn selected_angles(case: &Case) -> &[f64] {
 #[allow(clippy::too_many_arguments)]
 fn apply_influence(
     case: &Case,
+    sound_speed: &SoundSpeedModel,
     states: &[RayState],
     launch_angle_radians: f64,
     angular_spacing_radians: f64,
@@ -408,9 +489,31 @@ fn apply_influence(
             limits,
             counts,
         ),
-        Some(BeamFamily::SimpleGaussian) => {
-            simple_gaussian_eigenrays(case, states, launch_angle_radians, target, limits, counts)
-        }
+        Some(BeamFamily::SimpleGaussian) => simple_gaussian(
+            case,
+            states,
+            launch_angle_radians,
+            angular_spacing_radians,
+            target,
+            limits,
+            counts,
+        ),
+        Some(BeamFamily::CervenyCartesian) => cerveny_cartesian(
+            case,
+            sound_speed,
+            states,
+            launch_angle_radians,
+            angular_spacing_radians,
+            target,
+        ),
+        Some(BeamFamily::CervenyRayCentered) => cerveny_ray_centered(
+            case,
+            sound_speed,
+            states,
+            launch_angle_radians,
+            angular_spacing_radians,
+            target,
+        ),
         _ => unreachable!("unsupported beam families were rejected"),
     }
 }
@@ -484,7 +587,16 @@ fn trace_ray(
     let source_position_m = [0.0, source_depth_m];
     let source_sample = sound_speed.evaluate(source_position_m, &mut sound_segments)?;
     let launch_angle_radians = launch_angle_degrees.to_radians();
-    let amplitude = source_amplitude(case.source_beam_pattern.as_ref(), launch_angle_degrees);
+    let mut amplitude = source_amplitude(case.source_beam_pattern.as_ref(), launch_angle_degrees);
+    if case.environment.run.kind == RunKind::SemiCoherent {
+        let angular_frequency = 2.0 * std::f64::consts::PI * case.environment.frequency_hz;
+        amplitude *= 2.0_f64.sqrt()
+            * (angular_frequency / source_sample.speed_mps
+                * source_depth_m
+                * launch_angle_radians.sin())
+            .sin()
+            .abs();
+    }
     let geometric_q = case.environment.run.beam_family == Some(BeamFamily::GeometricHatCartesian)
         || case
             .environment

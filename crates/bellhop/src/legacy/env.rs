@@ -687,12 +687,14 @@ impl<'a> EnvironmentParser<'a> {
                 )?;
                 let component = match image_values[2].text.chars().next().unwrap_or('P') {
                     'P' => BeamComponent::Pressure,
+                    'V' => BeamComponent::Vertical,
+                    'H' => BeamComponent::Horizontal,
                     'D' => BeamComponent::Displacement,
                     other => {
                         return Err(invalid_option(
                             "trace.cerveny.component",
                             other,
-                            "P or D",
+                            "P, V, H, or D",
                             &image_values[2].location,
                         ));
                     }

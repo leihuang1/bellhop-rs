@@ -55,5 +55,20 @@ trajectory quantities use the same names and units as `/rays`.
 - `top_bounces`, `bottom_bounces`
 
 Arrival quantities intentionally use single-precision storage at the same
-rounding points as Acoustics Toolbox `v2023.5`. Later field milestones may add
-groups without changing the version-1 layouts.
+rounding points as Acoustics Toolbox `v2023.5`.
+
+## Pressure-field data
+
+`/field` stores flattened receiver samples for coherent, semi-coherent, and
+incoherent calculations:
+
+- `source_depth_m`: source depths
+- `receiver_offset`: `source_count + 1` offsets grouping samples by source
+- `receiver_range_m`, `receiver_depth_m`: sample coordinates
+- `pressure_real`, `pressure_imaginary`: single-precision relative complex
+  pressure
+
+Samples are range-major, then depth-major for rectilinear grids. Irregular
+grids contain one depth per range. Semi-coherent and incoherent results follow
+the reference pressure-scaling convention and therefore have zero imaginary
+components.

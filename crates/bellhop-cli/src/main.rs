@@ -149,6 +149,11 @@ fn run(path: &Path, requested_output: Option<&Path>, overwrite: bool) -> ExitCod
         .flat_map(|source| &source.receivers)
         .map(|receiver| receiver.arrivals.len())
         .sum();
+    let field_sample_count: usize = result
+        .field_sources
+        .iter()
+        .map(|source| source.samples.len())
+        .sum();
     let point_count: usize = result
         .sources
         .iter()
@@ -163,7 +168,7 @@ fn run(path: &Path, requested_output: Option<&Path>, overwrite: bool) -> ExitCod
         .map(|ray| ray.points.len())
         .sum();
     println!(
-        "wrote {} ({ray_count} rays, {eigenray_count} eigenrays, {arrival_count} arrivals, {point_count} trajectory points)",
+        "wrote {} ({ray_count} rays, {eigenray_count} eigenrays, {arrival_count} arrivals, {field_sample_count} field samples, {point_count} trajectory points)",
         output_path.display()
     );
     ExitCode::SUCCESS

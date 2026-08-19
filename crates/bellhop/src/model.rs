@@ -293,5 +293,7 @@ pub enum CurvatureCondition {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BeamComponent {
     Pressure,
+    Vertical,
+    Horizontal,
     Displacement,
 }

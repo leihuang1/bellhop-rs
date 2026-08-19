@@ -22,6 +22,10 @@
 | `Bellhop/influence.f90::InfluenceGeoHatCart` | `bellhop::solver::influence::geo_hat_cartesian` | Golden verified |
 | `Bellhop/influence.f90::InfluenceGeoGaussianCart` | `bellhop::solver::influence::geo_gaussian_cartesian` | Golden verified |
 | `Bellhop/influence.f90::InfluenceGeoHatRayCen` | `bellhop::solver::influence::geo_hat_ray_centered` | Golden verified |
-| `Bellhop/influence.f90::InfluenceSGB` (`E` path) | `bellhop::solver::influence::simple_gaussian_eigenrays` | Differentially exercised |
+| `Bellhop/influence.f90::InfluenceSGB` | `bellhop::solver::influence::simple_gaussian` | Golden verified |
+| `Bellhop/influence.f90::InfluenceCervenyCart` | `bellhop::solver::influence::cerveny_cartesian` | Golden verified |
+| `Bellhop/influence.f90::InfluenceCervenyRayCen` | `bellhop::solver::influence::cerveny_ray_centered` | Golden verified |
+| `bellhop.f90::PickEpsilon` | `bellhop::solver::influence::pick_epsilon` | Differentially exercised for `F/M/W` |
+| `Bellhop/influence.f90::{BranchCut,Hermite}` | `bellhop::solver::influence::{branch_cut,hermite}` | Golden verified |
+| `Bellhop/influence.f90::{ApplyContribution,ScalePressure}` | `bellhop::solver::influence::{apply_contribution,scale_pressure}` | Golden verified |
 | `Bellhop/ArrMod.f90::AddArr` | `bellhop::solver::influence::add_arrival` | Golden verified |
-| Other `Bellhop/influence.f90` models | — | Not started |

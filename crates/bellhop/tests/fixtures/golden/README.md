@@ -7,13 +7,18 @@ title, one source depth, one launch angle, and a 10.1 km trace box.
 
 The other `.env` files are small, project-authored, reduced, or unmodified
 official cases. They cover every `N/C/P/S/Q/A` SSP algorithm, Cartesian
-geometric-hat eigenrays and arrivals, and Cartesian geometric-Gaussian
-arrivals, including a ray-centered geometric-hat case. The `.ray` and `.arr` files were generated from the unmodified
+geometric-hat eigenrays and arrivals, Cartesian geometric-Gaussian arrivals,
+and all three pressure-field coherence modes, including geometric, simple-
+Gaussian, and Cerveny beams. The `.ray`, `.arr`, and pressure CSV values were generated from the unmodified
 `v2023.5` Fortran source using GNU Fortran 14.2.0 on Apple arm64 with:
 
 ```text
 -O1 -ffast-math -funroll-all-loops -fomit-frame-pointer -std=gnu
 ```
+
+The pressure CSV files were extracted from the generated `.shd` records in
+range-major, then depth-major order. The legacy binary containers are not
+committed.
 
 SHA-256:
 
@@ -26,6 +31,18 @@ afc2bd68348802ed2d7fd3ff02c8eaafdc408221af5059cf59a122c6b3d274c3  CLinear_one_ra
 ea53e614c83bf394eed92bd88274e3e1be3bf9e23bd798b0f7c33c99d13b29e9  GeoHat_arrival.arr
 f5f6fbd0be0ccfee58771d3de66ccf6989cb404a2751150165ad9613765ba1cd  GeoHat_eigen.env
 6caeb6b8dd16b636cd331583796506a3f35c468a20afe00ffc7903199f213d7f  GeoHat_eigen.ray
+35afee5b3b05b1f4b660ac9553efd2f08a2c4494f9e16018633680380495a468  Field_B_incoherent.env
+616be5dca3c443104aa18dd49e27c9f28a706f853d389c318d1c25ee8139937a  Field_B_incoherent.csv
+34debb113e0f36e6ff9dcb7ed5dcda985e600557e57498b6d389a4fff8e37a69  Field_B_semi.env
+b8fe4dad2162fd80915ead4fa919e82b3fdc5b777def67e5792f71f9c41a5b44  Field_B_semi.csv
+8f50947452d3400d4613b9f5b96f73f4fbf16a558d26d0a8bc8da667b13ae090  Field_CervenyC.env
+d1aedd11e34efa06e24826b853b70fff2e76fd99ec24960dfb8a587c782f2a9b  Field_CervenyC.csv
+fd99307d0f02b4693afd27227fe06db4ca9bd8dc78e8cd8e4fa4fe1337445d43  Field_CervenyR.env
+7e573583815079e6ad4cae20589b82ce10d4f5293f27230106ef2d4506f0e455  Field_CervenyR.csv
+965f47d45999cd862b52e3ac3935f7d522dd005aeaa97bece16278e6ffb8cf9c  Field_G.env
+d08a25a21967e3b02fbfb6a0be4a461259f7cd5cbf117c12a0f42bc8df1269b6  Field_G.csv
+54cf37c0065353dd339388ba77d270896c4ef94d190d4129e59ea63e6bbcbb54  Field_S.env
+ce69590d72d0f7e70b780050834782b5d13348786a5bf15f810d00755a040ef9  Field_S.csv
 44ec956e7619ef9290827c86f529dc6cfbbb15b9abf5253f1c3a45cbf838762e  GeoHatRay_arrival.env
 2d20874e6961c36e2cb3817ea12e8f8a89e73b5fe191c63570703e85eee96c2c  GeoHatRay_arrival.arr
 0bb8fde32081d577b0a07718cf94488760e7c580c6b34149f4a05911b1030d59  MunkP_one_ray.env

@@ -160,3 +160,51 @@ coverage = ["A", "geometric-gaussian-cartesian", "receiver-grid"]
 input_sha256 = "aa2ed61ea679acd8e54fbb5122a1f612d100282caf340c4bdd39ef32de059343"
 output_sha256 = "fca078e8b082443cac28aefc53da9cc795379a8010ce7316f6f269c26b968d5c"
 
+[[golden]]
+stem = "Field_G"
+provenance = "project-authored"
+modified = true
+coverage = ["C", "geometric-hat-cartesian", "pressure-field"]
+input_sha256 = "965f47d45999cd862b52e3ac3935f7d522dd005aeaa97bece16278e6ffb8cf9c"
+output_sha256 = "d08a25a21967e3b02fbfb6a0be4a461259f7cd5cbf117c12a0f42bc8df1269b6"
+
+[[golden]]
+stem = "Field_B_incoherent"
+provenance = "project-authored"
+modified = true
+coverage = ["I", "geometric-gaussian-cartesian", "pressure-field"]
+input_sha256 = "35afee5b3b05b1f4b660ac9553efd2f08a2c4494f9e16018633680380495a468"
+output_sha256 = "616be5dca3c443104aa18dd49e27c9f28a706f853d389c318d1c25ee8139937a"
+
+[[golden]]
+stem = "Field_B_semi"
+provenance = "project-authored"
+modified = true
+coverage = ["S", "geometric-gaussian-cartesian", "lloyd-mirror", "pressure-field"]
+input_sha256 = "34debb113e0f36e6ff9dcb7ed5dcda985e600557e57498b6d389a4fff8e37a69"
+output_sha256 = "b8fe4dad2162fd80915ead4fa919e82b3fdc5b777def67e5792f71f9c41a5b44"
+
+[[golden]]
+stem = "Field_S"
+provenance = "project-authored"
+modified = true
+coverage = ["C", "simple-gaussian", "pressure-field"]
+input_sha256 = "54cf37c0065353dd339388ba77d270896c4ef94d190d4129e59ea63e6bbcbb54"
+output_sha256 = "ce69590d72d0f7e70b780050834782b5d13348786a5bf15f810d00755a040ef9"
+
+[[golden]]
+stem = "Field_CervenyC"
+provenance = "project-authored"
+modified = true
+coverage = ["C", "cerveny-cartesian", "pressure-field"]
+input_sha256 = "8f50947452d3400d4613b9f5b96f73f4fbf16a558d26d0a8bc8da667b13ae090"
+output_sha256 = "d1aedd11e34efa06e24826b853b70fff2e76fd99ec24960dfb8a587c782f2a9b"
+
+[[golden]]
+stem = "Field_CervenyR"
+provenance = "project-authored"
+modified = true
+coverage = ["C", "cerveny-ray-centered", "pressure-field"]
+input_sha256 = "fd99307d0f02b4693afd27227fe06db4ca9bd8dc78e8cd8e4fa4fe1337445d43"
+output_sha256 = "7e573583815079e6ad4cae20589b82ce10d4f5293f27230106ef2d4506f0e455"
+

@@ -17,10 +17,19 @@ Implemented:
 - same-directory, same-stem auxiliary-file resolution through `load_case`
 - semantic validation without invoking the numerical solver
 
+Numerically implemented:
+
+- deterministic single-threaded `R` ray traces
+- `N/C/P/S/Q/A` sound-speed evaluation and derivatives
+- reference modified polygon/midpoint integration with interface and boundary step reduction
+- flat, piecewise-linear, curvilinear, and range-dependent boundaries
+- vacuum, rigid, acousto-elastic, grain-size, and tabulated reflection conditions
+- source beam-pattern weighting and reflection amplitude/phase accumulation
+
 Not yet implemented:
 
-- precalculated internal `.irc` reflection tables
-- numerical execution
+- precalculated internal `.irc` reflection tables and `W` table generation
+- `E`, `A/a`, `C`, `S`, and `I` numerical execution
 
 Three-dimensional options are rejected explicitly.
 

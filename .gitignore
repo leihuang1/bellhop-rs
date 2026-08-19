@@ -1,4 +1,6 @@
 /target/
 *.h5
 *.h5.tmp
+*.prt
+*.ray
 .DS_Store

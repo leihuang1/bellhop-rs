@@ -1,12 +1,17 @@
 mod boundary;
+mod influence;
 mod integrator;
 mod reflection;
 mod ssp;
 
 use crate::diagnostic::{Diagnostic, DiagnosticReport, SourceLocation};
-use crate::model::{BoundaryCondition, Case, RunKind, SourceBeamPattern};
+use crate::model::{BeamFamily, BoundaryCondition, Case, ReceiverGrid, RunKind, SourceBeamPattern};
 
 use boundary::{BoundaryGeometry, BoundarySide};
+use influence::{
+    InfluenceCounts, InfluenceLimits, InfluenceTarget, geo_gaussian_cartesian, geo_hat_cartesian,
+    geo_hat_ray_centered, scale_arrivals, simple_gaussian_eigenrays,
+};
 use integrator::{RayState, StepLimits, step_2d};
 use num_complex::Complex64;
 use reflection::reflect_2d;
@@ -18,6 +23,10 @@ pub struct SimulationLimits {
     pub max_rays: usize,
     pub max_steps_per_ray: usize,
     pub max_total_ray_points: usize,
+    pub max_arrivals_per_receiver: usize,
+    pub max_total_arrivals: usize,
+    pub max_eigenrays: usize,
+    pub max_total_eigenray_points: usize,
 }
 
 impl Default for SimulationLimits {
@@ -26,6 +35,10 @@ impl Default for SimulationLimits {
             max_rays: 1_000_000,
             max_steps_per_ray: 100_000,
             max_total_ray_points: 20_000_000,
+            max_arrivals_per_receiver: 20_000_000,
+            max_total_arrivals: 20_000_000,
+            max_eigenrays: 1_000_000,
+            max_total_eigenray_points: 20_000_000,
         }
     }
 }
@@ -33,7 +46,12 @@ impl Default for SimulationLimits {
 /// Results from one complete simulation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SimulationResult {
+    pub title: String,
+    pub frequency_hz: f64,
+    pub legacy_run_options: String,
     pub sources: Vec<SourceRaySet>,
+    pub arrival_sources: Vec<SourceArrivals>,
+    pub eigenray_sources: Vec<SourceEigenrays>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -61,6 +79,44 @@ pub struct RayPoint {
     pub phase_radians: f64,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SourceArrivals {
+    pub source_depth_m: f32,
+    pub receivers: Vec<ReceiverArrivals>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReceiverArrivals {
+    pub range_m: f64,
+    pub depth_m: f32,
+    pub arrivals: Vec<Arrival>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Arrival {
+    pub amplitude: f32,
+    pub phase_radians: f32,
+    pub travel_time_s: f32,
+    pub attenuation_time_s: f32,
+    pub source_angle_degrees: f32,
+    pub receiver_angle_degrees: f32,
+    pub top_bounces: u32,
+    pub bottom_bounces: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SourceEigenrays {
+    pub source_depth_m: f32,
+    pub receivers: Vec<ReceiverEigenrays>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReceiverEigenrays {
+    pub range_m: f64,
+    pub depth_m: f32,
+    pub eigenrays: Vec<RayTrajectory>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RayTermination {
     ExitedTraceBox,
@@ -68,24 +124,50 @@ pub enum RayTermination {
     EscapedBoundary,
     SourceOutsideBoundaries,
     StepLimit,
+    ReceiverHit,
 }
 
 /// Runs a loaded case using the deterministic compatibility path.
 ///
-/// The current numerical milestone supports `R` (ray trace) cases. Other run
-/// kinds return a structured unsupported-mode diagnostic.
+/// The current numerical milestone supports ray traces, eigenrays, and
+/// arrivals with geometric-hat and geometric-Gaussian influence models. Other
+/// run kinds and beam families return a structured unsupported-mode diagnostic.
 ///
 /// # Errors
 ///
 /// Returns diagnostics for unsupported modes, exceeded resource limits, or
 /// non-finite and otherwise invalid numerical states.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::cast_precision_loss, clippy::too_many_lines)]
 pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, DiagnosticReport> {
-    if case.environment.run.kind != RunKind::Rays {
+    if !matches!(
+        case.environment.run.kind,
+        RunKind::Rays | RunKind::Eigenrays | RunKind::Arrivals
+    ) {
         return Err(report(Diagnostic::error(
             "BH0301",
-            "the numerical solver currently supports only R (ray trace) runs",
+            "the numerical solver currently supports R, E, A, and a runs",
             "run_options.kind",
+            SourceLocation::file(&case.environment.source_path),
+        )));
+    }
+    let influence_supported = matches!(
+        case.environment.run.beam_family,
+        Some(
+            BeamFamily::GeometricHatCartesian
+                | BeamFamily::GeometricHatRayCentered
+                | BeamFamily::GeometricGaussianCartesian
+        )
+    ) || (case.environment.run.kind == RunKind::Eigenrays
+        && case.environment.run.beam_family == Some(BeamFamily::SimpleGaussian));
+    if matches!(
+        case.environment.run.kind,
+        RunKind::Eigenrays | RunKind::Arrivals
+    ) && !influence_supported
+    {
+        return Err(report(Diagnostic::error(
+            "BH0301",
+            "the selected influence model is not yet supported for this E, A, or a run",
+            "run_options.beam_family",
             SourceLocation::file(&case.environment.source_path),
         )));
     }
@@ -101,10 +183,16 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
             SourceLocation::file(&case.environment.source_path),
         )));
     }
-    if limits.max_steps_per_ray < 2 || limits.max_total_ray_points < ray_count {
+    if limits.max_steps_per_ray < 2
+        || limits.max_total_ray_points < ray_count
+        || (case.environment.run.kind == RunKind::Arrivals
+            && (limits.max_arrivals_per_receiver == 0 || limits.max_total_arrivals == 0))
+        || (case.environment.run.kind == RunKind::Eigenrays
+            && (limits.max_eigenrays == 0 || limits.max_total_eigenray_points == 0))
+    {
         return Err(report(Diagnostic::error(
             "BH0303",
-            "simulation ray-point limits are too small",
+            "simulation resource limits are too small",
             "simulation_limits",
             SourceLocation::file(&case.environment.source_path),
         )));
@@ -138,12 +226,44 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
         max_depth_m: case.environment.trace.max_depth_m,
     };
 
+    let receiver_count = receiver_count(case);
+    let reference_max_arrivals = (limits.max_total_arrivals / receiver_count.max(1)).max(10);
+    let influence_limits = InfluenceLimits {
+        max_arrivals_per_receiver: limits.max_arrivals_per_receiver.min(reference_max_arrivals),
+        max_total_arrivals: limits.max_total_arrivals,
+        max_eigenrays: limits.max_eigenrays,
+        max_eigenray_points: limits.max_total_eigenray_points,
+    };
+    let all_angles = &case.environment.trace.launch_angles_degrees;
+    let angular_spacing_radians = if all_angles.len() == 1 {
+        0.0
+    } else {
+        ((all_angles[all_angles.len() - 1] - all_angles[0]) / (all_angles.len() - 1) as f64)
+            .to_radians()
+    };
+    let mut counts = InfluenceCounts {
+        arrivals: 0,
+        eigenrays: 0,
+        eigenray_points: 0,
+    };
     let mut total_points = 0_usize;
-    let mut sources = Vec::with_capacity(case.environment.positions.source_depths_m.len());
+    let mut sources = Vec::new();
+    let mut arrival_sources = Vec::new();
+    let mut eigenray_sources = Vec::new();
     for &source_depth_m in &case.environment.positions.source_depths_m {
         let mut rays = Vec::with_capacity(selected_angles(case).len());
+        let mut arrival_receivers = if case.environment.run.kind == RunKind::Arrivals {
+            make_arrival_receivers(case)
+        } else {
+            Vec::new()
+        };
+        let mut eigenray_receivers = if case.environment.run.kind == RunKind::Eigenrays {
+            make_eigenray_receivers(case)
+        } else {
+            Vec::new()
+        };
         for &launch_angle_degrees in selected_angles(case) {
-            let ray = trace_ray(
+            let traced = trace_ray(
                 case,
                 &sound_speed,
                 &boundaries,
@@ -162,33 +282,85 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
                     SourceLocation::file(&case.environment.source_path),
                 ))
             })?;
-            total_points = total_points.checked_add(ray.points.len()).ok_or_else(|| {
-                report(Diagnostic::error(
-                    "BH0303",
-                    "total ray-point count overflowed",
-                    "simulation_limits.max_total_ray_points",
-                    SourceLocation::file(&case.environment.source_path),
-                ))
-            })?;
+            total_points = total_points
+                .checked_add(traced.states.len())
+                .ok_or_else(|| resource_report(case, "total ray-point count overflowed"))?;
             if total_points > limits.max_total_ray_points {
-                return Err(report(Diagnostic::error(
-                    "BH0303",
-                    format!(
-                        "simulation produced more than {} ray points",
+                return Err(resource_report(
+                    case,
+                    &format!(
+                        "simulation traced more than {} ray points",
                         limits.max_total_ray_points
                     ),
-                    "simulation_limits.max_total_ray_points",
-                    SourceLocation::file(&case.environment.source_path),
-                )));
+                ));
             }
-            rays.push(ray);
+
+            match case.environment.run.kind {
+                RunKind::Rays => rays.push(trajectory_from_states(
+                    launch_angle_degrees,
+                    &traced.states,
+                    traced.termination,
+                )),
+                RunKind::Eigenrays => {
+                    let mut target = InfluenceTarget::Eigenrays(&mut eigenray_receivers);
+                    apply_influence(
+                        case,
+                        &traced.states,
+                        launch_angle_degrees.to_radians(),
+                        angular_spacing_radians,
+                        &mut target,
+                        &influence_limits,
+                        &mut counts,
+                    )
+                    .map_err(|message| resource_report(case, message))?;
+                }
+                RunKind::Arrivals => {
+                    let mut target = InfluenceTarget::Arrivals(&mut arrival_receivers);
+                    apply_influence(
+                        case,
+                        &traced.states,
+                        launch_angle_degrees.to_radians(),
+                        angular_spacing_radians,
+                        &mut target,
+                        &influence_limits,
+                        &mut counts,
+                    )
+                    .map_err(|message| resource_report(case, message))?;
+                }
+                RunKind::Coherent | RunKind::SemiCoherent | RunKind::Incoherent => {
+                    unreachable!("unsupported run modes were rejected")
+                }
+            }
         }
-        sources.push(SourceRaySet {
-            source_depth_m,
-            rays,
-        });
+        match case.environment.run.kind {
+            RunKind::Rays => sources.push(SourceRaySet {
+                source_depth_m,
+                rays,
+            }),
+            RunKind::Eigenrays => eigenray_sources.push(SourceEigenrays {
+                source_depth_m,
+                receivers: eigenray_receivers,
+            }),
+            RunKind::Arrivals => {
+                scale_arrivals(case, &mut arrival_receivers);
+                arrival_sources.push(SourceArrivals {
+                    source_depth_m,
+                    receivers: arrival_receivers,
+                });
+            }
+            RunKind::Coherent | RunKind::SemiCoherent | RunKind::Incoherent => {
+                unreachable!("unsupported run modes were rejected")
+            }
+        }
     }
-    Ok(SimulationResult { sources })
+    Ok(SimulationResult {
+        title: case.environment.title.clone(),
+        frequency_hz: case.environment.frequency_hz,
+        legacy_run_options: case.environment.run.legacy.clone(),
+        sources,
+        arrival_sources,
+        eigenray_sources,
+    })
 }
 
 fn selected_angles(case: &Case) -> &[f64] {
@@ -196,6 +368,106 @@ fn selected_angles(case: &Case) -> &[f64] {
         Some(index) => &case.environment.trace.launch_angles_degrees[index - 1..index],
         None => &case.environment.trace.launch_angles_degrees,
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_influence(
+    case: &Case,
+    states: &[RayState],
+    launch_angle_radians: f64,
+    angular_spacing_radians: f64,
+    target: &mut InfluenceTarget<'_>,
+    limits: &InfluenceLimits,
+    counts: &mut InfluenceCounts,
+) -> Result<(), &'static str> {
+    match case.environment.run.beam_family {
+        Some(BeamFamily::GeometricHatCartesian) => geo_hat_cartesian(
+            case,
+            states,
+            launch_angle_radians,
+            angular_spacing_radians,
+            target,
+            limits,
+            counts,
+        ),
+        Some(BeamFamily::GeometricHatRayCentered) => geo_hat_ray_centered(
+            case,
+            states,
+            launch_angle_radians,
+            angular_spacing_radians,
+            target,
+            limits,
+            counts,
+        ),
+        Some(BeamFamily::GeometricGaussianCartesian) => geo_gaussian_cartesian(
+            case,
+            states,
+            launch_angle_radians,
+            angular_spacing_radians,
+            target,
+            limits,
+            counts,
+        ),
+        Some(BeamFamily::SimpleGaussian) => {
+            simple_gaussian_eigenrays(case, states, launch_angle_radians, target, limits, counts)
+        }
+        _ => unreachable!("unsupported beam families were rejected"),
+    }
+}
+
+fn receiver_count(case: &Case) -> usize {
+    match case.environment.run.receiver_grid {
+        ReceiverGrid::Rectilinear => {
+            case.environment.positions.receiver_ranges_m.len()
+                * case.environment.positions.receiver_depths_m.len()
+        }
+        ReceiverGrid::Irregular => case.environment.positions.receiver_ranges_m.len(),
+    }
+}
+
+fn make_arrival_receivers(case: &Case) -> Vec<ReceiverArrivals> {
+    receiver_coordinates(case)
+        .map(|(range_m, depth_m)| ReceiverArrivals {
+            range_m,
+            depth_m,
+            arrivals: Vec::new(),
+        })
+        .collect()
+}
+
+fn make_eigenray_receivers(case: &Case) -> Vec<ReceiverEigenrays> {
+    receiver_coordinates(case)
+        .map(|(range_m, depth_m)| ReceiverEigenrays {
+            range_m,
+            depth_m,
+            eigenrays: Vec::new(),
+        })
+        .collect()
+}
+
+fn receiver_coordinates(case: &Case) -> impl Iterator<Item = (f64, f32)> + '_ {
+    let positions = &case.environment.positions;
+    positions
+        .receiver_ranges_m
+        .iter()
+        .enumerate()
+        .flat_map(
+            move |(range_index, &range_m)| match case.environment.run.receiver_grid {
+                ReceiverGrid::Rectilinear => positions
+                    .receiver_depths_m
+                    .iter()
+                    .map(move |&depth_m| (range_m, depth_m))
+                    .collect::<Vec<_>>(),
+                ReceiverGrid::Irregular => {
+                    vec![(range_m, positions.receiver_depths_m[range_index])]
+                }
+            },
+        )
+}
+
+struct TracedRay {
+    states: Vec<RayState>,
+    termination: RayTermination,
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -207,19 +479,20 @@ fn trace_ray(
     source_depth_m: f64,
     launch_angle_degrees: f64,
     limits: SimulationLimits,
-) -> Result<RayTrajectory, &'static str> {
+) -> Result<TracedRay, &'static str> {
     let mut sound_segments = SegmentState::default();
     let source_position_m = [0.0, source_depth_m];
     let source_sample = sound_speed.evaluate(source_position_m, &mut sound_segments)?;
     let launch_angle_radians = launch_angle_degrees.to_radians();
     let amplitude = source_amplitude(case.source_beam_pattern.as_ref(), launch_angle_degrees);
-    let geometric_q = case
-        .environment
-        .run
-        .legacy
-        .chars()
-        .nth(1)
-        .is_some_and(|option| option == 'G');
+    let geometric_q = case.environment.run.beam_family == Some(BeamFamily::GeometricHatCartesian)
+        || case
+            .environment
+            .run
+            .legacy
+            .chars()
+            .nth(1)
+            .is_some_and(|option| option == 'G');
     let initial = RayState {
         position_m: source_position_m,
         tangent: [
@@ -246,11 +519,10 @@ fn trace_ray(
         .bottom
         .signed_inside_distance(source_position_m, bottom_segment);
     if beginning_top_distance <= 0.0 || beginning_bottom_distance <= 0.0 {
-        return Ok(finish_trajectory(
-            launch_angle_degrees,
+        return Ok(TracedRay {
             states,
-            RayTermination::SourceOutsideBoundaries,
-        ));
+            termination: RayTermination::SourceOutsideBoundaries,
+        });
     }
 
     let mut consecutive_small_steps = 0_usize;
@@ -364,7 +636,10 @@ fn trace_ray(
         beginning_bottom_distance = ending_bottom_distance;
     }
 
-    Ok(finish_trajectory(launch_angle_degrees, states, termination))
+    Ok(TracedRay {
+        states,
+        termination,
+    })
 }
 
 fn source_amplitude(pattern: Option<&SourceBeamPattern>, angle_degrees: f64) -> f64 {
@@ -379,16 +654,16 @@ fn source_amplitude(pattern: Option<&SourceBeamPattern>, angle_degrees: f64) -> 
     (1.0 - fraction) * points[left].amplitude + fraction * points[left + 1].amplitude
 }
 
-fn finish_trajectory(
+fn trajectory_from_states(
     launch_angle_degrees: f64,
-    states: Vec<RayState>,
+    states: &[RayState],
     termination: RayTermination,
 ) -> RayTrajectory {
     let final_state = *states.last().expect("ray has an initial state");
     RayTrajectory {
         launch_angle_degrees,
         points: states
-            .into_iter()
+            .iter()
             .map(|state| RayPoint {
                 range_m: state.position_m[0],
                 depth_m: state.position_m[1],
@@ -402,6 +677,15 @@ fn finish_trajectory(
         bottom_bounces: final_state.bottom_bounces,
         termination,
     }
+}
+
+fn resource_report(case: &Case, message: &str) -> DiagnosticReport {
+    report(Diagnostic::error(
+        "BH0303",
+        message,
+        "simulation_limits",
+        SourceLocation::file(&case.environment.source_path),
+    ))
 }
 
 fn report(diagnostic: Diagnostic) -> DiagnosticReport {

@@ -25,11 +25,15 @@ Numerically implemented:
 - flat, piecewise-linear, curvilinear, and range-dependent boundaries
 - vacuum, rigid, acousto-elastic, grain-size, and tabulated reflection conditions
 - source beam-pattern weighting and reflection amplitude/phase accumulation
+- `E` eigenray and `A/a` arrival calculations for Cartesian/ray-centered geometric-hat (`G/g`) and Cartesian geometric-Gaussian (`B`) beams
+- simple-Gaussian (`S`) eigenray detection
+- point and line source scaling, rectilinear and irregular receiver grids, caustic phases, arrival combination, and strongest-arrival retention
 
 Not yet implemented:
 
 - precalculated internal `.irc` reflection tables and `W` table generation
-- `E`, `A/a`, `C`, `S`, and `I` numerical execution
+- Cerveny (`C/R`) influence models and simple-Gaussian (`S`) arrival influence
+- `C`, `S`, and `I` field calculations
 
 Three-dimensional options are rejected explicitly.
 

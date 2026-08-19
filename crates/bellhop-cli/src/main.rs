@@ -137,14 +137,33 @@ fn run(path: &Path, requested_output: Option<&Path>, overwrite: bool) -> ExitCod
     }
 
     let ray_count: usize = result.sources.iter().map(|source| source.rays.len()).sum();
+    let eigenray_count: usize = result
+        .eigenray_sources
+        .iter()
+        .flat_map(|source| &source.receivers)
+        .map(|receiver| receiver.eigenrays.len())
+        .sum();
+    let arrival_count: usize = result
+        .arrival_sources
+        .iter()
+        .flat_map(|source| &source.receivers)
+        .map(|receiver| receiver.arrivals.len())
+        .sum();
     let point_count: usize = result
         .sources
         .iter()
         .flat_map(|source| &source.rays)
+        .chain(
+            result
+                .eigenray_sources
+                .iter()
+                .flat_map(|source| &source.receivers)
+                .flat_map(|receiver| &receiver.eigenrays),
+        )
         .map(|ray| ray.points.len())
         .sum();
     println!(
-        "wrote {} ({ray_count} rays, {point_count} ray points)",
+        "wrote {} ({ray_count} rays, {eigenray_count} eigenrays, {arrival_count} arrivals, {point_count} trajectory points)",
         output_path.display()
     );
     ExitCode::SUCCESS

@@ -3,4 +3,6 @@
 *.h5.tmp
 *.prt
 *.ray
+*.arr
+*.shd
 .DS_Store

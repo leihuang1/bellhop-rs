@@ -3,8 +3,8 @@ use std::f64::consts::PI;
 use num_complex::Complex64;
 
 use crate::model::{
-    AttenuationUnit, BoundaryCondition, BoundaryMaterial, EnvironmentCase, HalfSpace,
-    ReflectionCoefficientTable, VolumeAttenuation,
+    AttenuationUnit, BoundaryCondition, BoundaryMaterial, CurvatureCondition, EnvironmentCase,
+    HalfSpace, ReflectionCoefficientTable, VolumeAttenuation,
 };
 
 use super::boundary::{BoundarySegment, BoundarySide, add, dot, scale, subtract};
@@ -58,6 +58,16 @@ pub(crate) fn reflect_2d(
     curvature_change += incidence_tangent
         * (2.0 * normal_gradient_jump - incidence_tangent * tangent_gradient_jump)
         / sample.speed_mps.powi(2);
+    match environment
+        .trace
+        .cerveny
+        .as_ref()
+        .map(|options| options.curvature)
+    {
+        Some(CurvatureCondition::Double) => curvature_change *= 2.0,
+        Some(CurvatureCondition::Zero) => curvature_change = 0.0,
+        Some(CurvatureCondition::Standard) | None => {}
+    }
     reflected.speed_mps = sample.speed_mps;
     reflected.p = add(incident.p, scale(incident.q, curvature_change));
     reflected.q = incident.q;

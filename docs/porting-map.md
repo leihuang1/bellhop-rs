@@ -19,4 +19,9 @@
 | `bellhop.f90::TraceRay2D` | `bellhop::solver::trace_ray` | Golden verified |
 | `bellhop.f90::Reflect2D` | `bellhop::solver::reflection::reflect_2d` | Differentially exercised |
 | `Bellhop/WriteRay.f90` | `bellhop::solver::{RayTrajectory, RayPoint}` | In-memory equivalent; legacy writer intentionally omitted |
-| `Bellhop/influence.f90` | — | Not started |
+| `Bellhop/influence.f90::InfluenceGeoHatCart` | `bellhop::solver::influence::geo_hat_cartesian` | Golden verified |
+| `Bellhop/influence.f90::InfluenceGeoGaussianCart` | `bellhop::solver::influence::geo_gaussian_cartesian` | Golden verified |
+| `Bellhop/influence.f90::InfluenceGeoHatRayCen` | `bellhop::solver::influence::geo_hat_ray_centered` | Golden verified |
+| `Bellhop/influence.f90::InfluenceSGB` (`E` path) | `bellhop::solver::influence::simple_gaussian_eigenrays` | Differentially exercised |
+| `Bellhop/ArrMod.f90::AddArr` | `bellhop::solver::influence::add_arrival` | Golden verified |
+| Other `Bellhop/influence.f90` models | — | Not started |

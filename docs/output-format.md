@@ -12,6 +12,9 @@ rename.
 - `input_filename`
 - `input_size_bytes` (`u64`)
 - `input_sha256`
+- `title`
+- `frequency_hz`
+- `legacy_run_options`
 - `coordinate_convention`
 
 Input contents are not embedded.
@@ -32,5 +35,25 @@ Ray trajectories use a flattened ragged-array representation under `/rays`:
   complex accumulated travel time
 - `amplitude`, `phase_radians`: cumulative reflection amplitude and phase
 
-Every dataset has a `unit` attribute. Later field and arrival milestones will
-add groups without changing the version-1 ray layout.
+Every dataset has a `unit` attribute.
+
+## Eigenray data
+
+`/eigenrays` records receiver coordinates and flattened eigenray trajectories.
+`receiver_offset` groups receivers by source, `eigenray_offset` groups
+eigenrays by receiver, and `point_offset` groups points by eigenray. The
+trajectory quantities use the same names and units as `/rays`.
+
+## Arrival data
+
+`/arrivals` uses `receiver_offset` to group receiver coordinates by source and
+`arrival_offset` to group arrivals by receiver. Per-arrival datasets are:
+
+- `amplitude`, `phase_radians`
+- `travel_time_s`, `attenuation_time_s`
+- `source_angle_degrees`, `receiver_angle_degrees`
+- `top_bounces`, `bottom_bounces`
+
+Arrival quantities intentionally use single-precision storage at the same
+rounding points as Acoustics Toolbox `v2023.5`. Later field milestones may add
+groups without changing the version-1 layouts.

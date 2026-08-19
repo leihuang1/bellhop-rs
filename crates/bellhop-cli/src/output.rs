@@ -2,7 +2,9 @@ use std::fs;
 use std::path::Path;
 use std::str::FromStr;
 
-use bellhop::solver::{RayTermination, SimulationResult};
+use bellhop::solver::{
+    RayTermination, ReceiverArrivals, SimulationResult, SourceArrivals, SourceEigenrays,
+};
 use hdf5::types::VarLenUnicode;
 use hdf5::{File, Group, H5Type};
 use sha2::{Digest, Sha256};
@@ -38,6 +40,13 @@ pub(crate) fn write_hdf5(
     write_string_attribute(&file, "input_filename", &input_filename)?;
     write_scalar_attribute(&file, "input_size_bytes", &input_size)?;
     write_string_attribute(&file, "input_sha256", &input_sha256)?;
+    write_string_attribute(&file, "title", &result.title)?;
+    write_scalar_attribute(&file, "frequency_hz", &result.frequency_hz)?;
+    write_string_attribute(
+        &file,
+        "legacy_run_options",
+        result.legacy_run_options.trim_end(),
+    )?;
     write_string_attribute(
         &file,
         "coordinate_convention",
@@ -46,6 +55,14 @@ pub(crate) fn write_hdf5(
 
     let rays = file.create_group("rays").map_err(hdf5_error)?;
     write_rays(&rays, result)?;
+    if !result.arrival_sources.is_empty() {
+        let arrivals = file.create_group("arrivals").map_err(hdf5_error)?;
+        write_arrivals(&arrivals, &result.arrival_sources)?;
+    }
+    if !result.eigenray_sources.is_empty() {
+        let eigenrays = file.create_group("eigenrays").map_err(hdf5_error)?;
+        write_eigenrays(&eigenrays, &result.eigenray_sources)?;
+    }
     file.flush().map_err(hdf5_error)
 }
 
@@ -122,9 +139,190 @@ fn write_rays(group: &Group, result: &SimulationResult) -> Result<(), String> {
     write_string_attribute(
         group,
         "termination_codes",
-        "0=exited_trace_box,1=lost_energy,2=escaped_boundary,3=source_outside_boundaries,4=step_limit",
+        "0=exited_trace_box,1=lost_energy,2=escaped_boundary,3=source_outside_boundaries,4=step_limit,5=receiver_hit",
     )?;
     Ok(())
+}
+
+fn write_arrivals(group: &Group, sources: &[SourceArrivals]) -> Result<(), String> {
+    let source_depth_m: Vec<f32> = sources.iter().map(|source| source.source_depth_m).collect();
+    let receiver_count: usize = sources.iter().map(|source| source.receivers.len()).sum();
+    let arrival_count: usize = sources
+        .iter()
+        .flat_map(|source| &source.receivers)
+        .map(|receiver| receiver.arrivals.len())
+        .sum();
+    let mut receiver_offset = Vec::with_capacity(sources.len() + 1);
+    let mut receiver_range_m = Vec::with_capacity(receiver_count);
+    let mut receiver_depth_m = Vec::with_capacity(receiver_count);
+    let mut arrival_offset = Vec::with_capacity(receiver_count + 1);
+    let mut amplitude = Vec::with_capacity(arrival_count);
+    let mut phase_radians = Vec::with_capacity(arrival_count);
+    let mut travel_time_s = Vec::with_capacity(arrival_count);
+    let mut attenuation_time_s = Vec::with_capacity(arrival_count);
+    let mut source_angle_degrees = Vec::with_capacity(arrival_count);
+    let mut receiver_angle_degrees = Vec::with_capacity(arrival_count);
+    let mut top_bounces = Vec::with_capacity(arrival_count);
+    let mut bottom_bounces = Vec::with_capacity(arrival_count);
+    receiver_offset.push(0_u64);
+    arrival_offset.push(0_u64);
+
+    for source in sources {
+        for receiver in &source.receivers {
+            receiver_range_m.push(receiver.range_m);
+            receiver_depth_m.push(receiver.depth_m);
+            append_arrivals(
+                receiver,
+                &mut amplitude,
+                &mut phase_radians,
+                &mut travel_time_s,
+                &mut attenuation_time_s,
+                &mut source_angle_degrees,
+                &mut receiver_angle_degrees,
+                &mut top_bounces,
+                &mut bottom_bounces,
+            );
+            arrival_offset.push(as_u64(amplitude.len(), "arrival offset")?);
+        }
+        receiver_offset.push(as_u64(receiver_range_m.len(), "receiver offset")?);
+    }
+
+    write_dataset(group, "source_depth_m", &source_depth_m, "m")?;
+    write_dataset(group, "receiver_offset", &receiver_offset, "index")?;
+    write_dataset(group, "receiver_range_m", &receiver_range_m, "m")?;
+    write_dataset(group, "receiver_depth_m", &receiver_depth_m, "m")?;
+    write_dataset(group, "arrival_offset", &arrival_offset, "index")?;
+    write_dataset(group, "amplitude", &amplitude, "1")?;
+    write_dataset(group, "phase_radians", &phase_radians, "rad")?;
+    write_dataset(group, "travel_time_s", &travel_time_s, "s")?;
+    write_dataset(group, "attenuation_time_s", &attenuation_time_s, "s")?;
+    write_dataset(
+        group,
+        "source_angle_degrees",
+        &source_angle_degrees,
+        "degree",
+    )?;
+    write_dataset(
+        group,
+        "receiver_angle_degrees",
+        &receiver_angle_degrees,
+        "degree",
+    )?;
+    write_dataset(group, "top_bounces", &top_bounces, "count")?;
+    write_dataset(group, "bottom_bounces", &bottom_bounces, "count")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_arrivals(
+    receiver: &ReceiverArrivals,
+    amplitude: &mut Vec<f32>,
+    phase_radians: &mut Vec<f32>,
+    travel_time_s: &mut Vec<f32>,
+    attenuation_time_s: &mut Vec<f32>,
+    source_angle_degrees: &mut Vec<f32>,
+    receiver_angle_degrees: &mut Vec<f32>,
+    top_bounces: &mut Vec<u32>,
+    bottom_bounces: &mut Vec<u32>,
+) {
+    for arrival in &receiver.arrivals {
+        amplitude.push(arrival.amplitude);
+        phase_radians.push(arrival.phase_radians);
+        travel_time_s.push(arrival.travel_time_s);
+        attenuation_time_s.push(arrival.attenuation_time_s);
+        source_angle_degrees.push(arrival.source_angle_degrees);
+        receiver_angle_degrees.push(arrival.receiver_angle_degrees);
+        top_bounces.push(arrival.top_bounces);
+        bottom_bounces.push(arrival.bottom_bounces);
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn write_eigenrays(group: &Group, sources: &[SourceEigenrays]) -> Result<(), String> {
+    let source_depth_m: Vec<f32> = sources.iter().map(|source| source.source_depth_m).collect();
+    let receiver_count: usize = sources.iter().map(|source| source.receivers.len()).sum();
+    let eigenray_count: usize = sources
+        .iter()
+        .flat_map(|source| &source.receivers)
+        .map(|receiver| receiver.eigenrays.len())
+        .sum();
+    let point_count: usize = sources
+        .iter()
+        .flat_map(|source| &source.receivers)
+        .flat_map(|receiver| &receiver.eigenrays)
+        .map(|ray| ray.points.len())
+        .sum();
+    let mut receiver_offset = vec![0_u64];
+    let mut receiver_range_m = Vec::with_capacity(receiver_count);
+    let mut receiver_depth_m = Vec::with_capacity(receiver_count);
+    let mut eigenray_offset = vec![0_u64];
+    let mut eigenray_receiver_index = Vec::with_capacity(eigenray_count);
+    let mut launch_angle_degrees = Vec::with_capacity(eigenray_count);
+    let mut point_offset = vec![0_u64];
+    let mut top_bounces = Vec::with_capacity(eigenray_count);
+    let mut bottom_bounces = Vec::with_capacity(eigenray_count);
+    let mut range_m = Vec::with_capacity(point_count);
+    let mut depth_m = Vec::with_capacity(point_count);
+    let mut travel_time_s = Vec::with_capacity(point_count);
+    let mut attenuation_time_s = Vec::with_capacity(point_count);
+    let mut amplitude = Vec::with_capacity(point_count);
+    let mut phase_radians = Vec::with_capacity(point_count);
+
+    for source in sources {
+        for receiver in &source.receivers {
+            let receiver_index = u64::try_from(receiver_range_m.len())
+                .map_err(|_| "receiver index does not fit in u64".to_owned())?;
+            receiver_range_m.push(receiver.range_m);
+            receiver_depth_m.push(receiver.depth_m);
+            for ray in &receiver.eigenrays {
+                eigenray_receiver_index.push(receiver_index);
+                launch_angle_degrees.push(ray.launch_angle_degrees);
+                top_bounces.push(ray.top_bounces);
+                bottom_bounces.push(ray.bottom_bounces);
+                for point in &ray.points {
+                    range_m.push(point.range_m);
+                    depth_m.push(point.depth_m);
+                    travel_time_s.push(point.travel_time_s);
+                    attenuation_time_s.push(point.attenuation_time_s);
+                    amplitude.push(point.amplitude);
+                    phase_radians.push(point.phase_radians);
+                }
+                point_offset.push(as_u64(range_m.len(), "eigenray point offset")?);
+            }
+            eigenray_offset.push(as_u64(eigenray_receiver_index.len(), "eigenray offset")?);
+        }
+        receiver_offset.push(as_u64(receiver_range_m.len(), "receiver offset")?);
+    }
+
+    write_dataset(group, "source_depth_m", &source_depth_m, "m")?;
+    write_dataset(group, "receiver_offset", &receiver_offset, "index")?;
+    write_dataset(group, "receiver_range_m", &receiver_range_m, "m")?;
+    write_dataset(group, "receiver_depth_m", &receiver_depth_m, "m")?;
+    write_dataset(group, "eigenray_offset", &eigenray_offset, "index")?;
+    write_dataset(
+        group,
+        "eigenray_receiver_index",
+        &eigenray_receiver_index,
+        "index",
+    )?;
+    write_dataset(
+        group,
+        "launch_angle_degrees",
+        &launch_angle_degrees,
+        "degree",
+    )?;
+    write_dataset(group, "point_offset", &point_offset, "index")?;
+    write_dataset(group, "top_bounces", &top_bounces, "count")?;
+    write_dataset(group, "bottom_bounces", &bottom_bounces, "count")?;
+    write_dataset(group, "range_m", &range_m, "m")?;
+    write_dataset(group, "depth_m", &depth_m, "m")?;
+    write_dataset(group, "travel_time_s", &travel_time_s, "s")?;
+    write_dataset(group, "attenuation_time_s", &attenuation_time_s, "s")?;
+    write_dataset(group, "amplitude", &amplitude, "1")?;
+    write_dataset(group, "phase_radians", &phase_radians, "rad")
+}
+
+fn as_u64(value: usize, description: &str) -> Result<u64, String> {
+    u64::try_from(value).map_err(|_| format!("{description} does not fit in u64"))
 }
 
 fn termination_code(termination: RayTermination) -> u8 {
@@ -134,6 +332,7 @@ fn termination_code(termination: RayTermination) -> u8 {
         RayTermination::EscapedBoundary => 2,
         RayTermination::SourceOutsideBoundaries => 3,
         RayTermination::StepLimit => 4,
+        RayTermination::ReceiverHit => 5,
     }
 }
 
@@ -183,7 +382,8 @@ mod tests {
     use std::fs;
 
     use bellhop::solver::{
-        RayPoint, RayTermination, RayTrajectory, SimulationResult, SourceRaySet,
+        RayPoint, RayTermination, RayTrajectory, SimulationLimits, SimulationResult, SourceRaySet,
+        run,
     };
     use hdf5::File;
 
@@ -199,6 +399,9 @@ mod tests {
         let output = directory.join("case.h5");
         fs::write(&input, "test input").unwrap();
         let result = SimulationResult {
+            title: "test case".to_owned(),
+            frequency_hz: 100.0,
+            legacy_run_options: "R".to_owned(),
             sources: vec![SourceRaySet {
                 source_depth_m: 10.0,
                 rays: vec![RayTrajectory {
@@ -226,6 +429,8 @@ mod tests {
                     termination: RayTermination::ExitedTraceBox,
                 }],
             }],
+            arrival_sources: Vec::new(),
+            eigenray_sources: Vec::new(),
         };
 
         write_hdf5(&output, &input, &result).unwrap();
@@ -250,6 +455,48 @@ mod tests {
                 .read_raw::<f64>()
                 .unwrap(),
             vec![10.0, 20.0]
+        );
+        drop(file);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn writes_flattened_arrival_schema() {
+        let directory =
+            std::env::temp_dir().join(format!("bellhop-hdf5-arrival-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../bellhop/tests/fixtures/golden/GeoHat_arrival.env");
+        let output = directory.join("arrival.h5");
+        let case = bellhop::legacy::load_case(&input).unwrap().value;
+        let result = run(&case, SimulationLimits::default()).unwrap();
+
+        write_hdf5(&output, &input, &result).unwrap();
+        let file = File::open(&output).unwrap();
+        assert_eq!(
+            file.dataset("arrivals/arrival_offset")
+                .unwrap()
+                .read_raw::<u64>()
+                .unwrap(),
+            vec![0, 3]
+        );
+        assert_eq!(file.dataset("arrivals/amplitude").unwrap().shape(), vec![3]);
+        drop(file);
+
+        let eigen_input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../bellhop/tests/fixtures/golden/GeoHat_eigen.env");
+        let eigen_output = directory.join("eigen.h5");
+        let case = bellhop::legacy::load_case(&eigen_input).unwrap().value;
+        let result = run(&case, SimulationLimits::default()).unwrap();
+        write_hdf5(&eigen_output, &eigen_input, &result).unwrap();
+        let file = File::open(&eigen_output).unwrap();
+        assert_eq!(
+            file.dataset("eigenrays/point_offset")
+                .unwrap()
+                .read_raw::<u64>()
+                .unwrap(),
+            vec![0, 106, 208, 314]
         );
         drop(file);
         fs::remove_dir_all(directory).unwrap();

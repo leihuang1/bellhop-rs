@@ -31,6 +31,19 @@ tools/reference/compare-ray.sh path/to/case.env
 tools/reference/compare-ray-linux.sh path/to/case.env
 ```
 
+Compare an arrivals (`A`/`a`) or pressure-field (`C`/`S`/`I`) run the same
+way. The arrival comparator checks receiver counts and all eight arrival
+fields at the committed single-precision storage tolerances; the pressure
+comparator parses the fixed-record `.shd` layout, checks `LRecl` and the
+receiver vectors, and compares every complex sample with `5e-8` absolute
+pressure (override with `BELLHOP_DIFFERENTIAL_PRESSURE_TOLERANCE` and
+relative tolerance `BELLHOP_DIFFERENTIAL_PRESSURE_RELATIVE_TOLERANCE`):
+
+```sh
+tools/reference/compare-arrival.sh path/to/case.env
+tools/reference/compare-field.sh path/to/case.env
+```
+
 The semantic comparator checks launch angles, bounce counts, and trajectory
 coordinates. It aligns isolated `1e-4 × base step` vertices because a value
 within a few ulps of an SSP or boundary interface can make one compiler take

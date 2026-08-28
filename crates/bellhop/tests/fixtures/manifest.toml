@@ -209,6 +209,39 @@ input_sha256 = "fd99307d0f02b4693afd27227fe06db4ca9bd8dc78e8cd8e4fa4fe1337445d43
 output_sha256 = "7e573583815079e6ad4cae20589b82ce10d4f5293f27230106ef2d4506f0e455"
 
 [[golden]]
+stem = "Field_CervenyF"
+provenance = "Field_CervenyR.env with 'MS' width changed to 'FS'"
+modified = true
+coverage = ["C", "cerveny-ray-centered", "space-filling-width", "pressure-field"]
+input_sha256 = "3443683abadc96f5d4e81f054c2b8ed1cdf339c3a0133e4bcbeec34e98f870ac"
+output_sha256 = "c5af21a9622f3ff3a6fa914b3cc78ceb772212377f833aa6cd13026da6ff5f98"
+
+[[golden]]
+stem = "Field_CervenyW"
+provenance = "Field_CervenyR.env with 'MS' width changed to 'WS'"
+modified = true
+coverage = ["C", "cerveny-ray-centered", "wkb-width", "pressure-field"]
+input_sha256 = "a469d71b0cece2bfbb749eece884bde445ecbd1d519dcd8da7b1fd2925bf2079"
+output_sha256 = "7645db4e69785fecbff4c421179eb9fc7c311a56ec95748e30c7ac55a0b43385"
+
+[[golden]]
+stem = "ShadedField"
+provenance = "tests/BeamPattern/shaded.env with reduced 51x51 receiver grid"
+modified = true
+coverage = ["C", "geometric-hat-cartesian", "source-beam-pattern", "pressure-field"]
+input_sha256 = "fdf64b6ad4a423d83f82618e111ed1ab13400395fb55e9c7a9ceb608f3f70ba2"
+sbp_sha256 = "d430840e81a87ca8c76d5ab7a4a035dacdefb8b095945b0dbf8f875846e38a74"
+output_sha256 = "9ee0d59ebd3c9df926728d833490094f71639365d42d4c5f258bb0bb8d11ab4b"
+
+[[golden]]
+stem = "FreeFGB_grid"
+provenance = "tests/VolAtt/free_FGB.env with reduced 101x41 receiver grid"
+modified = true
+coverage = ["C", "geometric-hat-cartesian", "francois-garrison-attenuation", "pressure-field"]
+input_sha256 = "37db11a1ca3dae88e9821f1043f1766a3020f2744812d90652b1c70f2cf0f8c9"
+output_sha256 = "b41948f1d1619b7ff5224d5e855cdcb1354793438bd87a2caac51e0ea0d2d034"
+
+[[golden]]
 stem = "ElasticReflection"
 provenance = "project-authored Fortran v2023.5 reflection harness"
 modified = true

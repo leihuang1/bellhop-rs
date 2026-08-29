@@ -1,12 +1,14 @@
 # HDF5 output schema
 
-Schema version 1 is used by `bellhop run`. Files are written only after a
-complete simulation succeeds, using `<output>.tmp` followed by an atomic
-rename.
+Schema version 2 is written by both `bellhop run` and `POST /v1/run` through the
+shared `bellhop-hdf5` crate. The CLI installs a file only after a complete
+simulation succeeds, using `<output>.tmp` followed by an atomic rename. The HTTP
+service builds a temporary file and returns its bytes directly as
+`application/x-hdf5`.
 
 ## Root attributes
 
-- `schema_version` (`u32`)
+- `schema_version` (`u32`, currently `2`)
 - `implementation`
 - `compatibility_reference`
 - `input_filename`
@@ -16,8 +18,16 @@ rename.
 - `frequency_hz`
 - `legacy_run_options`
 - `coordinate_convention`
+- `warnings` (one-dimensional variable-length UTF-8 string array)
 
-Input contents are not embedded.
+For CLI runs, input metadata describes the exact primary `.env` or `.json` file
+bytes. For HTTP runs it describes the exact request-body bytes and uses
+`request.json` as the filename. Input contents and legacy auxiliary files are
+not embedded. `legacy_run_options` is empty for modern JSON cases.
+
+Each `warnings` entry is the rendered structured input diagnostic, including
+source, severity, diagnostic code, message, and field. The attribute is present
+as an empty array when no warnings were emitted.
 
 ## Ray data
 
@@ -72,3 +82,9 @@ Samples are range-major, then depth-major for rectilinear grids. Irregular
 grids contain one depth per range. Semi-coherent and incoherent results follow
 the reference pressure-scaling convention and therefore have zero imaginary
 components.
+
+## Version history
+
+- **v2:** adds the root `warnings` string-array attribute and supports exact JSON
+  request metadata from the HTTP service.
+- **v1:** initial flattened rays, eigenrays, arrivals, and pressure fields.

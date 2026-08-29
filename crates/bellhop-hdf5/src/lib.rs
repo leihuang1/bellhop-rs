@@ -1,7 +1,9 @@
-use std::fs;
+//! Shared HDF5 result writer used by the CLI and HTTP service.
+
 use std::path::Path;
 use std::str::FromStr;
 
+use bellhop::diagnostic::Diagnostic;
 use bellhop::solver::{
     RayTermination, ReceiverArrivals, SimulationResult, SourceArrivals, SourceEigenrays,
 };
@@ -9,21 +11,26 @@ use hdf5::types::VarLenUnicode;
 use hdf5::{File, Group, H5Type};
 use sha2::{Digest, Sha256};
 
-const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
-pub(crate) fn write_hdf5(
+/// Writes one simulation result using schema v2.
+///
+/// `input_bytes` must be the exact bytes supplied by the caller. They are not
+/// embedded, but their byte length and SHA-256 digest are recorded at the root.
+///
+/// # Errors
+///
+/// Returns a descriptive error if metadata conversion or HDF5 I/O fails.
+pub fn write_hdf5(
     path: &Path,
-    input_path: &Path,
+    input_filename: &str,
+    input_bytes: &[u8],
     result: &SimulationResult,
+    warnings: &[Diagnostic],
 ) -> Result<(), String> {
-    let input =
-        fs::read(input_path).map_err(|error| format!("unable to read input metadata: {error}"))?;
-    let input_size =
-        u64::try_from(input.len()).map_err(|_| "input file size does not fit in u64".to_owned())?;
-    let input_sha256 = format!("{:x}", Sha256::digest(&input));
-    let input_filename = input_path
-        .file_name()
-        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    let input_size = u64::try_from(input_bytes.len())
+        .map_err(|_| "input size does not fit in u64".to_owned())?;
+    let input_sha256 = format!("{:x}", Sha256::digest(input_bytes));
 
     let file = File::create(path).map_err(hdf5_error)?;
     write_scalar_attribute(&file, "schema_version", &SCHEMA_VERSION)?;
@@ -37,7 +44,7 @@ pub(crate) fn write_hdf5(
         "compatibility_reference",
         "Acoustics Toolbox v2023.5 (475108519289c6fb488b58980c644ea14eccc604)",
     )?;
-    write_string_attribute(&file, "input_filename", &input_filename)?;
+    write_string_attribute(&file, "input_filename", input_filename)?;
     write_scalar_attribute(&file, "input_size_bytes", &input_size)?;
     write_string_attribute(&file, "input_sha256", &input_sha256)?;
     write_string_attribute(&file, "title", &result.title)?;
@@ -52,6 +59,8 @@ pub(crate) fn write_hdf5(
         "coordinate_convention",
         "range origin at source; depth positive downward; launch angle positive downward",
     )?;
+    let warnings: Vec<String> = warnings.iter().map(ToString::to_string).collect();
+    write_string_array_attribute(&file, "warnings", &warnings)?;
 
     let rays = file.create_group("rays").map_err(hdf5_error)?;
     write_rays(&rays, result)?;
@@ -410,6 +419,26 @@ fn write_string_attribute(parent: &hdf5::Location, name: &str, value: &str) -> R
         .map_err(hdf5_error)
 }
 
+fn write_string_array_attribute(
+    parent: &hdf5::Location,
+    name: &str,
+    values: &[String],
+) -> Result<(), String> {
+    let values = values
+        .iter()
+        .map(|value| {
+            VarLenUnicode::from_str(value)
+                .map_err(|error| format!("invalid metadata string: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    parent
+        .new_attr_builder()
+        .with_data(&values)
+        .create(name)
+        .map(|_| ())
+        .map_err(hdf5_error)
+}
+
 #[allow(clippy::needless_pass_by_value)]
 fn hdf5_error(error: hdf5::Error) -> String {
     format!("HDF5 output failed: {error}")
@@ -419,11 +448,13 @@ fn hdf5_error(error: hdf5::Error) -> String {
 mod tests {
     use std::fs;
 
+    use bellhop::diagnostic::{Diagnostic, SourceLocation};
     use bellhop::solver::{
         RayPoint, RayTermination, RayTrajectory, SimulationLimits, SimulationResult, SourceRaySet,
         run,
     };
     use hdf5::File;
+    use hdf5::types::VarLenUnicode;
 
     use super::write_hdf5;
 
@@ -433,9 +464,7 @@ mod tests {
             std::env::temp_dir().join(format!("bellhop-hdf5-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&directory);
         fs::create_dir_all(&directory).unwrap();
-        let input = directory.join("case.env");
         let output = directory.join("case.h5");
-        fs::write(&input, "test input").unwrap();
         let result = SimulationResult {
             title: "test case".to_owned(),
             frequency_hz: 100.0,
@@ -472,15 +501,28 @@ mod tests {
             field_sources: Vec::new(),
         };
 
-        write_hdf5(&output, &input, &result).unwrap();
+        let warning = Diagnostic::warning(
+            "BH1000",
+            "test warning",
+            "test",
+            SourceLocation::file("case.env"),
+        );
+        write_hdf5(&output, "case.env", b"test input", &result, &[warning]).unwrap();
         let file = File::open(&output).unwrap();
         assert_eq!(
             file.attr("schema_version")
                 .unwrap()
                 .read_scalar::<u32>()
                 .unwrap(),
-            1
+            2
         );
+        let warnings = file
+            .attr("warnings")
+            .unwrap()
+            .read_raw::<VarLenUnicode>()
+            .unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].as_str().contains("warning[BH1000]"));
         assert_eq!(
             file.dataset("rays/point_offset")
                 .unwrap()
@@ -511,7 +553,14 @@ mod tests {
         let case = bellhop::legacy::load_case(&input).unwrap().value;
         let result = run(&case, SimulationLimits::default()).unwrap();
 
-        write_hdf5(&output, &input, &result).unwrap();
+        write_hdf5(
+            &output,
+            "GeoHat_arrival.env",
+            &fs::read(&input).unwrap(),
+            &result,
+            &[],
+        )
+        .unwrap();
         let file = File::open(&output).unwrap();
         assert_eq!(
             file.dataset("arrivals/arrival_offset")
@@ -528,7 +577,14 @@ mod tests {
         let eigen_output = directory.join("eigen.h5");
         let case = bellhop::legacy::load_case(&eigen_input).unwrap().value;
         let result = run(&case, SimulationLimits::default()).unwrap();
-        write_hdf5(&eigen_output, &eigen_input, &result).unwrap();
+        write_hdf5(
+            &eigen_output,
+            "GeoHat_eigen.env",
+            &fs::read(&eigen_input).unwrap(),
+            &result,
+            &[],
+        )
+        .unwrap();
         let file = File::open(&eigen_output).unwrap();
         assert_eq!(
             file.dataset("eigenrays/point_offset")
@@ -544,7 +600,14 @@ mod tests {
         let field_output = directory.join("field.h5");
         let case = bellhop::legacy::load_case(&field_input).unwrap().value;
         let result = run(&case, SimulationLimits::default()).unwrap();
-        write_hdf5(&field_output, &field_input, &result).unwrap();
+        write_hdf5(
+            &field_output,
+            "Field_G.env",
+            &fs::read(&field_input).unwrap(),
+            &result,
+            &[],
+        )
+        .unwrap();
         let file = File::open(&field_output).unwrap();
         assert_eq!(
             file.dataset("field/receiver_offset")

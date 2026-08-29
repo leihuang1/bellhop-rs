@@ -1057,7 +1057,7 @@ fn automatic_launch_count(
     count
 }
 
-fn validate(
+pub(crate) fn validate(
     case: &EnvironmentCase,
     locations: &HashMap<&'static str, SourceLocation>,
     diagnostics: &mut DiagnosticReport,

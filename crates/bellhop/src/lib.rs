@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod diagnostic;
+pub mod json;
 pub mod legacy;
 pub mod model;
 pub mod solver;

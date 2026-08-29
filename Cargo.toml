@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/bellhop", "crates/bellhop-cli"]
+members = [
+    "crates/bellhop",
+    "crates/bellhop-cli",
+    "crates/bellhop-hdf5",
+    "crates/bellhop-server",
+]
 resolver = "2"
 
 [workspace.package]

@@ -12,6 +12,7 @@ use auxiliary::{
     BoundarySide, parse_boundary_shape, parse_internal_reflection_coefficients,
     parse_range_dependent_sound_speed, parse_reflection_coefficients, parse_source_beam_pattern,
 };
+pub(crate) use env::validate;
 
 /// Loads and validates a two-dimensional legacy BELLHOP `.env` file.
 ///

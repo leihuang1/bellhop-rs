@@ -344,16 +344,16 @@ impl<'a> EnvironmentParser<'a> {
                 .apply(&slots, "sound_speed.point", true)?;
             let point = self.medium_defaults.as_sound_speed_point();
 
-            if let Some(previous) = points.last() {
-                if point.depth_m <= previous.depth_m {
-                    let location = first_atom_location(&slots, &self.path);
-                    return Err(Diagnostic::error(
-                        "BH0201",
-                        "sound-speed depths must be strictly increasing",
-                        "sound_speed.point.depth",
-                        location,
-                    ));
-                }
+            if let Some(previous) = points.last()
+                && point.depth_m <= previous.depth_m
+            {
+                let location = first_atom_location(&slots, &self.path);
+                return Err(Diagnostic::error(
+                    "BH0201",
+                    "sound-speed depths must be strictly increasing",
+                    "sound_speed.point.depth",
+                    location,
+                ));
             }
             let at_bottom = (point.depth_m - bottom_depth_m).abs() < SSP_BOTTOM_TOLERANCE_M;
             points.push(point);
@@ -610,18 +610,18 @@ impl<'a> EnvironmentParser<'a> {
                 launch_angles_degrees.pop();
             }
         }
-        if let Some(selected) = selected_launch_angle {
-            if selected == 0 || selected > launch_angles_degrees.len() {
-                return Err(Diagnostic::error(
-                    "BH0201",
-                    format!(
-                        "selected launch angle must be in 1..={}",
-                        launch_angles_degrees.len()
-                    ),
-                    "trace.selected_launch_angle",
-                    count_location.clone(),
-                ));
-            }
+        if let Some(selected) = selected_launch_angle
+            && (selected == 0 || selected > launch_angles_degrees.len())
+        {
+            return Err(Diagnostic::error(
+                "BH0201",
+                format!(
+                    "selected launch angle must be in 1..={}",
+                    launch_angles_degrees.len()
+                ),
+                "trace.selected_launch_angle",
+                count_location.clone(),
+            ));
         }
 
         let limits = required_atoms(

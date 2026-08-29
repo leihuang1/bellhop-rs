@@ -18,10 +18,11 @@ fi
 "$root/tools/reference/run-case.sh" "$case_path" "$output"
 
 BELLHOP_DIFFERENTIAL_ENV="$case_path" \
-BELLHOP_DIFFERENTIAL_RAY="$output/$stem.ray" \
+BELLHOP_DIFFERENTIAL_SHD="$output/$stem.shd" \
 cargo test \
+  --release \
   --manifest-path "$root/Cargo.toml" \
   --package bellhop \
   --test differential_reference \
-  ray_trajectories_match_pinned_linux_reference \
+  pressure_fields_match_pinned_linux_reference \
   -- --ignored --nocapture --test-threads=1

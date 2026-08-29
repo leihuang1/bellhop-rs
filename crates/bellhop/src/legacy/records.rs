@@ -223,27 +223,26 @@ fn append_atom_slots(
     location: SourceLocation,
     expected: usize,
 ) {
-    if !quoted {
-        if let Some((count_text, repeated_text)) = text.split_once('*') {
-            if let Ok(count) = count_text.parse::<usize>() {
-                for _ in 0..count {
-                    if slots.len() >= expected {
-                        break;
-                    }
-                    slots.push(Slot {
-                        atom: if repeated_text.is_empty() {
-                            None
-                        } else {
-                            Some(Atom {
-                                text: repeated_text.to_owned(),
-                                location: location.clone(),
-                            })
-                        },
-                    });
-                }
-                return;
+    if !quoted
+        && let Some((count_text, repeated_text)) = text.split_once('*')
+        && let Ok(count) = count_text.parse::<usize>()
+    {
+        for _ in 0..count {
+            if slots.len() >= expected {
+                break;
             }
+            slots.push(Slot {
+                atom: if repeated_text.is_empty() {
+                    None
+                } else {
+                    Some(Atom {
+                        text: repeated_text.to_owned(),
+                        location: location.clone(),
+                    })
+                },
+            });
         }
+        return;
     }
 
     slots.push(Slot {

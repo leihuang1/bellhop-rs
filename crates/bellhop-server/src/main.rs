@@ -1,0 +1,121 @@
+#![forbid(unsafe_code)]
+
+use std::error::Error;
+use std::io;
+use std::net::SocketAddr;
+use std::time::Duration;
+
+use bellhop::solver::SimulationLimits;
+use bellhop_server::{ServerConfig, app};
+use clap::Parser;
+use tracing_subscriber::EnvFilter;
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "bellhop-server",
+    version,
+    about = "Synchronous JSON/HDF5 HTTP service for bellhop-rs"
+)]
+struct Args {
+    /// Address on which to accept HTTP connections.
+    #[arg(long, env = "BELLHOP_LISTEN", default_value = "0.0.0.0:8080")]
+    listen: SocketAddr,
+
+    /// Maximum number of requests admitted to blocking simulation work.
+    #[arg(long, env = "BELLHOP_WORKERS", default_value_t = default_workers())]
+    workers: usize,
+
+    /// End-to-end request timeout, including time spent waiting for a worker.
+    #[arg(long, env = "BELLHOP_REQUEST_TIMEOUT_SECONDS", default_value_t = 120)]
+    request_timeout_seconds: u64,
+
+    /// Maximum JSON request-body size.
+    #[arg(long, env = "BELLHOP_MAX_BODY_BYTES", default_value_t = 16 * 1024 * 1024)]
+    max_body_bytes: usize,
+
+    /// Optional static bearer token. TLS must be terminated externally.
+    #[arg(long, env = "BELLHOP_AUTH_TOKEN", hide_env_values = true)]
+    auth_token: Option<String>,
+
+    /// Maximum launch rays across all source depths.
+    #[arg(long, env = "BELLHOP_MAX_RAYS", default_value_t = 1_000_000)]
+    max_rays: usize,
+
+    /// Maximum integration steps for any one ray.
+    #[arg(long, env = "BELLHOP_MAX_STEPS_PER_RAY", default_value_t = 100_000)]
+    max_steps_per_ray: usize,
+
+    /// Maximum stored ray or eigenray trajectory points per result class.
+    #[arg(long, env = "BELLHOP_MAX_TOTAL_POINTS", default_value_t = 20_000_000)]
+    max_total_points: usize,
+
+    /// Maximum pressure-field receiver cells.
+    #[arg(long, env = "BELLHOP_MAX_FIELD_CELLS", default_value_t = 20_000_000)]
+    max_field_cells: usize,
+}
+
+fn default_workers() -> usize {
+    std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .init();
+    let args = Args::parse();
+    validate_args(&args)?;
+
+    let limits = SimulationLimits {
+        max_rays: args.max_rays,
+        max_steps_per_ray: args.max_steps_per_ray,
+        max_total_ray_points: args.max_total_points,
+        max_total_eigenray_points: args.max_total_points,
+        max_field_cells: args.max_field_cells,
+        ..SimulationLimits::default()
+    };
+    let config = ServerConfig {
+        workers: args.workers,
+        request_timeout: Duration::from_secs(args.request_timeout_seconds),
+        max_body_bytes: args.max_body_bytes,
+        simulation_limits: limits,
+        auth_token: args.auth_token,
+    };
+
+    let listener = tokio::net::TcpListener::bind(args.listen).await?;
+    tracing::info!(address = %args.listen, workers = args.workers, "bellhop server listening");
+    axum::serve(listener, app(config))
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+    Ok(())
+}
+
+fn validate_args(args: &Args) -> Result<(), io::Error> {
+    if args.request_timeout_seconds == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "--request-timeout-seconds must be positive",
+        ));
+    }
+    let values = [
+        ("workers", args.workers),
+        ("max-body-bytes", args.max_body_bytes),
+        ("max-rays", args.max_rays),
+        ("max-steps-per-ray", args.max_steps_per_ray),
+        ("max-total-points", args.max_total_points),
+        ("max-field-cells", args.max_field_cells),
+    ];
+    if let Some((name, _)) = values.into_iter().find(|(_, value)| *value == 0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("--{name} must be positive"),
+        ));
+    }
+    Ok(())
+}
+
+async fn shutdown_signal() {
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        tracing::error!(%error, "unable to install shutdown signal handler");
+    }
+}

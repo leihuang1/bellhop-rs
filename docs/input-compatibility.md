@@ -1,6 +1,11 @@
-# Legacy input compatibility
+# Input compatibility
 
-The input reader targets the two-dimensional environment syntax accepted by Acoustics Toolbox `v2023.5`.
+The CLI accepts both the modern [self-contained JSON format](json-input.md) and
+the legacy two-dimensional environment syntax accepted by Acoustics Toolbox
+`v2023.5`. The HTTP service accepts JSON only. `bellhop export case.env` resolves
+a legacy case and all same-stem resources into one canonical JSON document.
+
+## Legacy inputs
 
 Implemented:
 

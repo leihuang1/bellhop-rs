@@ -1,0 +1,697 @@
+#![forbid(unsafe_code)]
+
+//! Synchronous HTTP facade for modern, self-contained BELLHOP cases.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::body::Bytes;
+use axum::error_handling::HandleErrorLayer;
+use axum::extract::rejection::BytesRejection;
+use axum::extract::{Request, State};
+use axum::http::header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE, WWW_AUTHENTICATE};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use bellhop::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome, Severity};
+use bellhop::json::{CaseDocument, DocumentErrorKind};
+use bellhop::model::Case;
+use bellhop::solver::{SimulationLimits, run as run_simulation};
+use serde::Serialize;
+use tokio::sync::Semaphore;
+use tower::limit::ConcurrencyLimitLayer;
+use tower::timeout::TimeoutLayer;
+use tower::{BoxError, ServiceBuilder};
+use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
+use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+use utoipa::{Modify, OpenApi, ToSchema};
+use utoipa_swagger_ui::SwaggerUi;
+
+pub const HDF5_MEDIA_TYPE: &str = "application/x-hdf5";
+
+#[derive(Clone, Debug)]
+pub struct ServerConfig {
+    pub workers: usize,
+    pub request_timeout: Duration,
+    pub max_body_bytes: usize,
+    pub simulation_limits: SimulationLimits,
+    pub auth_token: Option<String>,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            workers: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
+            request_timeout: Duration::from_secs(120),
+            max_body_bytes: 16 * 1024 * 1024,
+            simulation_limits: SimulationLimits::default(),
+            auth_token: None,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct AppState {
+    simulation_limits: SimulationLimits,
+    auth_token: Option<Arc<str>>,
+    worker_slots: Arc<Semaphore>,
+}
+
+/// Builds the complete service, including public health and `OpenAPI` routes.
+///
+/// # Panics
+///
+/// Panics when `workers` or `max_body_bytes` is zero. The executable validates
+/// these values before constructing the service.
+pub fn app(config: ServerConfig) -> Router {
+    assert!(config.workers > 0, "workers must be positive");
+    assert!(config.max_body_bytes > 0, "max_body_bytes must be positive");
+
+    let state = AppState {
+        simulation_limits: config.simulation_limits,
+        auth_token: config.auth_token.map(Arc::from),
+        worker_slots: Arc::new(Semaphore::new(config.workers)),
+    };
+    let api = Router::new()
+        .route("/v1/validate", post(validate_case))
+        .route("/v1/run", post(run_case))
+        .layer(axum::extract::DefaultBodyLimit::max(config.max_body_bytes))
+        .layer(middleware::from_fn_with_state(state.clone(), require_auth))
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(handle_middleware_error))
+                .layer(TimeoutLayer::new(config.request_timeout))
+                .layer(ConcurrencyLimitLayer::new(config.workers)),
+        )
+        .with_state(state);
+
+    Router::new()
+        .route("/healthz", get(healthz))
+        .merge(api)
+        .merge(SwaggerUi::new("/docs").url("/openapi.json", ApiDoc::openapi()))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(tracing::Level::INFO))
+                .on_response(DefaultOnResponse::new().level(tracing::Level::INFO)),
+        )
+}
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(healthz, validate_case, run_case),
+    components(schemas(
+        CaseDocument,
+        HealthResponse,
+        ValidationResponse,
+        DiagnosticResponse,
+        DiagnosticLocationResponse,
+        DiagnosticSeverityResponse,
+        ErrorResponse,
+        ErrorDetail,
+        Hdf5Response
+    )),
+    modifiers(&SecurityAddon),
+    tags(
+        (name = "service", description = "Service health"),
+        (name = "simulation", description = "BELLHOP validation and simulation")
+    )
+)]
+pub struct ApiDoc;
+
+struct SecurityAddon;
+
+impl Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "bearer_auth",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some(
+                            "Static bearer token when BELLHOP_AUTH_TOKEN is configured",
+                        ))
+                        .build(),
+                ),
+            );
+        }
+    }
+}
+
+#[derive(Serialize, ToSchema)]
+struct HealthResponse {
+    status: &'static str,
+}
+
+#[utoipa::path(
+    get,
+    path = "/healthz",
+    tag = "service",
+    responses((status = 200, description = "Service is ready", body = HealthResponse))
+)]
+async fn healthz() -> Json<HealthResponse> {
+    Json(HealthResponse { status: "ok" })
+}
+
+#[derive(Serialize, ToSchema)]
+struct ValidationResponse {
+    valid: bool,
+    warnings: Vec<DiagnosticResponse>,
+}
+
+#[derive(Clone, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum DiagnosticSeverityResponse {
+    Warning,
+    Error,
+}
+
+#[derive(Clone, Serialize, ToSchema)]
+struct DiagnosticLocationResponse {
+    path: String,
+    line: usize,
+    column: usize,
+}
+
+#[derive(Clone, Serialize, ToSchema)]
+struct DiagnosticResponse {
+    severity: DiagnosticSeverityResponse,
+    code: String,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    field: Option<String>,
+    location: DiagnosticLocationResponse,
+}
+
+impl From<&Diagnostic> for DiagnosticResponse {
+    fn from(diagnostic: &Diagnostic) -> Self {
+        Self {
+            severity: match diagnostic.severity {
+                Severity::Warning => DiagnosticSeverityResponse::Warning,
+                Severity::Error => DiagnosticSeverityResponse::Error,
+            },
+            code: diagnostic.code.to_owned(),
+            message: diagnostic.message.clone(),
+            field: diagnostic.field.clone(),
+            location: DiagnosticLocationResponse {
+                path: diagnostic.location.path.to_string_lossy().into_owned(),
+                line: diagnostic.location.line,
+                column: diagnostic.location.column,
+            },
+        }
+    }
+}
+
+#[derive(ToSchema)]
+#[schema(value_type = String, format = Binary)]
+#[allow(dead_code)]
+struct Hdf5Response(Vec<u8>);
+
+#[derive(Serialize, ToSchema)]
+struct ErrorResponse {
+    error: ErrorDetail,
+}
+
+#[derive(Serialize, ToSchema)]
+struct ErrorDetail {
+    code: String,
+    message: String,
+    diagnostics: Vec<DiagnosticResponse>,
+}
+
+struct ApiError {
+    status: StatusCode,
+    code: &'static str,
+    message: String,
+    diagnostics: Vec<DiagnosticResponse>,
+}
+
+impl ApiError {
+    fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            code,
+            message: message.into(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    fn from_report(
+        status: StatusCode,
+        code: &'static str,
+        message: impl Into<String>,
+        report: &DiagnosticReport,
+    ) -> Self {
+        Self {
+            status,
+            code,
+            message: message.into(),
+            diagnostics: report
+                .diagnostics()
+                .iter()
+                .map(DiagnosticResponse::from)
+                .collect(),
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (
+            self.status,
+            Json(ErrorResponse {
+                error: ErrorDetail {
+                    code: self.code.to_owned(),
+                    message: self.message,
+                    diagnostics: self.diagnostics,
+                },
+            }),
+        )
+            .into_response()
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/validate",
+    tag = "simulation",
+    request_body(content = CaseDocument, content_type = "application/json"),
+    security((), ("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "The case is semantically valid", body = ValidationResponse),
+        (status = 400, description = "Malformed JSON", body = ErrorResponse),
+        (status = 401, description = "Bearer authentication failed", body = ErrorResponse),
+        (status = 413, description = "Request body exceeds the configured limit", body = ErrorResponse),
+        (status = 415, description = "Request is not JSON", body = ErrorResponse),
+        (status = 422, description = "Semantically invalid case", body = ErrorResponse),
+        (status = 504, description = "Request timed out", body = ErrorResponse)
+    )
+)]
+async fn validate_case(
+    headers: HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+) -> Result<Json<ValidationResponse>, ApiError> {
+    let body = extract_json_body(&headers, body)?;
+    let outcome = parse_document(&body)?;
+    Ok(Json(ValidationResponse {
+        valid: true,
+        warnings: outcome
+            .warnings
+            .iter()
+            .map(DiagnosticResponse::from)
+            .collect(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/run",
+    tag = "simulation",
+    request_body(content = CaseDocument, content_type = "application/json"),
+    security((), ("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "Versioned HDF5 simulation result", body = Hdf5Response, content_type = "application/x-hdf5"),
+        (status = 400, description = "Malformed JSON", body = ErrorResponse),
+        (status = 401, description = "Bearer authentication failed", body = ErrorResponse),
+        (status = 413, description = "Request body exceeds the configured limit", body = ErrorResponse),
+        (status = 415, description = "Request is not JSON", body = ErrorResponse),
+        (status = 422, description = "Case or run option is unsupported", body = ErrorResponse),
+        (status = 429, description = "Simulation resource limit exceeded", body = ErrorResponse),
+        (status = 500, description = "Internal execution or HDF5 error", body = ErrorResponse),
+        (status = 504, description = "Request timed out", body = ErrorResponse)
+    )
+)]
+async fn run_case(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+) -> Result<Response, ApiError> {
+    let body = extract_json_body(&headers, body)?;
+    let outcome = parse_document(&body)?;
+    let request_bytes = body.to_vec();
+    let limits = state.simulation_limits;
+    let worker_permit = state
+        .worker_slots
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "simulation worker semaphore closed");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "worker_pool_failed",
+                "simulation worker pool failed",
+            )
+        })?;
+    let task = tokio::task::spawn_blocking(move || {
+        let _worker_permit = worker_permit;
+        simulate_to_hdf5(&outcome.value, &request_bytes, &outcome.warnings, limits)
+    });
+    let bytes = match task.await {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(WorkerError::Simulation(report))) => {
+            let limit_exceeded = report
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == "BH0303");
+            let (status, code, message) = if limit_exceeded {
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "resource_limit_exceeded",
+                    "simulation exceeded a server resource limit",
+                )
+            } else {
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "simulation_failed",
+                    "the case could not be simulated",
+                )
+            };
+            return Err(ApiError::from_report(status, code, message, &report));
+        }
+        Ok(Err(WorkerError::Output(message))) => {
+            tracing::error!(%message, "failed to build HDF5 response");
+            return Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "output_failed",
+                "unable to create the HDF5 result",
+            ));
+        }
+        Err(error) => {
+            tracing::error!(%error, "blocking simulation task failed");
+            return Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "execution_failed",
+                "simulation worker failed",
+            ));
+        }
+    };
+
+    let mut response = bytes.into_response();
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static(HDF5_MEDIA_TYPE));
+    response.headers_mut().insert(
+        CONTENT_DISPOSITION,
+        HeaderValue::from_static("attachment; filename=\"bellhop-result.h5\""),
+    );
+    Ok(response)
+}
+
+fn extract_json_body(
+    headers: &HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+) -> Result<Bytes, ApiError> {
+    let media_type = headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::trim);
+    if !matches!(media_type, Some("application/json"))
+        && !media_type.is_some_and(|value| value.ends_with("+json"))
+    {
+        return Err(ApiError::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_media_type",
+            "Content-Type must be application/json",
+        ));
+    }
+    body.map_err(|rejection| {
+        ApiError::new(
+            rejection.status(),
+            if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                "body_too_large"
+            } else {
+                "body_read_failed"
+            },
+            rejection.body_text(),
+        )
+    })
+}
+
+fn parse_document(bytes: &[u8]) -> Result<LoadOutcome<Case>, ApiError> {
+    bellhop::json::load_case_document(bytes).map_err(|error| {
+        let (status, code, message) = match error.kind() {
+            DocumentErrorKind::Malformed => (
+                StatusCode::BAD_REQUEST,
+                "malformed_json",
+                "request body is not a valid JSON case",
+            ),
+            DocumentErrorKind::Semantic => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_case",
+                "request body describes an invalid case",
+            ),
+        };
+        ApiError::from_report(status, code, message, error.report())
+    })
+}
+
+enum WorkerError {
+    Simulation(DiagnosticReport),
+    Output(String),
+}
+
+fn simulate_to_hdf5(
+    case: &Case,
+    request_bytes: &[u8],
+    warnings: &[Diagnostic],
+    limits: SimulationLimits,
+) -> Result<Vec<u8>, WorkerError> {
+    let result = run_simulation(case, limits).map_err(WorkerError::Simulation)?;
+    let directory = tempfile::tempdir()
+        .map_err(|error| WorkerError::Output(format!("temporary directory failed: {error}")))?;
+    let path = directory.path().join("result.h5");
+    bellhop_hdf5::write_hdf5(&path, "request.json", request_bytes, &result, warnings)
+        .map_err(WorkerError::Output)?;
+    std::fs::read(path)
+        .map_err(|error| WorkerError::Output(format!("unable to read HDF5 result: {error}")))
+}
+
+async fn require_auth(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let Some(expected) = state.auth_token.as_deref() else {
+        return next.run(request).await;
+    };
+    let valid = request
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .is_some_and(|token| token == expected);
+    if valid {
+        next.run(request).await
+    } else {
+        let mut response = ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "a valid bearer token is required",
+        )
+        .into_response();
+        response
+            .headers_mut()
+            .insert(WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+        response
+    }
+}
+
+async fn handle_middleware_error(error: BoxError) -> ApiError {
+    if error.is::<tower::timeout::error::Elapsed>() {
+        ApiError::new(
+            StatusCode::GATEWAY_TIMEOUT,
+            "request_timeout",
+            "the request exceeded the server timeout",
+        )
+    } else {
+        tracing::error!(%error, "HTTP middleware failed");
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "middleware_failed",
+            "request processing failed",
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode, header};
+    use serde_json::Value;
+    use tower::ServiceExt;
+
+    use super::{HDF5_MEDIA_TYPE, ServerConfig, app};
+
+    const CASE: &str = include_str!("../../../examples/field-g.json");
+
+    fn json_request(path: &str, body: impl Into<Body>) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(path)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body.into())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn public_routes_and_validation_contract() {
+        let service = app(ServerConfig::default());
+        let health = service
+            .clone()
+            .oneshot(Request::get("/healthz").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(health.status(), StatusCode::OK);
+
+        let openapi = service
+            .clone()
+            .oneshot(Request::get("/openapi.json").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(openapi.status(), StatusCode::OK);
+        let openapi: Value =
+            serde_json::from_slice(&to_bytes(openapi.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert!(openapi["paths"]["/v1/run"].is_object());
+        assert_eq!(
+            openapi["components"]["schemas"]["Hdf5Response"]["format"],
+            "binary"
+        );
+
+        let valid = service
+            .clone()
+            .oneshot(json_request("/v1/validate", CASE))
+            .await
+            .unwrap();
+        assert_eq!(valid.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(valid.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["valid"], true);
+        assert_eq!(body["warnings"].as_array().unwrap().len(), 1);
+
+        let malformed = service
+            .clone()
+            .oneshot(json_request("/v1/validate", "{"))
+            .await
+            .unwrap();
+        assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+
+        let mut semantic: Value = serde_json::from_str(CASE).unwrap();
+        semantic["trace"]["launch_angles_degrees"] = serde_json::json!([]);
+        let semantic = service
+            .oneshot(json_request(
+                "/v1/validate",
+                serde_json::to_vec(&semantic).unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(semantic.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn run_returns_hdf5_directly() {
+        let response = app(ServerConfig::default())
+            .oneshot(json_request("/v1/run", CASE))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], HDF5_MEDIA_TYPE);
+        assert_eq!(
+            response.headers()[header::CONTENT_DISPOSITION],
+            "attachment; filename=\"bellhop-result.h5\""
+        );
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&body[..8], b"\x89HDF\r\n\x1a\n");
+    }
+
+    #[tokio::test]
+    async fn transport_limits_use_the_documented_statuses() {
+        let too_large = app(ServerConfig {
+            max_body_bytes: 8,
+            ..ServerConfig::default()
+        })
+        .oneshot(json_request("/v1/validate", CASE))
+        .await
+        .unwrap();
+        assert_eq!(too_large.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            too_large.headers()[header::CONTENT_TYPE],
+            "application/json"
+        );
+
+        let wrong_media_type = app(ServerConfig::default())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/validate")
+                    .body(Body::from(CASE))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            wrong_media_type.status(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE
+        );
+
+        let timed_out = app(ServerConfig {
+            request_timeout: Duration::ZERO,
+            ..ServerConfig::default()
+        })
+        .oneshot(json_request("/v1/run", CASE))
+        .await
+        .unwrap();
+        assert_eq!(timed_out.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            timed_out.headers()[header::CONTENT_TYPE],
+            "application/json"
+        );
+    }
+
+    #[tokio::test]
+    async fn authentication_and_resource_limit_errors_are_json() {
+        let config = ServerConfig {
+            auth_token: Some("secret".to_owned()),
+            ..ServerConfig::default()
+        };
+        let service = app(config);
+        let unauthorized = service
+            .clone()
+            .oneshot(json_request("/v1/validate", CASE))
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(unauthorized.headers()[header::WWW_AUTHENTICATE], "Bearer");
+
+        let authorized = service
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/validate")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer secret")
+                    .body(Body::from(CASE))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(authorized.status(), StatusCode::OK);
+
+        let limits = bellhop::solver::SimulationLimits {
+            max_rays: 1,
+            ..bellhop::solver::SimulationLimits::default()
+        };
+        let limited = app(ServerConfig {
+            simulation_limits: limits,
+            ..ServerConfig::default()
+        })
+        .oneshot(json_request("/v1/run", CASE))
+        .await
+        .unwrap();
+        assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(limited.headers()[header::CONTENT_TYPE], "application/json");
+    }
+}

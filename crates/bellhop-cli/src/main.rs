@@ -1,14 +1,15 @@
 #![forbid(unsafe_code)]
 
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use bellhop::Severity;
+use bellhop::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome};
+use bellhop::model::Case;
 use bellhop::solver::{SimulationLimits, run as run_simulation};
 use clap::{Parser, Subcommand};
-
-mod output;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -23,14 +24,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Parse and validate a legacy BELLHOP case without running it.
+    /// Parse and validate a modern JSON or legacy BELLHOP case without running it.
     Validate {
-        /// Path to the primary legacy environment file.
+        /// Path to a self-contained .json case or primary legacy .env file.
         case: PathBuf,
     },
-    /// Run a case and write a versioned HDF5 result.
+    /// Run a modern JSON or legacy case and write a versioned HDF5 result.
     Run {
-        /// Path to the primary legacy environment file.
+        /// Path to a self-contained .json case or primary legacy .env file.
         case: PathBuf,
         /// Result path; defaults to `<case-stem>.h5` in the current directory.
         #[arg(short, long)]
@@ -38,6 +39,11 @@ enum Command {
         /// Replace an existing result.
         #[arg(long)]
         overwrite: bool,
+    },
+    /// Convert a legacy or modern case to canonical, self-contained JSON.
+    Export {
+        /// Path to a primary legacy .env file or an existing .json case.
+        case: PathBuf,
     },
 }
 
@@ -50,11 +56,12 @@ fn main() -> ExitCode {
             output,
             overwrite,
         } => run(&case, output.as_deref(), overwrite),
+        Command::Export { case } => export(&case),
     }
 }
 
 fn validate(path: &Path) -> ExitCode {
-    match bellhop::legacy::load_case(path) {
+    match load_case(path) {
         Ok(outcome) => {
             for diagnostic in outcome.warnings {
                 eprintln!("{diagnostic}");
@@ -94,13 +101,20 @@ fn run(path: &Path, requested_output: Option<&Path>, overwrite: bool) -> ExitCod
         return ExitCode::from(4);
     }
 
-    let case = match bellhop::legacy::load_case(path) {
+    let (case, warnings) = match load_case(path) {
         Ok(outcome) => {
-            for diagnostic in outcome.warnings {
+            for diagnostic in &outcome.warnings {
                 eprintln!("{diagnostic}");
             }
-            outcome.value
+            (outcome.value, outcome.warnings)
         }
+        Err(report) => {
+            render_report(&report);
+            return ExitCode::from(2);
+        }
+    };
+    let input_bytes = match read_input(path) {
+        Ok(bytes) => bytes,
         Err(report) => {
             render_report(&report);
             return ExitCode::from(2);
@@ -122,7 +136,16 @@ fn run(path: &Path, requested_output: Option<&Path>, overwrite: bool) -> ExitCod
         );
         return ExitCode::from(4);
     }
-    if let Err(error) = output::write_hdf5(&temporary_path, path, &result) {
+    let input_filename = path
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    if let Err(error) = bellhop_hdf5::write_hdf5(
+        &temporary_path,
+        &input_filename,
+        &input_bytes,
+        &result,
+        &warnings,
+    ) {
         let _ = fs::remove_file(&temporary_path);
         eprintln!("error[BH0402]: {error}");
         return ExitCode::from(4);
@@ -172,6 +195,49 @@ fn run(path: &Path, requested_output: Option<&Path>, overwrite: bool) -> ExitCod
         output_path.display()
     );
     ExitCode::SUCCESS
+}
+
+fn export(path: &Path) -> ExitCode {
+    let outcome = match load_case(path) {
+        Ok(outcome) => outcome,
+        Err(report) => {
+            render_report(&report);
+            return ExitCode::from(2);
+        }
+    };
+    for diagnostic in &outcome.warnings {
+        eprintln!("{diagnostic}");
+    }
+    let document = match bellhop::json::export_case_document(&outcome.value) {
+        Ok(document) => document,
+        Err(report) => {
+            render_report(&report);
+            return ExitCode::from(2);
+        }
+    };
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    if let Err(error) = serde_json::to_writer_pretty(&mut stdout, &document)
+        .and_then(|()| writeln!(stdout).map_err(serde_json::Error::io))
+    {
+        eprintln!("error[BH0402]: unable to write JSON output: {error}");
+        return ExitCode::from(4);
+    }
+    ExitCode::SUCCESS
+}
+
+fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
+    if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
+        let bytes = read_input(path)?;
+        bellhop::json::load_case_document_named(&bytes, path)
+            .map_err(bellhop::json::DocumentError::into_report)
+    } else {
+        bellhop::legacy::load_case(path)
+    }
+}
+
+fn read_input(path: &Path) -> Result<Vec<u8>, DiagnosticReport> {
+    fs::read(path).map_err(|error| DiagnosticReport::from_diagnostic(Diagnostic::io(path, &error)))
 }
 
 fn default_output_path(input: &Path) -> PathBuf {

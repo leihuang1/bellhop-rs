@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  build-test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+      - name: Test
+        run: cargo test --workspace
+      - name: Documentation build
+        run: cargo doc --workspace --no-deps
+
+  differential-reference:
+    runs-on: ubuntu-22.04
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build pinned Fortran reference image
+        run: tools/reference/build-image.sh
+      - name: Prepare official differential cases
+        run: |
+          mkdir -p target/reference/cases
+          docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/cases:/out" \
+            --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 \
+            -c "cp /opt/acoustics-toolbox/tests/Munk/MunkB_Coh.env /out/ && cp /opt/acoustics-toolbox/tests/SBCX/sbcx_Arr_asc.env /out/"
+      - name: Critical boundary/interface rays
+        run: tools/reference/check-critical-rays.sh
+      - name: Official full-grid coherent field (MunkB_Coh)
+        run: tools/reference/compare-field.sh target/reference/cases/MunkB_Coh.env
+      - name: Official 50k-receiver ASCII arrival fan (sbcx_Arr_asc)
+        run: tools/reference/compare-arrival.sh target/reference/cases/sbcx_Arr_asc.env

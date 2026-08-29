@@ -284,7 +284,7 @@ pub(super) fn parse_reflection_coefficients(
     )?;
     let mut points = Vec::with_capacity(point_count);
     let mut previous_angle = None;
-    for values in atoms.chunks_exact(3) {
+    for values in atoms.chunks(3) {
         let angle_degrees = parse_f64(&values[0], field)?;
         let magnitude = parse_f64(&values[1], field)?;
         let phase_degrees = parse_f64(&values[2], field)?;

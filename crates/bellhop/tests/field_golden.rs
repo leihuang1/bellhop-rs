@@ -16,6 +16,10 @@ fn field_modes_match_v2023_5_golden_pressures() {
         "Field_S",
         "Field_CervenyC",
         "Field_CervenyR",
+        "Field_CervenyF",
+        "Field_CervenyW",
+        "ShadedField",
+        "FreeFGB_grid",
     ] {
         let case = load_case(&fixture(&format!("{stem}.env"))).unwrap().value;
         let result = run(&case, SimulationLimits::default()).unwrap();

@@ -23,4 +23,5 @@ cargo test \
   --manifest-path "$root/Cargo.toml" \
   --package bellhop \
   --test differential_reference \
+  ray_trajectories_match_pinned_linux_reference \
   -- --ignored --nocapture --test-threads=1

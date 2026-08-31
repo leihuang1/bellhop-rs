@@ -49,6 +49,18 @@ struct Args {
     #[arg(long, env = "BELLHOP_MAX_TOTAL_POINTS", default_value_t = 20_000_000)]
     max_total_points: usize,
 
+    /// Maximum arrivals retained for any one receiver.
+    #[arg(
+        long,
+        env = "BELLHOP_MAX_ARRIVALS_PER_RECEIVER",
+        default_value_t = 20_000_000
+    )]
+    max_arrivals_per_receiver: usize,
+
+    /// Maximum arrivals retained across one complete simulation.
+    #[arg(long, env = "BELLHOP_MAX_TOTAL_ARRIVALS", default_value_t = 20_000_000)]
+    max_total_arrivals: usize,
+
     /// Maximum pressure-field receiver cells.
     #[arg(long, env = "BELLHOP_MAX_FIELD_CELLS", default_value_t = 20_000_000)]
     max_field_cells: usize,
@@ -70,6 +82,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         max_rays: args.max_rays,
         max_steps_per_ray: args.max_steps_per_ray,
         max_total_ray_points: args.max_total_points,
+        max_arrivals_per_receiver: args.max_arrivals_per_receiver,
+        max_total_arrivals: args.max_total_arrivals,
         max_total_eigenray_points: args.max_total_points,
         max_field_cells: args.max_field_cells,
         ..SimulationLimits::default()
@@ -103,6 +117,8 @@ fn validate_args(args: &Args) -> Result<(), io::Error> {
         ("max-rays", args.max_rays),
         ("max-steps-per-ray", args.max_steps_per_ray),
         ("max-total-points", args.max_total_points),
+        ("max-arrivals-per-receiver", args.max_arrivals_per_receiver),
+        ("max-total-arrivals", args.max_total_arrivals),
         ("max-field-cells", args.max_field_cells),
     ];
     if let Some((name, _)) = values.into_iter().find(|(_, value)| *value == 0) {

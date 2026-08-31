@@ -17,8 +17,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use bellhop::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome, Severity};
 use bellhop::json::{CaseDocument, DocumentErrorKind};
-use bellhop::model::Case;
-use bellhop::solver::{SimulationLimits, run as run_simulation};
+use bellhop::model::{Case, RunKind};
+use bellhop::solver::{SimulationLimits, SimulationResult, run as run_simulation};
 use serde::Serialize;
 use tokio::sync::Semaphore;
 use tower::limit::ConcurrencyLimitLayer;
@@ -77,6 +77,7 @@ pub fn app(config: ServerConfig) -> Router {
     let api = Router::new()
         .route("/v1/validate", post(validate_case))
         .route("/v1/run", post(run_case))
+        .route("/v1/arrivals", post(arrivals_case))
         .layer(axum::extract::DefaultBodyLimit::max(config.max_body_bytes))
         .layer(middleware::from_fn_with_state(state.clone(), require_auth))
         .layer(
@@ -100,7 +101,7 @@ pub fn app(config: ServerConfig) -> Router {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(healthz, validate_case, run_case),
+    paths(healthz, validate_case, run_case, arrivals_case),
     components(schemas(
         CaseDocument,
         HealthResponse,
@@ -110,7 +111,11 @@ pub fn app(config: ServerConfig) -> Router {
         DiagnosticSeverityResponse,
         ErrorResponse,
         ErrorDetail,
-        Hdf5Response
+        Hdf5Response,
+        ArrivalsResponse,
+        ArrivalSourceResponse,
+        ArrivalReceiverResponse,
+        ArrivalResponse
     )),
     modifiers(&SecurityAddon),
     tags(
@@ -208,6 +213,80 @@ impl From<&Diagnostic> for DiagnosticResponse {
 #[schema(value_type = String, format = Binary)]
 #[allow(dead_code)]
 struct Hdf5Response(Vec<u8>);
+
+#[derive(Serialize, ToSchema)]
+struct ArrivalsResponse {
+    schema_version: u32,
+    title: String,
+    frequency_hz: f64,
+    warnings: Vec<DiagnosticResponse>,
+    sources: Vec<ArrivalSourceResponse>,
+}
+
+#[derive(Serialize, ToSchema)]
+struct ArrivalSourceResponse {
+    source_depth_m: f32,
+    receivers: Vec<ArrivalReceiverResponse>,
+}
+
+#[derive(Serialize, ToSchema)]
+struct ArrivalReceiverResponse {
+    range_m: f64,
+    depth_m: f32,
+    arrivals: Vec<ArrivalResponse>,
+}
+
+#[derive(Serialize, ToSchema)]
+struct ArrivalResponse {
+    amplitude: f32,
+    phase_radians: f32,
+    travel_time_s: f32,
+    attenuation_time_s: f32,
+    source_angle_degrees: f32,
+    receiver_angle_degrees: f32,
+    top_bounces: u32,
+    bottom_bounces: u32,
+}
+
+impl ArrivalsResponse {
+    fn from_result(result: SimulationResult, warnings: &[Diagnostic]) -> Self {
+        Self {
+            schema_version: 1,
+            title: result.title,
+            frequency_hz: result.frequency_hz,
+            warnings: warnings.iter().map(DiagnosticResponse::from).collect(),
+            sources: result
+                .arrival_sources
+                .into_iter()
+                .map(|source| ArrivalSourceResponse {
+                    source_depth_m: source.source_depth_m,
+                    receivers: source
+                        .receivers
+                        .into_iter()
+                        .map(|receiver| ArrivalReceiverResponse {
+                            range_m: receiver.range_m,
+                            depth_m: receiver.depth_m,
+                            arrivals: receiver
+                                .arrivals
+                                .into_iter()
+                                .map(|arrival| ArrivalResponse {
+                                    amplitude: arrival.amplitude,
+                                    phase_radians: arrival.phase_radians,
+                                    travel_time_s: arrival.travel_time_s,
+                                    attenuation_time_s: arrival.attenuation_time_s,
+                                    source_angle_degrees: arrival.source_angle_degrees,
+                                    receiver_angle_degrees: arrival.receiver_angle_degrees,
+                                    top_bounces: arrival.top_bounces,
+                                    bottom_bounces: arrival.bottom_bounces,
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}
 
 #[derive(Serialize, ToSchema)]
 struct ErrorResponse {
@@ -400,6 +479,92 @@ async fn run_case(
     Ok(response)
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/arrivals",
+    tag = "simulation",
+    request_body(content = CaseDocument, content_type = "application/json"),
+    security((), ("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "Versioned JSON arrival result", body = ArrivalsResponse, content_type = "application/json"),
+        (status = 400, description = "Malformed JSON", body = ErrorResponse),
+        (status = 401, description = "Bearer authentication failed", body = ErrorResponse),
+        (status = 413, description = "Request body exceeds the configured limit", body = ErrorResponse),
+        (status = 415, description = "Request is not JSON", body = ErrorResponse),
+        (status = 422, description = "Case is invalid, unsupported, or not an arrival run", body = ErrorResponse),
+        (status = 429, description = "Simulation resource limit exceeded", body = ErrorResponse),
+        (status = 500, description = "Internal execution error", body = ErrorResponse),
+        (status = 504, description = "Request timed out", body = ErrorResponse)
+    )
+)]
+async fn arrivals_case(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+) -> Result<Json<ArrivalsResponse>, ApiError> {
+    let body = extract_json_body(&headers, body)?;
+    let outcome = parse_document(&body)?;
+    if outcome.value.environment.run.kind != RunKind::Arrivals {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unsupported_run_kind",
+            "the /v1/arrivals endpoint requires run.kind to be arrivals",
+        ));
+    }
+
+    let limits = state.simulation_limits;
+    let warnings = outcome.warnings;
+    let worker_permit = state
+        .worker_slots
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "simulation worker semaphore closed");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "worker_pool_failed",
+                "simulation worker pool failed",
+            )
+        })?;
+    let task = tokio::task::spawn_blocking(move || {
+        let _worker_permit = worker_permit;
+        run_simulation(&outcome.value, limits)
+            .map(|result| ArrivalsResponse::from_result(result, &warnings))
+    });
+    match task.await {
+        Ok(Ok(response)) => Ok(Json(response)),
+        Ok(Err(report)) => {
+            let limit_exceeded = report
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == "BH0303");
+            let (status, code, message) = if limit_exceeded {
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "resource_limit_exceeded",
+                    "simulation exceeded a server resource limit",
+                )
+            } else {
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "simulation_failed",
+                    "the case could not be simulated",
+                )
+            };
+            Err(ApiError::from_report(status, code, message, &report))
+        }
+        Err(error) => {
+            tracing::error!(%error, "blocking simulation task failed");
+            Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "execution_failed",
+                "simulation worker failed",
+            ))
+        }
+    }
+}
+
 fn extract_json_body(
     headers: &HeaderMap,
     body: Result<Bytes, BytesRejection>,
@@ -555,10 +720,12 @@ mod tests {
             serde_json::from_slice(&to_bytes(openapi.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert!(openapi["paths"]["/v1/run"].is_object());
+        assert!(openapi["paths"]["/v1/arrivals"].is_object());
         assert_eq!(
             openapi["components"]["schemas"]["Hdf5Response"]["format"],
             "binary"
         );
+        assert!(openapi["components"]["schemas"]["ArrivalsResponse"].is_object());
 
         let valid = service
             .clone()
@@ -605,6 +772,70 @@ mod tests {
         );
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(&body[..8], b"\x89HDF\r\n\x1a\n");
+    }
+
+    #[tokio::test]
+    async fn arrivals_returns_versioned_json_and_rejects_other_run_kinds() {
+        let mut arrivals_case: Value = serde_json::from_str(CASE).unwrap();
+        arrivals_case["run"]["kind"] = serde_json::json!("arrivals");
+        let response = app(ServerConfig::default())
+            .oneshot(json_request(
+                "/v1/arrivals",
+                serde_json::to_vec(&arrivals_case).unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["schema_version"], 1);
+        assert_eq!(body["frequency_hz"], 1000.0);
+        assert!(body["warnings"].is_array());
+        assert_eq!(body["sources"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            body["sources"][0]["receivers"].as_array().unwrap().len(),
+            33
+        );
+        assert!(
+            body["sources"][0]["receivers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|receiver| !receiver["arrivals"].as_array().unwrap().is_empty())
+        );
+
+        let rejected = app(ServerConfig::default())
+            .oneshot(json_request("/v1/arrivals", CASE))
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(rejected.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["error"]["code"], "unsupported_run_kind");
+
+        let limits = bellhop::solver::SimulationLimits {
+            max_arrivals_per_receiver: 1,
+            max_total_arrivals: 1,
+            ..bellhop::solver::SimulationLimits::default()
+        };
+        let limited = app(ServerConfig {
+            simulation_limits: limits,
+            ..ServerConfig::default()
+        })
+        .oneshot(json_request(
+            "/v1/arrivals",
+            serde_json::to_vec(&arrivals_case).unwrap(),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(limited.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["error"]["code"], "resource_limit_exceeded");
     }
 
     #[tokio::test]

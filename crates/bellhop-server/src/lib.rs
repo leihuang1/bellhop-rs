@@ -19,8 +19,12 @@ use axum::{Json, Router};
 use bellhop::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome, Severity};
 use bellhop::json::{CaseDocument, DocumentErrorKind};
 use bellhop::model::{Case, RunKind};
-use bellhop::solver::{SimulationLimits, SimulationResult, run as run_simulation};
+use bellhop::solver::{
+    Arrival, ReceiverArrivals, SimulationLimits, SimulationResult, SourceArrivals,
+    run as run_simulation,
+};
 use serde::Serialize;
+use serde::ser::{SerializeSeq, SerializeStruct, Serializer};
 use tokio::sync::Semaphore;
 use tower::limit::ConcurrencyLimitLayer;
 use tower::timeout::TimeoutLayer;
@@ -224,7 +228,8 @@ impl From<&Diagnostic> for DiagnosticResponse {
 #[allow(dead_code)]
 struct Hdf5Response(Vec<u8>);
 
-#[derive(Serialize, ToSchema)]
+#[derive(ToSchema)]
+#[allow(dead_code)]
 struct ArrivalsResponse {
     schema_version: u32,
     title: String,
@@ -233,20 +238,23 @@ struct ArrivalsResponse {
     sources: Vec<ArrivalSourceResponse>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(ToSchema)]
+#[allow(dead_code)]
 struct ArrivalSourceResponse {
     source_depth_m: f32,
     receivers: Vec<ArrivalReceiverResponse>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(ToSchema)]
+#[allow(dead_code)]
 struct ArrivalReceiverResponse {
     range_m: f64,
     depth_m: f32,
     arrivals: Vec<ArrivalResponse>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(ToSchema)]
+#[allow(dead_code)]
 struct ArrivalResponse {
     amplitude: f32,
     phase_radians: f32,
@@ -258,93 +266,146 @@ struct ArrivalResponse {
     bottom_bounces: u32,
 }
 
+#[derive(Serialize)]
+struct BorrowedArrivalsResponse<'a> {
+    schema_version: u32,
+    title: &'a str,
+    frequency_hz: f64,
+    warnings: Vec<DiagnosticResponse>,
+    sources: BorrowedArrivalSources<'a>,
+}
+
+struct BorrowedArrivalSources<'a>(&'a [SourceArrivals]);
+struct BorrowedArrivalSource<'a>(&'a SourceArrivals);
+struct BorrowedArrivalReceivers<'a>(&'a [ReceiverArrivals]);
+struct BorrowedArrivalReceiver<'a>(&'a ReceiverArrivals);
+struct BorrowedArrivals<'a>(&'a [Arrival]);
+struct BorrowedArrival<'a>(&'a Arrival);
+
+impl Serialize for BorrowedArrivalSources<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for source in self.0 {
+            sequence.serialize_element(&BorrowedArrivalSource(source))?;
+        }
+        sequence.end()
+    }
+}
+
+impl Serialize for BorrowedArrivalSource<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("ArrivalSourceResponse", 2)?;
+        state.serialize_field("source_depth_m", &self.0.source_depth_m)?;
+        state.serialize_field("receivers", &BorrowedArrivalReceivers(&self.0.receivers))?;
+        state.end()
+    }
+}
+
+impl Serialize for BorrowedArrivalReceivers<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for receiver in self.0 {
+            sequence.serialize_element(&BorrowedArrivalReceiver(receiver))?;
+        }
+        sequence.end()
+    }
+}
+
+impl Serialize for BorrowedArrivalReceiver<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("ArrivalReceiverResponse", 3)?;
+        state.serialize_field("range_m", &self.0.range_m)?;
+        state.serialize_field("depth_m", &self.0.depth_m)?;
+        state.serialize_field("arrivals", &BorrowedArrivals(&self.0.arrivals))?;
+        state.end()
+    }
+}
+
+impl Serialize for BorrowedArrivals<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for arrival in self.0 {
+            sequence.serialize_element(&BorrowedArrival(arrival))?;
+        }
+        sequence.end()
+    }
+}
+
+impl Serialize for BorrowedArrival<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("ArrivalResponse", 8)?;
+        state.serialize_field("amplitude", &self.0.amplitude)?;
+        state.serialize_field("phase_radians", &self.0.phase_radians)?;
+        state.serialize_field("travel_time_s", &self.0.travel_time_s)?;
+        state.serialize_field("attenuation_time_s", &self.0.attenuation_time_s)?;
+        state.serialize_field("source_angle_degrees", &self.0.source_angle_degrees)?;
+        state.serialize_field("receiver_angle_degrees", &self.0.receiver_angle_degrees)?;
+        state.serialize_field("top_bounces", &self.0.top_bounces)?;
+        state.serialize_field("bottom_bounces", &self.0.bottom_bounces)?;
+        state.end()
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct NonFiniteOutput {
     field: &'static str,
 }
 
-impl ArrivalsResponse {
-    fn from_result(
-        result: SimulationResult,
-        warnings: &[Diagnostic],
-    ) -> Result<Self, NonFiniteOutput> {
-        let frequency_hz = finite_f64(result.frequency_hz, "frequency_hz")?;
-        let sources = result
-            .arrival_sources
-            .into_iter()
-            .map(|source| {
-                let source_depth_m = finite_f32(source.source_depth_m, "sources.source_depth_m")?;
-                let receivers = source
-                    .receivers
-                    .into_iter()
-                    .map(|receiver| {
-                        let range_m = finite_f64(receiver.range_m, "receivers.range_m")?;
-                        let depth_m = finite_f32(receiver.depth_m, "receivers.depth_m")?;
-                        let arrivals = receiver
-                            .arrivals
-                            .into_iter()
-                            .map(|arrival| {
-                                Ok(ArrivalResponse {
-                                    amplitude: finite_f32(arrival.amplitude, "arrivals.amplitude")?,
-                                    phase_radians: finite_f32(
-                                        arrival.phase_radians,
-                                        "arrivals.phase_radians",
-                                    )?,
-                                    travel_time_s: finite_f32(
-                                        arrival.travel_time_s,
-                                        "arrivals.travel_time_s",
-                                    )?,
-                                    attenuation_time_s: finite_f32(
-                                        arrival.attenuation_time_s,
-                                        "arrivals.attenuation_time_s",
-                                    )?,
-                                    source_angle_degrees: finite_f32(
-                                        arrival.source_angle_degrees,
-                                        "arrivals.source_angle_degrees",
-                                    )?,
-                                    receiver_angle_degrees: finite_f32(
-                                        arrival.receiver_angle_degrees,
-                                        "arrivals.receiver_angle_degrees",
-                                    )?,
-                                    top_bounces: arrival.top_bounces,
-                                    bottom_bounces: arrival.bottom_bounces,
-                                })
-                            })
-                            .collect::<Result<Vec<_>, NonFiniteOutput>>()?;
-                        Ok(ArrivalReceiverResponse {
-                            range_m,
-                            depth_m,
-                            arrivals,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, NonFiniteOutput>>()?;
-                Ok(ArrivalSourceResponse {
-                    source_depth_m,
-                    receivers,
-                })
-            })
-            .collect::<Result<Vec<_>, NonFiniteOutput>>()?;
-        Ok(Self {
-            schema_version: 1,
-            title: result.title,
-            frequency_hz,
-            warnings: warnings.iter().map(DiagnosticResponse::from).collect(),
-            sources,
-        })
+fn validate_arrival_result(result: &SimulationResult) -> Result<(), NonFiniteOutput> {
+    finite_f64(result.frequency_hz, "frequency_hz")?;
+    for source in &result.arrival_sources {
+        finite_f32(source.source_depth_m, "sources.source_depth_m")?;
+        for receiver in &source.receivers {
+            finite_f64(receiver.range_m, "receivers.range_m")?;
+            finite_f32(receiver.depth_m, "receivers.depth_m")?;
+            for arrival in &receiver.arrivals {
+                finite_f32(arrival.amplitude, "arrivals.amplitude")?;
+                finite_f32(arrival.phase_radians, "arrivals.phase_radians")?;
+                finite_f32(arrival.travel_time_s, "arrivals.travel_time_s")?;
+                finite_f32(arrival.attenuation_time_s, "arrivals.attenuation_time_s")?;
+                finite_f32(
+                    arrival.source_angle_degrees,
+                    "arrivals.source_angle_degrees",
+                )?;
+                finite_f32(
+                    arrival.receiver_angle_degrees,
+                    "arrivals.receiver_angle_degrees",
+                )?;
+            }
+        }
     }
+    Ok(())
 }
 
-fn finite_f32(value: f32, field: &'static str) -> Result<f32, NonFiniteOutput> {
+fn finite_f32(value: f32, field: &'static str) -> Result<(), NonFiniteOutput> {
     value
         .is_finite()
-        .then_some(value)
+        .then_some(())
         .ok_or(NonFiniteOutput { field })
 }
 
-fn finite_f64(value: f64, field: &'static str) -> Result<f64, NonFiniteOutput> {
+fn finite_f64(value: f64, field: &'static str) -> Result<(), NonFiniteOutput> {
     value
         .is_finite()
-        .then_some(value)
+        .then_some(())
         .ok_or(NonFiniteOutput { field })
 }
 
@@ -388,11 +449,20 @@ enum ArrivalWorkerError {
 }
 
 fn serialize_arrivals(
-    response: &ArrivalsResponse,
+    result: &SimulationResult,
+    warnings: &[Diagnostic],
     max_bytes: usize,
 ) -> Result<Vec<u8>, ArrivalWorkerError> {
+    validate_arrival_result(result).map_err(ArrivalWorkerError::NonFinite)?;
+    let response = BorrowedArrivalsResponse {
+        schema_version: 1,
+        title: &result.title,
+        frequency_hz: result.frequency_hz,
+        warnings: warnings.iter().map(DiagnosticResponse::from).collect(),
+        sources: BorrowedArrivalSources(&result.arrival_sources),
+    };
     let mut output = LimitedJsonBuffer::new(max_bytes);
-    if let Err(error) = serde_json::to_writer(&mut output, response) {
+    if let Err(error) = serde_json::to_writer(&mut output, &response) {
         return if output.limit_exceeded {
             Err(ArrivalWorkerError::ResponseTooLarge)
         } else {
@@ -646,9 +716,7 @@ async fn arrivals_case(
         let _worker_permit = worker_permit;
         let result =
             run_simulation(&outcome.value, limits).map_err(ArrivalWorkerError::Simulation)?;
-        let response = ArrivalsResponse::from_result(result, &warnings)
-            .map_err(ArrivalWorkerError::NonFinite)?;
-        serialize_arrivals(&response, max_json_response_bytes)
+        serialize_arrivals(&result, &warnings, max_json_response_bytes)
     });
     let bytes = match task.await {
         Ok(Ok(bytes)) => bytes,
@@ -1036,9 +1104,9 @@ mod tests {
             field_sources: Vec::new(),
         };
 
-        let result = super::ArrivalsResponse::from_result(result, &[]);
+        let validation = super::validate_arrival_result(&result);
         assert!(matches!(
-            result,
+            validation,
             Err(super::NonFiniteOutput {
                 field: "arrivals.amplitude"
             })

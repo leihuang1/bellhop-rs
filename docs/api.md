@@ -121,8 +121,9 @@ A case with any other run kind returns `422` with error code
 `unsupported_run_kind`.
 
 Simulation, finite-value validation, and JSON serialization all run while the
-request holds a bounded worker slot. Serialization writes into a size-limited
-buffer rather than first allocating an unbounded response. Exceeding
+request holds a bounded worker slot. A borrowing serialization view writes the
+solver result directly into a size-limited buffer; it does not materialize a
+second source/receiver/arrival object graph. Exceeding
 `BELLHOP_MAX_JSON_RESPONSE_BYTES` returns `429`; a non-finite solver value
 returns a structured `500` instead of emitting schema-invalid JSON `null`.
 

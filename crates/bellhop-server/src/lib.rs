@@ -2,6 +2,7 @@
 
 //! Synchronous HTTP facade for modern, self-contained BELLHOP cases.
 
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,12 +31,14 @@ use utoipa::{Modify, OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
 pub const HDF5_MEDIA_TYPE: &str = "application/x-hdf5";
+const JSON_MEDIA_TYPE: &str = "application/json";
 
 #[derive(Clone, Debug)]
 pub struct ServerConfig {
     pub workers: usize,
     pub request_timeout: Duration,
     pub max_body_bytes: usize,
+    pub max_json_response_bytes: usize,
     pub simulation_limits: SimulationLimits,
     pub auth_token: Option<String>,
 }
@@ -46,6 +49,7 @@ impl Default for ServerConfig {
             workers: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
             request_timeout: Duration::from_secs(120),
             max_body_bytes: 16 * 1024 * 1024,
+            max_json_response_bytes: 64 * 1024 * 1024,
             simulation_limits: SimulationLimits::default(),
             auth_token: None,
         }
@@ -55,6 +59,7 @@ impl Default for ServerConfig {
 #[derive(Clone)]
 struct AppState {
     simulation_limits: SimulationLimits,
+    max_json_response_bytes: usize,
     auth_token: Option<Arc<str>>,
     worker_slots: Arc<Semaphore>,
 }
@@ -63,14 +68,19 @@ struct AppState {
 ///
 /// # Panics
 ///
-/// Panics when `workers` or `max_body_bytes` is zero. The executable validates
-/// these values before constructing the service.
+/// Panics when `workers`, `max_body_bytes`, or `max_json_response_bytes` is
+/// zero. The executable validates these values before constructing the service.
 pub fn app(config: ServerConfig) -> Router {
     assert!(config.workers > 0, "workers must be positive");
     assert!(config.max_body_bytes > 0, "max_body_bytes must be positive");
+    assert!(
+        config.max_json_response_bytes > 0,
+        "max_json_response_bytes must be positive"
+    );
 
     let state = AppState {
         simulation_limits: config.simulation_limits,
+        max_json_response_bytes: config.max_json_response_bytes,
         auth_token: config.auth_token.map(Arc::from),
         worker_slots: Arc::new(Semaphore::new(config.workers)),
     };
@@ -248,44 +258,148 @@ struct ArrivalResponse {
     bottom_bounces: u32,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct NonFiniteOutput {
+    field: &'static str,
+}
+
 impl ArrivalsResponse {
-    fn from_result(result: SimulationResult, warnings: &[Diagnostic]) -> Self {
-        Self {
-            schema_version: 1,
-            title: result.title,
-            frequency_hz: result.frequency_hz,
-            warnings: warnings.iter().map(DiagnosticResponse::from).collect(),
-            sources: result
-                .arrival_sources
-                .into_iter()
-                .map(|source| ArrivalSourceResponse {
-                    source_depth_m: source.source_depth_m,
-                    receivers: source
-                        .receivers
-                        .into_iter()
-                        .map(|receiver| ArrivalReceiverResponse {
-                            range_m: receiver.range_m,
-                            depth_m: receiver.depth_m,
-                            arrivals: receiver
-                                .arrivals
-                                .into_iter()
-                                .map(|arrival| ArrivalResponse {
-                                    amplitude: arrival.amplitude,
-                                    phase_radians: arrival.phase_radians,
-                                    travel_time_s: arrival.travel_time_s,
-                                    attenuation_time_s: arrival.attenuation_time_s,
-                                    source_angle_degrees: arrival.source_angle_degrees,
-                                    receiver_angle_degrees: arrival.receiver_angle_degrees,
+    fn from_result(
+        result: SimulationResult,
+        warnings: &[Diagnostic],
+    ) -> Result<Self, NonFiniteOutput> {
+        let frequency_hz = finite_f64(result.frequency_hz, "frequency_hz")?;
+        let sources = result
+            .arrival_sources
+            .into_iter()
+            .map(|source| {
+                let source_depth_m = finite_f32(source.source_depth_m, "sources.source_depth_m")?;
+                let receivers = source
+                    .receivers
+                    .into_iter()
+                    .map(|receiver| {
+                        let range_m = finite_f64(receiver.range_m, "receivers.range_m")?;
+                        let depth_m = finite_f32(receiver.depth_m, "receivers.depth_m")?;
+                        let arrivals = receiver
+                            .arrivals
+                            .into_iter()
+                            .map(|arrival| {
+                                Ok(ArrivalResponse {
+                                    amplitude: finite_f32(arrival.amplitude, "arrivals.amplitude")?,
+                                    phase_radians: finite_f32(
+                                        arrival.phase_radians,
+                                        "arrivals.phase_radians",
+                                    )?,
+                                    travel_time_s: finite_f32(
+                                        arrival.travel_time_s,
+                                        "arrivals.travel_time_s",
+                                    )?,
+                                    attenuation_time_s: finite_f32(
+                                        arrival.attenuation_time_s,
+                                        "arrivals.attenuation_time_s",
+                                    )?,
+                                    source_angle_degrees: finite_f32(
+                                        arrival.source_angle_degrees,
+                                        "arrivals.source_angle_degrees",
+                                    )?,
+                                    receiver_angle_degrees: finite_f32(
+                                        arrival.receiver_angle_degrees,
+                                        "arrivals.receiver_angle_degrees",
+                                    )?,
                                     top_bounces: arrival.top_bounces,
                                     bottom_bounces: arrival.bottom_bounces,
                                 })
-                                .collect(),
+                            })
+                            .collect::<Result<Vec<_>, NonFiniteOutput>>()?;
+                        Ok(ArrivalReceiverResponse {
+                            range_m,
+                            depth_m,
+                            arrivals,
                         })
-                        .collect(),
+                    })
+                    .collect::<Result<Vec<_>, NonFiniteOutput>>()?;
+                Ok(ArrivalSourceResponse {
+                    source_depth_m,
+                    receivers,
                 })
-                .collect(),
+            })
+            .collect::<Result<Vec<_>, NonFiniteOutput>>()?;
+        Ok(Self {
+            schema_version: 1,
+            title: result.title,
+            frequency_hz,
+            warnings: warnings.iter().map(DiagnosticResponse::from).collect(),
+            sources,
+        })
+    }
+}
+
+fn finite_f32(value: f32, field: &'static str) -> Result<f32, NonFiniteOutput> {
+    value
+        .is_finite()
+        .then_some(value)
+        .ok_or(NonFiniteOutput { field })
+}
+
+fn finite_f64(value: f64, field: &'static str) -> Result<f64, NonFiniteOutput> {
+    value
+        .is_finite()
+        .then_some(value)
+        .ok_or(NonFiniteOutput { field })
+}
+
+struct LimitedJsonBuffer {
+    bytes: Vec<u8>,
+    limit: usize,
+    limit_exceeded: bool,
+}
+
+impl LimitedJsonBuffer {
+    fn new(limit: usize) -> Self {
+        Self {
+            bytes: Vec::with_capacity(limit.min(64 * 1024)),
+            limit,
+            limit_exceeded: false,
         }
     }
+}
+
+impl Write for LimitedJsonBuffer {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        if buffer.len() > self.limit.saturating_sub(self.bytes.len()) {
+            self.limit_exceeded = true;
+            return Err(io::Error::other("JSON response byte limit exceeded"));
+        }
+        self.bytes.extend_from_slice(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+enum ArrivalWorkerError {
+    Simulation(DiagnosticReport),
+    NonFinite(NonFiniteOutput),
+    ResponseTooLarge,
+    Serialization(String),
+}
+
+fn serialize_arrivals(
+    response: &ArrivalsResponse,
+    max_bytes: usize,
+) -> Result<Vec<u8>, ArrivalWorkerError> {
+    let mut output = LimitedJsonBuffer::new(max_bytes);
+    if let Err(error) = serde_json::to_writer(&mut output, response) {
+        return if output.limit_exceeded {
+            Err(ArrivalWorkerError::ResponseTooLarge)
+        } else {
+            Err(ArrivalWorkerError::Serialization(error.to_string()))
+        };
+    }
+    Ok(output.bytes)
 }
 
 #[derive(Serialize, ToSchema)]
@@ -492,8 +606,8 @@ async fn run_case(
         (status = 413, description = "Request body exceeds the configured limit", body = ErrorResponse),
         (status = 415, description = "Request is not JSON", body = ErrorResponse),
         (status = 422, description = "Case is invalid, unsupported, or not an arrival run", body = ErrorResponse),
-        (status = 429, description = "Simulation resource limit exceeded", body = ErrorResponse),
-        (status = 500, description = "Internal execution error", body = ErrorResponse),
+        (status = 429, description = "Simulation or JSON response resource limit exceeded", body = ErrorResponse),
+        (status = 500, description = "Internal execution or JSON output error", body = ErrorResponse),
         (status = 504, description = "Request timed out", body = ErrorResponse)
     )
 )]
@@ -501,7 +615,7 @@ async fn arrivals_case(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
-) -> Result<Json<ArrivalsResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     let body = extract_json_body(&headers, body)?;
     let outcome = parse_document(&body)?;
     if outcome.value.environment.run.kind != RunKind::Arrivals {
@@ -513,6 +627,7 @@ async fn arrivals_case(
     }
 
     let limits = state.simulation_limits;
+    let max_json_response_bytes = state.max_json_response_bytes;
     let warnings = outcome.warnings;
     let worker_permit = state
         .worker_slots
@@ -529,12 +644,15 @@ async fn arrivals_case(
         })?;
     let task = tokio::task::spawn_blocking(move || {
         let _worker_permit = worker_permit;
-        run_simulation(&outcome.value, limits)
-            .map(|result| ArrivalsResponse::from_result(result, &warnings))
+        let result =
+            run_simulation(&outcome.value, limits).map_err(ArrivalWorkerError::Simulation)?;
+        let response = ArrivalsResponse::from_result(result, &warnings)
+            .map_err(ArrivalWorkerError::NonFinite)?;
+        serialize_arrivals(&response, max_json_response_bytes)
     });
-    match task.await {
-        Ok(Ok(response)) => Ok(Json(response)),
-        Ok(Err(report)) => {
+    let bytes = match task.await {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(ArrivalWorkerError::Simulation(report))) => {
             let limit_exceeded = report
                 .diagnostics()
                 .iter()
@@ -552,17 +670,49 @@ async fn arrivals_case(
                     "the case could not be simulated",
                 )
             };
-            Err(ApiError::from_report(status, code, message, &report))
+            return Err(ApiError::from_report(status, code, message, &report));
+        }
+        Ok(Err(ArrivalWorkerError::NonFinite(error))) => {
+            tracing::error!(
+                field = error.field,
+                "simulation produced non-finite JSON output"
+            );
+            return Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "output_failed",
+                "simulation produced a non-finite arrival value",
+            ));
+        }
+        Ok(Err(ArrivalWorkerError::ResponseTooLarge)) => {
+            return Err(ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "resource_limit_exceeded",
+                "JSON response exceeded the configured byte limit",
+            ));
+        }
+        Ok(Err(ArrivalWorkerError::Serialization(message))) => {
+            tracing::error!(%message, "failed to serialize JSON arrival response");
+            return Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "output_failed",
+                "unable to serialize the JSON arrival result",
+            ));
         }
         Err(error) => {
             tracing::error!(%error, "blocking simulation task failed");
-            Err(ApiError::new(
+            return Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "execution_failed",
                 "simulation worker failed",
-            ))
+            ));
         }
-    }
+    };
+
+    let mut response = bytes.into_response();
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static(JSON_MEDIA_TYPE));
+    Ok(response)
 }
 
 fn extract_json_body(
@@ -684,6 +834,7 @@ mod tests {
 
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode, header};
+    use bellhop::solver::{Arrival, ReceiverArrivals, SimulationResult, SourceArrivals};
     use serde_json::Value;
     use tower::ServiceExt;
 
@@ -816,6 +967,25 @@ mod tests {
                 .unwrap();
         assert_eq!(body["error"]["code"], "unsupported_run_kind");
 
+        let output_limited = app(ServerConfig {
+            max_json_response_bytes: 8,
+            ..ServerConfig::default()
+        })
+        .oneshot(json_request(
+            "/v1/arrivals",
+            serde_json::to_vec(&arrivals_case).unwrap(),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(output_limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        let body: Value = serde_json::from_slice(
+            &to_bytes(output_limited.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["error"]["code"], "resource_limit_exceeded");
+
         let limits = bellhop::solver::SimulationLimits {
             max_arrivals_per_receiver: 1,
             max_total_arrivals: 1,
@@ -836,6 +1006,43 @@ mod tests {
             serde_json::from_slice(&to_bytes(limited.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
         assert_eq!(body["error"]["code"], "resource_limit_exceeded");
+    }
+
+    #[test]
+    fn non_finite_arrivals_must_not_serialize_as_null() {
+        let result = SimulationResult {
+            title: "non-finite arrival".to_owned(),
+            frequency_hz: 1_000.0,
+            legacy_run_options: String::new(),
+            sources: Vec::new(),
+            arrival_sources: vec![SourceArrivals {
+                source_depth_m: 10.0,
+                receivers: vec![ReceiverArrivals {
+                    range_m: 1.0,
+                    depth_m: 10.0,
+                    arrivals: vec![Arrival {
+                        amplitude: f32::INFINITY,
+                        phase_radians: 0.0,
+                        travel_time_s: 0.1,
+                        attenuation_time_s: 0.0,
+                        source_angle_degrees: 0.0,
+                        receiver_angle_degrees: 0.0,
+                        top_bounces: 0,
+                        bottom_bounces: 0,
+                    }],
+                }],
+            }],
+            eigenray_sources: Vec::new(),
+            field_sources: Vec::new(),
+        };
+
+        let result = super::ArrivalsResponse::from_result(result, &[]);
+        assert!(matches!(
+            result,
+            Err(super::NonFiniteOutput {
+                field: "arrivals.amplitude"
+            })
+        ));
     }
 
     #[tokio::test]

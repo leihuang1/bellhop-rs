@@ -28,11 +28,12 @@ curl -H 'Content-Type: application/json' \
   --output result.h5
 ```
 
-The multi-client service accepts modern JSON only and returns HDF5 directly.
-It includes bounded blocking execution, timeouts, server-controlled simulation
-limits, optional Bearer authentication, tracing, health checks, generated
-OpenAPI at `/openapi.json`, and Swagger UI at `/docs`. See the
-[HTTP service guide](docs/api.md).
+The multi-client service accepts modern JSON only. `/v1/run` returns the full
+HDF5 result, while `/v1/arrivals` returns a focused versioned JSON arrival
+result for cases whose `run.kind` is `arrivals`. It includes bounded blocking
+execution, timeouts, server-controlled simulation limits, optional Bearer
+authentication, tracing, health checks, generated OpenAPI at `/openapi.json`,
+and Swagger UI at `/docs`. See the [HTTP service guide](docs/api.md).
 
 The reference-unsupported ray-centered geometric-Gaussian path remains
 unavailable. BELLHOP v2023.5's `W` boundary option is rejected because the

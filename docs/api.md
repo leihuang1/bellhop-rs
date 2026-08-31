@@ -1,9 +1,9 @@
 # HTTP service
 
 `bellhop-server` is a stateless, synchronous HTTP facade. Each simulation
-request supplies one [self-contained JSON case](json-input.md), waits for the
-solver, and receives the completed HDF5 file directly. The service does not
-retain cases or results.
+request supplies one [self-contained JSON case](json-input.md) and waits for the
+solver. A caller can receive either the complete versioned HDF5 result or a
+focused JSON arrival result. The service does not retain cases or results.
 
 ## Start the service
 
@@ -58,6 +58,75 @@ curl --fail-with-body \
 When authentication is configured, add
 `-H "Authorization: Bearer $BELLHOP_AUTH_TOKEN"`.
 
+### `POST /v1/arrivals`
+
+Accepts the same JSON document but requires `run.kind` to be `arrivals`.
+Success returns `application/json` without creating or parsing an intermediate
+HDF5 file:
+
+```json
+{
+  "schema_version": 1,
+  "title": "BELLHOP field influence golden",
+  "frequency_hz": 1000.0,
+  "warnings": [],
+  "sources": [
+    {
+      "source_depth_m": 50.0,
+      "receivers": [
+        {
+          "range_m": 1000.0,
+          "depth_m": 50.0,
+          "arrivals": [
+            {
+              "amplitude": 0.001,
+              "phase_radians": 0.0,
+              "travel_time_s": 0.6666667,
+              "attenuation_time_s": 0.0,
+              "source_angle_degrees": 0.0,
+              "receiver_angle_degrees": 0.0,
+              "top_bounces": 0,
+              "bottom_bounces": 0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+The source and receiver nesting preserves the input position axes and supports
+both rectilinear and irregular receiver grids. Empty receiver arrival arrays
+are retained. Floating-point values use the solver's native precision.
+
+- depths and ranges are metres, with depth positive downward;
+- `amplitude` is relative pressure amplitude;
+- `phase_radians` is the accumulated reflection/caustic phase;
+- travel and attenuation times are seconds;
+- source and receiver angles are degrees, positive downward;
+- bounce counts correspond to the top and bottom boundaries.
+
+Example using the included field case with its run kind changed to arrivals:
+
+```console
+jq '.run.kind = "arrivals"' examples/field-g.json |
+  curl --fail-with-body \
+    -H 'Content-Type: application/json' \
+    --data-binary @- \
+    http://localhost:8080/v1/arrivals
+```
+
+A case with any other run kind returns `422` with error code
+`unsupported_run_kind`.
+
+Simulation, finite-value validation, and JSON serialization all run while the
+request holds a bounded worker slot. A borrowing serialization view writes the
+solver result directly into a size-limited buffer; it does not materialize a
+second source/receiver/arrival object graph. Exceeding
+`BELLHOP_MAX_JSON_RESPONSE_BYTES` returns `429`; a non-finite solver value
+returns a structured `500` instead of emitting schema-invalid JSON `null`.
+
 ## Errors
 
 Errors use `application/json`:
@@ -87,8 +156,8 @@ Errors use `application/json`:
 | `413` | request exceeds `BELLHOP_MAX_BODY_BYTES` |
 | `415` | `Content-Type` is not JSON |
 | `422` | semantic validation, unsupported run option, or simulation failure |
-| `429` | a server-controlled simulation resource limit was exceeded |
-| `500` | worker or HDF5 output failure |
+| `429` | a server-controlled simulation or response-size limit was exceeded |
+| `500` | worker, HDF5, JSON serialization, or non-finite output failure |
 | `504` | queueing plus execution exceeded the request timeout |
 
 ## Configuration
@@ -102,10 +171,13 @@ Run `bellhop-server --help` for flag names.
 | `BELLHOP_WORKERS` | logical CPU count | maximum admitted blocking requests |
 | `BELLHOP_REQUEST_TIMEOUT_SECONDS` | `120` | queue plus execution timeout |
 | `BELLHOP_MAX_BODY_BYTES` | `16777216` | request-body limit |
+| `BELLHOP_MAX_JSON_RESPONSE_BYTES` | `67108864` | JSON arrival response limit |
 | `BELLHOP_AUTH_TOKEN` | unset | optional static Bearer token |
 | `BELLHOP_MAX_RAYS` | `1000000` | total launch-ray limit |
 | `BELLHOP_MAX_STEPS_PER_RAY` | `100000` | per-ray integration limit |
 | `BELLHOP_MAX_TOTAL_POINTS` | `20000000` | ray/eigenray point limit |
+| `BELLHOP_MAX_ARRIVALS_PER_RECEIVER` | `20000000` | per-receiver arrival limit |
+| `BELLHOP_MAX_TOTAL_ARRIVALS` | `20000000` | total arrival limit per request |
 | `BELLHOP_MAX_FIELD_CELLS` | `20000000` | pressure-field cell limit |
 
 Logging uses `tracing` and the standard `RUST_LOG` filter; its fallback is

@@ -6,3 +6,4 @@
 *.arr
 *.shd
 .DS_Store
+vendor

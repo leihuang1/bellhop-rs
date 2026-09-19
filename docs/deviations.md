@@ -2,6 +2,21 @@
 
 Only intentional differences that affect numerical or discrete behavior belong here. Ordinary porting defects are fixed directly and covered by tests.
 
+## Double-precision source and receiver geometry
+
+bellhop-rs stores and interpolates source and receiver depths in `f64` instead
+of reproducing Acoustics Toolbox's single-precision position grids. This keeps
+all geometric coordinates at the solver's native precision, preserves modern
+JSON inputs, and avoids rejecting decimal coordinates that lie exactly on an
+`f64` water-column boundary.
+
+The pinned `sbcx_Arr_asc` comparison changes four of 50,000 receiver arrival
+counts by one at influence-window edges. Receivers with matching counts remain
+within `3.5e-7` amplitude, `2.0e-5` degrees, and `2.0e-6` seconds of the
+single-precision reference. Critical rays and the 501,501-sample Munk coherent
+field retain their previous tolerances. Arrival values and pressure remain
+single precision at their documented output rounding points.
+
 ## Precalculated `.irc` bottom reflection
 
 Acoustics Toolbox BELLHOP `v2023.5` reads a bottom `P` option and loads the

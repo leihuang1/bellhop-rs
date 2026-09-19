@@ -134,13 +134,13 @@ pub(crate) fn validate_environment(
         &location,
         diagnostics,
     );
-    require_finite_f32(
+    require_finite_f64(
         &positions.source_depths_m,
         "positions.source_depths_m",
         &location,
         diagnostics,
     );
-    require_finite_f32(
+    require_finite_f64(
         &positions.receiver_depths_m,
         "positions.receiver_depths_m",
         &location,
@@ -158,7 +158,7 @@ pub(crate) fn validate_environment(
     if positions
         .source_depths_m
         .iter()
-        .any(|depth| f64::from(*depth) < top || f64::from(*depth) > bottom)
+        .any(|depth| *depth < top || *depth > bottom)
     {
         diagnostics.push(Diagnostic::error(
             "BH0201",
@@ -170,7 +170,7 @@ pub(crate) fn validate_environment(
     if positions
         .receiver_depths_m
         .iter()
-        .any(|depth| f64::from(*depth) < top || f64::from(*depth) > bottom)
+        .any(|depth| *depth < top || *depth > bottom)
     {
         diagnostics.push(Diagnostic::error(
             "BH0201",
@@ -891,22 +891,6 @@ fn require_nonempty(
     }
 }
 
-fn require_finite_f32(
-    values: &[f32],
-    field: &'static str,
-    location: &impl Fn(&'static str) -> SourceLocation,
-    diagnostics: &mut DiagnosticReport,
-) {
-    if values.iter().any(|value| !value.is_finite()) {
-        diagnostics.push(Diagnostic::error(
-            "BH0201",
-            "all values must be finite",
-            field,
-            location(field),
-        ));
-    }
-}
-
 fn require_finite_f64(
     values: &[f64],
     field: &'static str,
@@ -939,6 +923,25 @@ mod tests {
     use super::Case;
 
     const CASE: &[u8] = include_bytes!("../../../examples/field-g.json");
+
+    #[test]
+    fn f64_depth_on_fractional_boundary_is_valid() {
+        for boundary in [0.1, 100.1] {
+            let loaded = crate::json::load_case_document(CASE).unwrap();
+            let mut definition = loaded.value.into_definition();
+            let mut top = definition.environment.sound_speed.points[0].clone();
+            let mut bottom = definition.environment.sound_speed.points[1].clone();
+            top.depth_m = 0.0;
+            bottom.depth_m = boundary;
+            definition.environment.sound_speed.top_depth_m = 0.0;
+            definition.environment.sound_speed.bottom_depth_m = boundary;
+            definition.environment.sound_speed.points = vec![top, bottom];
+            definition.environment.positions.source_depths_m = vec![boundary];
+            definition.environment.positions.receiver_depths_m = vec![boundary];
+
+            Case::from_definition(definition).unwrap();
+        }
+    }
 
     #[test]
     fn invalid_definition_cannot_become_a_case() {

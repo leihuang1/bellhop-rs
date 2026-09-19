@@ -55,8 +55,9 @@ A reflection-table condition therefore looks like:
 }
 ```
 
-Arrays that represent axes must be strictly increasing. A range-dependent
-sound-speed matrix is indexed as `[depth_index][range_index]`; its depth axis
+All geometric coordinates are retained at double precision. Arrays that
+represent axes must be strictly increasing. A range-dependent sound-speed
+matrix is indexed as `[depth_index][range_index]`; its depth axis
 must match the base profile. Receiver depths and ranges must have equal lengths
 for an `irregular` receiver grid. Beam families are omitted for ray runs and
 required for all other run kinds. Cerveny families require `trace.cerveny`.

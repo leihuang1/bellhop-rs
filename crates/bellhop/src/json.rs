@@ -243,8 +243,8 @@ pub struct ComplexValue {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PositionsDocument {
-    pub source_depths_m: Vec<f32>,
-    pub receiver_depths_m: Vec<f32>,
+    pub source_depths_m: Vec<f64>,
+    pub receiver_depths_m: Vec<f64>,
     pub receiver_ranges_m: Vec<f64>,
 }
 

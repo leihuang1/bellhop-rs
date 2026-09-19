@@ -1,6 +1,6 @@
 # HDF5 output schema
 
-Schema version 2 is written by both `bellhop run` and `POST /v1/run` through the
+Schema version 3 is written by both `bellhop run` and `POST /v1/run` through the
 shared `bellhop-hdf5` crate. The CLI installs a file only after a complete
 simulation succeeds, using `<output>.tmp` followed by an atomic rename. The HTTP
 service builds a temporary file and returns its bytes directly as
@@ -8,7 +8,7 @@ service builds a temporary file and returns its bytes directly as
 
 ## Root attributes
 
-- `schema_version` (`u32`, currently `2`)
+- `schema_version` (`u32`, currently `3`)
 - `implementation`
 - `compatibility_reference`
 - `input_filename`
@@ -27,7 +27,8 @@ not embedded. `legacy_run_options` is empty for modern JSON cases.
 
 Each `warnings` entry is the rendered structured input diagnostic, including
 source, severity, diagnostic code, message, and field. The attribute is present
-as an empty array when no warnings were emitted.
+as an empty array when no warnings were emitted. All source and receiver
+coordinate datasets use double precision.
 
 ## Ray data
 
@@ -85,6 +86,7 @@ components.
 
 ## Version history
 
+- **v3:** stores source and receiver coordinates in double precision.
 - **v2:** adds the root `warnings` string-array attribute and supports exact JSON
   request metadata from the HTTP service.
 - **v1:** initial flattened rays, eigenrays, arrivals, and pressure fields.

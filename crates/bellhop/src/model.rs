@@ -203,9 +203,8 @@ pub struct HalfSpace {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Positions {
-    /// BELLHOP stores source and receiver depths in single precision.
-    pub source_depths_m: Vec<f32>,
-    pub receiver_depths_m: Vec<f32>,
+    pub source_depths_m: Vec<f64>,
+    pub receiver_depths_m: Vec<f64>,
     pub receiver_ranges_m: Vec<f64>,
 }
 

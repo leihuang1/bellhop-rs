@@ -242,7 +242,7 @@ struct ArrivalsResponse {
 #[derive(ToSchema)]
 #[allow(dead_code)]
 struct ArrivalSourceResponse {
-    source_depth_m: f32,
+    source_depth_m: f64,
     receivers: Vec<ArrivalReceiverResponse>,
 }
 
@@ -250,7 +250,7 @@ struct ArrivalSourceResponse {
 #[allow(dead_code)]
 struct ArrivalReceiverResponse {
     range_m: f64,
-    depth_m: f32,
+    depth_m: f64,
     arrivals: Vec<ArrivalResponse>,
 }
 
@@ -373,10 +373,10 @@ struct NonFiniteOutput {
 fn validate_arrival_result(result: &SimulationResult) -> Result<(), NonFiniteOutput> {
     finite_f64(result.frequency_hz, "frequency_hz")?;
     for source in &result.arrival_sources {
-        finite_f32(source.source_depth_m, "sources.source_depth_m")?;
+        finite_f64(source.source_depth_m, "sources.source_depth_m")?;
         for receiver in &source.receivers {
             finite_f64(receiver.range_m, "receivers.range_m")?;
-            finite_f32(receiver.depth_m, "receivers.depth_m")?;
+            finite_f64(receiver.depth_m, "receivers.depth_m")?;
             for arrival in &receiver.arrivals {
                 finite_f32(arrival.amplitude, "arrivals.amplitude")?;
                 finite_f32(arrival.phase_radians, "arrivals.phase_radians")?;

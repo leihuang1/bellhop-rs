@@ -188,8 +188,8 @@ impl<'a> EnvironmentParser<'a> {
             &bottom_fields[0].location,
         )?;
 
-        let source_depths_m = self.read_f32_vector("positions.source_depths_m", 1.0)?;
-        let receiver_depths_m = self.read_f32_vector("positions.receiver_depths_m", 1.0)?;
+        let source_depths_m = self.read_f64_vector("positions.source_depths_m", 1.0)?;
+        let receiver_depths_m = self.read_f64_vector("positions.receiver_depths_m", 1.0)?;
         let receiver_ranges_m = self.read_f64_vector("positions.receiver_ranges_m", 1000.0)?;
 
         let run_atom = self.reader.read_string("run_options")?;
@@ -399,29 +399,6 @@ impl<'a> EnvironmentParser<'a> {
             "sound_speed.points",
             SourceLocation::file(&self.path),
         ))
-    }
-
-    fn read_f32_vector(&mut self, field: &'static str, scale: f32) -> Result<Vec<f32>, Diagnostic> {
-        let (count, location) = self.reader.read_i32(field)?;
-        let count = checked_count(count, field, &location)?;
-        let slots = self.reader.read_fields(field, count)?;
-        self.locations
-            .insert(field, first_atom_location(&slots, &self.path));
-        let mut values = expand_f32_vector(&slots, count, field, &self.path)?;
-        let was_sorted = values.windows(2).all(|pair| pair[0] <= pair[1]);
-        values.sort_by(f32::total_cmp);
-        if !was_sorted {
-            self.diagnostics.push(Diagnostic::warning(
-                "BH1002",
-                "legacy BELLHOP sorts this vector before use",
-                field,
-                location,
-            ));
-        }
-        for value in &mut values {
-            *value *= scale;
-        }
-        Ok(values)
     }
 
     fn read_f64_vector(&mut self, field: &'static str, scale: f64) -> Result<Vec<f64>, Diagnostic> {
@@ -976,28 +953,6 @@ fn checked_count(
     Ok(count)
 }
 
-fn expand_f32_vector(
-    slots: &[Slot],
-    count: usize,
-    field: &'static str,
-    path: &Path,
-) -> Result<Vec<f32>, Diagnostic> {
-    let explicit = parse_explicit_f32(slots, field)?;
-    if explicit.len() == count {
-        return Ok(explicit);
-    }
-    if count >= 3 && (explicit.len() == 1 || explicit.len() == 2) {
-        let first = explicit[0];
-        let last = explicit.get(1).copied().unwrap_or(first);
-        let denominator = (count - 1) as f32;
-        let delta = (last - first) / denominator;
-        return Ok((0..count)
-            .map(|index| first + index as f32 * delta)
-            .collect());
-    }
-    Err(incomplete_vector(field, count, explicit.len(), slots, path))
-}
-
 fn expand_f64_vector(
     slots: &[Slot],
     count: usize,
@@ -1018,14 +973,6 @@ fn expand_f64_vector(
             .collect());
     }
     Err(incomplete_vector(field, count, explicit.len(), slots, path))
-}
-
-fn parse_explicit_f32(slots: &[Slot], field: &'static str) -> Result<Vec<f32>, Diagnostic> {
-    slots
-        .iter()
-        .map_while(|slot| slot.atom.as_ref())
-        .map(|atom| parse_f32(atom, field))
-        .collect()
 }
 
 fn parse_explicit_f64(slots: &[Slot], field: &'static str) -> Result<Vec<f64>, Diagnostic> {

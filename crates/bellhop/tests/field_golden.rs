@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use bellhop::Case;
 use bellhop::legacy::load_case;
 use bellhop::model::BeamComponent;
 use bellhop::solver::{SimulationLimits, run};
@@ -44,9 +45,18 @@ fn field_modes_match_v2023_5_golden_pressures() {
 
 #[test]
 fn cerveny_velocity_components_match_v2023_5_samples() {
-    let mut case = load_case(&fixture("Field_CervenyR.env")).unwrap().value;
-    let options = case.environment.trace.cerveny.as_mut().unwrap();
-    options.component = BeamComponent::Vertical;
+    let mut definition = load_case(&fixture("Field_CervenyR.env"))
+        .unwrap()
+        .value
+        .into_definition();
+    definition
+        .environment
+        .trace
+        .cerveny
+        .as_mut()
+        .unwrap()
+        .component = BeamComponent::Vertical;
+    let case = Case::from_definition(definition.clone()).unwrap().value;
     let vertical = run(&case, SimulationLimits::default())
         .unwrap()
         .field_sources[0]
@@ -55,7 +65,14 @@ fn cerveny_velocity_components_match_v2023_5_samples() {
     assert!((vertical.re - 1.022_244_3e-3).abs() <= PRESSURE_TOLERANCE);
     assert!((vertical.im - 2.047_689e-3).abs() <= PRESSURE_TOLERANCE);
 
-    case.environment.trace.cerveny.as_mut().unwrap().component = BeamComponent::Horizontal;
+    definition
+        .environment
+        .trace
+        .cerveny
+        .as_mut()
+        .unwrap()
+        .component = BeamComponent::Horizontal;
+    let case = Case::from_definition(definition).unwrap().value;
     let horizontal = run(&case, SimulationLimits::default())
         .unwrap()
         .field_sources[0]

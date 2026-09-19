@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use bellhop::Case;
 use bellhop::legacy::load_case;
 use bellhop::model::BeamFamily;
 use bellhop::solver::{Arrival, SimulationLimits, run};
@@ -42,8 +43,12 @@ fn geometric_hat_eigenrays_match_v2023_5_golden() {
 
 #[test]
 fn simple_gaussian_eigenray_detection_matches_v2023_5_counts() {
-    let mut case = load_case(&fixture("GeoHat_eigen.env")).unwrap().value;
-    case.environment.run.beam_family = Some(BeamFamily::SimpleGaussian);
+    let mut definition = load_case(&fixture("GeoHat_eigen.env"))
+        .unwrap()
+        .value
+        .into_definition();
+    definition.environment.run.beam_family = Some(BeamFamily::SimpleGaussian);
+    let case = Case::from_definition(definition).unwrap().value;
     let result = run(&case, SimulationLimits::default()).unwrap();
     let eigenrays = &result.eigenray_sources[0].receivers[0].eigenrays;
 

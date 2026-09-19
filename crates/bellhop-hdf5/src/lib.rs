@@ -11,9 +11,9 @@ use hdf5::types::VarLenUnicode;
 use hdf5::{File, Group, H5Type};
 use sha2::{Digest, Sha256};
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
-/// Writes one simulation result using schema v2.
+/// Writes one simulation result using schema v3.
 ///
 /// `input_bytes` must be the exact bytes supplied by the caller. They are not
 /// embedded, but their byte length and SHA-256 digest are recorded at the root.
@@ -81,7 +81,7 @@ pub fn write_hdf5(
 
 #[allow(clippy::too_many_lines)]
 fn write_rays(group: &Group, result: &SimulationResult) -> Result<(), String> {
-    let source_depth_m: Vec<f32> = result
+    let source_depth_m: Vec<f64> = result
         .sources
         .iter()
         .map(|source| source.source_depth_m)
@@ -158,7 +158,7 @@ fn write_rays(group: &Group, result: &SimulationResult) -> Result<(), String> {
 }
 
 fn write_arrivals(group: &Group, sources: &[SourceArrivals]) -> Result<(), String> {
-    let source_depth_m: Vec<f32> = sources.iter().map(|source| source.source_depth_m).collect();
+    let source_depth_m: Vec<f64> = sources.iter().map(|source| source.source_depth_m).collect();
     let receiver_count: usize = sources.iter().map(|source| source.receivers.len()).sum();
     let arrival_count: usize = sources
         .iter()
@@ -251,7 +251,7 @@ fn append_arrivals(
 
 #[allow(clippy::too_many_lines)]
 fn write_eigenrays(group: &Group, sources: &[SourceEigenrays]) -> Result<(), String> {
-    let source_depth_m: Vec<f32> = sources.iter().map(|source| source.source_depth_m).collect();
+    let source_depth_m: Vec<f64> = sources.iter().map(|source| source.source_depth_m).collect();
     let receiver_count: usize = sources.iter().map(|source| source.receivers.len()).sum();
     let eigenray_count: usize = sources
         .iter()
@@ -335,7 +335,7 @@ fn write_eigenrays(group: &Group, sources: &[SourceEigenrays]) -> Result<(), Str
 }
 
 fn write_field(group: &Group, result: &SimulationResult) -> Result<(), String> {
-    let source_depth_m: Vec<f32> = result
+    let source_depth_m: Vec<f64> = result
         .field_sources
         .iter()
         .map(|source| source.source_depth_m)
@@ -514,7 +514,7 @@ mod tests {
                 .unwrap()
                 .read_scalar::<u32>()
                 .unwrap(),
-            2
+            3
         );
         let warnings = file
             .attr("warnings")
@@ -529,6 +529,13 @@ mod tests {
                 .read_raw::<u64>()
                 .unwrap(),
             vec![0, 2]
+        );
+        assert_eq!(
+            file.dataset("rays/source_depth_m")
+                .unwrap()
+                .read_raw::<f64>()
+                .unwrap(),
+            vec![10.0]
         );
         assert_eq!(
             file.dataset("rays/depth_m")
@@ -570,6 +577,10 @@ mod tests {
             vec![0, 3]
         );
         assert_eq!(file.dataset("arrivals/amplitude").unwrap().shape(), vec![3]);
+        file.dataset("arrivals/receiver_depth_m")
+            .unwrap()
+            .read_raw::<f64>()
+            .unwrap();
         drop(file);
 
         let eigen_input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

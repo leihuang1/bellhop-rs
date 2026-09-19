@@ -55,10 +55,11 @@ procedure to arrival and pressure outputs, parsing the reference `.arr` text
 and the direct-access `.shd` records directly.
 
 - `tests/SBCX/sbcx_Arr_asc.env` (official, unmodified): 200 beams over 100
-  depths × 500 ranges = 50,000 receivers ≈ 502,000 arrivals. Every receiver
-  count matches exactly; amplitude, travel time, attenuation time, angles, and
-  bounce counts are identical at single-precision storage. Phase agrees within
-  one storage quantum: the reference stores phase as single-precision degrees
+  depths × 500 ranges = 50,000 receivers ≈ 502,000 arrivals. Double-precision
+  receiver-grid interpolation changes four receiver counts by one at
+  influence-window edges. Matching arrivals differ by at most `3.5e-7` in
+  amplitude, `2.0e-5` degrees, and `2.0e-6` seconds. Phase agrees within one
+  storage quantum: the reference stores phase as single-precision degrees
   (≈ `2.2e-6` rad grid at large phases) while Rust stores single-precision
   radians, so boundary flips up to `4.2e-6` rad are admitted and reported.
 - `tests/Munk/MunkB_Coh.env` (official, unmodified): 501 depths × 501 ranges =

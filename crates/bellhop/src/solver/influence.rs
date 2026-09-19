@@ -2,9 +2,8 @@ use std::f64::consts::PI;
 
 use num_complex::{Complex32, Complex64};
 
-use crate::model::{
-    BeamComponent, BeamFamily, BeamWidth, Case, ReceiverGrid, RunKind, SourceGeometry,
-};
+use crate::Case;
+use crate::model::{BeamComponent, BeamFamily, BeamWidth, ReceiverGrid, RunKind, SourceGeometry};
 
 use super::integrator::RayState;
 use super::ssp::{SegmentState, SoundSpeedModel};
@@ -172,7 +171,6 @@ pub(super) fn cerveny_cartesian(
             }
 
             for (depth_index, &receiver_depth) in depths.iter().take(depth_count).enumerate() {
-                let receiver_depth = f64::from(receiver_depth);
                 let mut image_sum = Complex64::new(0.0, 0.0);
                 let mut depth_delta = 0.0;
                 let mut polarity = 1.0;
@@ -295,7 +293,6 @@ pub(super) fn cerveny_ray_centered(
 
     let mut stale_normal = 0.0;
     for (depth_index, &receiver_depth) in depths.iter().take(depth_count).enumerate() {
-        let receiver_depth = f64::from(receiver_depth);
         for image in 0..image_count {
             let mut prior: Option<(f64, f64, usize)> = None;
             for state_index in 1..states.len() {
@@ -554,9 +551,9 @@ pub(super) fn geo_hat_cartesian(
             if receiver_range >= range_a.min(range_b) && receiver_range < range_a.max(range_b) {
                 for depth_index in 0..depth_count {
                     let receiver_depth = if rectilinear {
-                        f64::from(depths[depth_index])
+                        depths[depth_index]
                     } else {
-                        f64::from(depths[receiver_index])
+                        depths[receiver_index]
                     };
                     if receiver_depth < minimum_depth || receiver_depth > maximum_depth {
                         continue;
@@ -665,7 +662,6 @@ pub(super) fn geo_hat_ray_centered(
         .collect();
 
     for (depth_index, &receiver_depth) in depths.iter().take(depth_count).enumerate() {
-        let receiver_depth = f64::from(receiver_depth);
         let mut caustic_phase = 0.0;
         let mut q_old = states[0].q[0];
         let (mut normal_a, mut range_a, mut receiver_a) = if normal_depth[0].abs() < 1.0e-6 {
@@ -862,7 +858,7 @@ pub(super) fn simple_gaussian(
                     )?;
                     continue;
                 }
-                let depth_delta = f64::from(receiver_depth) - position[1];
+                let depth_delta = receiver_depth - position[1];
                 let range_delta = range_b - range_a;
                 let step_depth = current.position_m[1] - previous.position_m[1];
                 let closest_approach =
@@ -967,9 +963,9 @@ pub(super) fn geo_gaussian_cartesian(
             if receiver_range >= range_a.min(range_b) && receiver_range < range_a.max(range_b) {
                 for depth_index in 0..depth_count {
                     let receiver_depth = if rectilinear {
-                        f64::from(depths[depth_index])
+                        depths[depth_index]
                     } else {
-                        f64::from(depths[receiver_index])
+                        depths[receiver_index]
                     };
                     if receiver_depth < minimum_depth || receiver_depth > maximum_depth {
                         continue;

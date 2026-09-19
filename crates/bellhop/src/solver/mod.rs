@@ -4,8 +4,9 @@ mod integrator;
 mod reflection;
 mod ssp;
 
+use crate::Case;
 use crate::diagnostic::{Diagnostic, DiagnosticReport, SourceLocation};
-use crate::model::{BeamFamily, BoundaryCondition, Case, ReceiverGrid, RunKind, SourceBeamPattern};
+use crate::model::{BeamFamily, BoundaryCondition, ReceiverGrid, RunKind, SourceBeamPattern};
 
 use boundary::{BoundaryGeometry, BoundarySide};
 use influence::{
@@ -60,7 +61,7 @@ pub struct SimulationResult {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourceRaySet {
-    pub source_depth_m: f32,
+    pub source_depth_m: f64,
     pub rays: Vec<RayTrajectory>,
 }
 
@@ -85,14 +86,14 @@ pub struct RayPoint {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourceArrivals {
-    pub source_depth_m: f32,
+    pub source_depth_m: f64,
     pub receivers: Vec<ReceiverArrivals>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReceiverArrivals {
     pub range_m: f64,
-    pub depth_m: f32,
+    pub depth_m: f64,
     pub arrivals: Vec<Arrival>,
 }
 
@@ -110,27 +111,27 @@ pub struct Arrival {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourceEigenrays {
-    pub source_depth_m: f32,
+    pub source_depth_m: f64,
     pub receivers: Vec<ReceiverEigenrays>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReceiverEigenrays {
     pub range_m: f64,
-    pub depth_m: f32,
+    pub depth_m: f64,
     pub eigenrays: Vec<RayTrajectory>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourceField {
-    pub source_depth_m: f32,
+    pub source_depth_m: f64,
     pub samples: Vec<FieldSample>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FieldSample {
     pub range_m: f64,
-    pub depth_m: f32,
+    pub depth_m: f64,
     pub pressure: Complex32,
 }
 
@@ -314,7 +315,7 @@ pub fn run(case: &Case, limits: SimulationLimits) -> Result<SimulationResult, Di
                 &sound_speed,
                 &boundaries,
                 step_limits,
-                f64::from(source_depth_m),
+                source_depth_m,
                 launch_angle_degrees,
                 limits,
             )
@@ -548,7 +549,7 @@ fn make_eigenray_receivers(case: &Case) -> Vec<ReceiverEigenrays> {
         .collect()
 }
 
-fn receiver_coordinates(case: &Case) -> impl Iterator<Item = (f64, f32)> + '_ {
+fn receiver_coordinates(case: &Case) -> impl Iterator<Item = (f64, f64)> + '_ {
     let positions = &case.environment.positions;
     positions
         .receiver_ranges_m

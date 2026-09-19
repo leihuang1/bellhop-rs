@@ -5,14 +5,15 @@ mod records;
 use std::fs;
 use std::path::Path;
 
+use crate::case::validate_environment;
 use crate::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome, SourceLocation};
-use crate::model::{BoundaryCondition, Case, EnvironmentCase};
+use crate::model::{BoundaryCondition, EnvironmentCase};
+use crate::{Case, CaseDefinition};
 
 use auxiliary::{
     BoundarySide, parse_boundary_shape, parse_internal_reflection_coefficients,
     parse_range_dependent_sound_speed, parse_reflection_coefficients, parse_source_beam_pattern,
 };
-pub(crate) use env::validate;
 
 /// Loads and validates a two-dimensional legacy BELLHOP `.env` file.
 ///
@@ -25,17 +26,7 @@ pub(crate) use env::validate;
 /// records are malformed, it requests a three-dimensional option, or semantic
 /// validation fails.
 pub fn load_env(path: &Path) -> Result<LoadOutcome<EnvironmentCase>, DiagnosticReport> {
-    if path.extension().and_then(|extension| extension.to_str()) != Some("env") {
-        return Err(DiagnosticReport::from_diagnostic(Diagnostic::error(
-            "BH0002",
-            "input path must name a .env file",
-            "input",
-            crate::diagnostic::SourceLocation::file(path),
-        )));
-    }
-    let source = fs::read_to_string(path)
-        .map_err(|error| DiagnosticReport::from_diagnostic(Diagnostic::io(path, &error)))?;
-    env::parse(&source, path)
+    env::parse(&read_environment(path)?, path)
 }
 
 /// Loads a complete two-dimensional legacy BELLHOP case.
@@ -51,10 +42,18 @@ pub fn load_env(path: &Path) -> Result<LoadOutcome<EnvironmentCase>, DiagnosticR
 /// malformed, inconsistent, or unsupported.
 #[allow(clippy::too_many_lines)]
 pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
-    let environment_outcome = load_env(path)?;
-    let environment = environment_outcome.value;
-    let mut diagnostics = DiagnosticReport::default();
-    diagnostics.extend(environment_outcome.warnings);
+    let source = read_environment(path)?;
+    let env::ParsedEnvironment {
+        value: environment,
+        mut diagnostics,
+        mut locations,
+    } = env::parse_unvalidated(&source, path)?;
+    let mut preflight = DiagnosticReport::default();
+    validate_environment(&environment, &locations, &mut preflight);
+    if preflight.has_errors() {
+        diagnostics.extend(preflight.diagnostics().iter().cloned());
+        return Err(diagnostics);
+    }
 
     let range_dependent_sound_speed = if environment
         .top_options
@@ -146,19 +145,11 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
                 .and_then(|(source, path)| parse_internal_reflection_coefficients(&source, &path)),
             &mut diagnostics,
         );
-        if let Some(table) = &table
-            && (table.frequency_hz - environment.frequency_hz).abs()
-                > 1.0e-9 * environment.frequency_hz.abs().max(1.0)
-        {
-            diagnostics.push(Diagnostic::warning(
-                "BH1004",
-                format!(
-                    ".irc frequency {} Hz differs from environment frequency {} Hz",
-                    table.frequency_hz, environment.frequency_hz
-                ),
+        if table.is_some() {
+            locations.insert(
                 "internal_reflection.frequency",
                 SourceLocation::file(path.with_extension("irc")),
-            ));
+            );
         }
         table
     } else {
@@ -175,24 +166,13 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
         None
     };
 
-    if matches!(
-        environment.top_boundary.condition,
-        BoundaryCondition::PrecalculatedReflectionCoefficient
-    ) {
-        diagnostics.push(Diagnostic::error(
-            "BH0202",
-            "the Acoustics Toolbox .irc format defines a bottom impedance and cannot be used for the top boundary",
-            "top_boundary.condition",
-            SourceLocation::file(path),
-        ));
-    }
-
     if diagnostics.has_errors() {
+        diagnostics.extend(preflight.diagnostics().iter().cloned());
         return Err(diagnostics);
     }
 
-    Ok(LoadOutcome {
-        value: Case {
+    Case::from_definition_with(
+        CaseDefinition {
             environment,
             range_dependent_sound_speed,
             altimetry,
@@ -202,8 +182,22 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
             internal_reflection,
             source_beam_pattern,
         },
-        warnings: diagnostics.diagnostics().to_vec(),
-    })
+        &locations,
+        diagnostics,
+    )
+}
+
+fn read_environment(path: &Path) -> Result<String, DiagnosticReport> {
+    if path.extension().and_then(|extension| extension.to_str()) != Some("env") {
+        return Err(DiagnosticReport::from_diagnostic(Diagnostic::error(
+            "BH0002",
+            "input path must name a .env file",
+            "input",
+            SourceLocation::file(path),
+        )));
+    }
+    fs::read_to_string(path)
+        .map_err(|error| DiagnosticReport::from_diagnostic(Diagnostic::io(path, &error)))
 }
 
 fn read_auxiliary(

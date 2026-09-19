@@ -16,9 +16,10 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use bellhop::Case;
 use bellhop::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome, Severity};
 use bellhop::json::{CaseDocument, DocumentErrorKind};
-use bellhop::model::{Case, RunKind};
+use bellhop::model::RunKind;
 use bellhop::solver::{
     Arrival, ReceiverArrivals, SimulationLimits, SimulationResult, SourceArrivals,
     run as run_simulation,

@@ -1,7 +1,7 @@
 //! Versioned, self-contained JSON input format.
 //!
 //! The document contains all data that legacy inputs keep in same-stem
-//! auxiliary files. It maps to the existing [`crate::model::Case`] and uses
+//! auxiliary files. It maps to the validated [`crate::Case`] and uses
 //! the same solver and numerical validation path.
 
 use std::collections::HashMap;
@@ -17,13 +17,14 @@ use crate::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome, SourceLocatio
 use crate::model::{
     AttenuationUnit, BeamComponent, BeamFamily, BeamWidth, BiologicalLayer, Boundary,
     BoundaryCondition, BoundaryInterpolation, BoundaryMaterial, BoundaryShape, BoundaryShapePoint,
-    Case, CervenyOptions, CurvatureCondition, EnvironmentCase, HalfSpace,
+    CervenyOptions, CurvatureCondition, EnvironmentCase, HalfSpace,
     InternalReflectionCoefficientPoint, InternalReflectionCoefficientTable, LegacyArrivalEncoding,
     Positions, RangeDependentSoundSpeed, ReceiverGrid, ReflectionCoefficientPoint,
     ReflectionCoefficientTable, RunKind, RunOptions, SoundSpeedInput, SoundSpeedPoint,
     SourceBeamPattern, SourceBeamPatternPoint, SourceGeometry, SspInterpolation, TopOptions,
     TraceOptions, VolumeAttenuation,
 };
+use crate::{Case, CaseDefinition};
 
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -458,56 +459,17 @@ impl CaseDocument {
             ));
         }
 
-        let top = import_boundary(self.top_boundary, true, source_path, &mut diagnostics);
-        let bottom = import_boundary(self.bottom_boundary, false, source_path, &mut diagnostics);
+        let top = import_boundary(self.top_boundary);
+        let bottom = import_boundary(self.bottom_boundary);
         let source_beam_pattern = self.source_beam_pattern.map(import_source_pattern);
         let run_kind = import_run_kind(self.run.kind);
         let beam_family = self.run.beam_family.map(import_beam_family);
-        if run_kind == RunKind::Rays && beam_family.is_some() {
-            diagnostics.push(error(
-                source_path,
-                "BH0201",
-                "ray runs must omit run.beam_family",
-                "run.beam_family",
-            ));
-        }
-        if run_kind != RunKind::Rays && beam_family.is_none() {
-            diagnostics.push(error(
-                source_path,
-                "BH0201",
-                "non-ray runs require run.beam_family",
-                "run.beam_family",
-            ));
-        }
-        let cerveny_family = matches!(
-            beam_family,
-            Some(BeamFamily::CervenyCartesian | BeamFamily::CervenyRayCentered)
-        );
-        if cerveny_family != self.trace.cerveny.is_some() {
-            diagnostics.push(error(
-                source_path,
-                "BH0201",
-                "Cerveny beam families require trace.cerveny and other families must omit it",
-                "trace.cerveny",
-            ));
-        }
-
         let interpolation = import_ssp_interpolation(self.sound_speed.interpolation);
-        if (interpolation == SspInterpolation::Quadrilateral)
-            != self.sound_speed.range_dependent.is_some()
-        {
-            diagnostics.push(error(
-                source_path,
-                "BH0201",
-                "quadrilateral interpolation requires sound_speed.range_dependent; other interpolation modes must omit it",
-                "sound_speed.range_dependent",
-            ));
-        }
 
         let (top_boundary, altimetry, top_reflection, _) = top;
         let (bottom_boundary, bathymetry, bottom_reflection, internal_reflection) = bottom;
         let surface_roughness_m = top_boundary.roughness_m;
-        let case = Case {
+        let definition = CaseDefinition {
             environment: EnvironmentCase {
                 source_path: source_path.to_path_buf(),
                 title: self.title,
@@ -572,17 +534,11 @@ impl CaseDocument {
             internal_reflection,
             source_beam_pattern,
         };
-        validate_document_case(&case, source_path, &mut diagnostics);
-        crate::legacy::validate(&case.environment, &HashMap::new(), &mut diagnostics);
-        if diagnostics.has_errors() {
-            return Err(DocumentError {
+        Case::from_definition_with(definition, &HashMap::new(), diagnostics).map_err(|report| {
+            DocumentError {
                 kind: DocumentErrorKind::Semantic,
-                report: diagnostics,
-            });
-        }
-        Ok(LoadOutcome {
-            value: case,
-            warnings: diagnostics.diagnostics().to_vec(),
+                report,
+            }
         })
     }
 }
@@ -661,350 +617,8 @@ impl TryFrom<&Case> for CaseDocument {
     }
 }
 
-#[allow(clippy::too_many_lines)]
-fn validate_document_case(case: &Case, path: &Path, diagnostics: &mut DiagnosticReport) {
-    let environment = &case.environment;
-    if environment.positions.source_depths_m.is_empty() {
-        diagnostics.push(error(
-            path,
-            "BH0201",
-            "at least one source depth is required",
-            "positions.source_depths_m",
-        ));
-    }
-    if environment.positions.receiver_depths_m.is_empty() {
-        diagnostics.push(error(
-            path,
-            "BH0201",
-            "at least one receiver depth is required",
-            "positions.receiver_depths_m",
-        ));
-    }
-    if environment.positions.receiver_ranges_m.is_empty() {
-        diagnostics.push(error(
-            path,
-            "BH0201",
-            "at least one receiver range is required",
-            "positions.receiver_ranges_m",
-        ));
-    }
-    if environment.trace.launch_angles_degrees.is_empty() {
-        diagnostics.push(error(
-            path,
-            "BH0201",
-            "at least one launch angle is required",
-            "trace.launch_angles_degrees",
-        ));
-    }
-    if let Some(selected) = environment.trace.selected_launch_angle
-        && (selected == 0 || selected > environment.trace.launch_angles_degrees.len())
-    {
-        diagnostics.push(error(
-            path,
-            "BH0201",
-            "selected_launch_angle is outside the one-based launch-angle range",
-            "trace.selected_launch_angle",
-        ));
-    }
-    if environment.run.receiver_grid == ReceiverGrid::Irregular
-        && environment.positions.receiver_depths_m.len()
-            != environment.positions.receiver_ranges_m.len()
-    {
-        diagnostics.push(error(
-            path,
-            "BH0201",
-            "irregular receiver grids require equal depth and range counts",
-            "positions",
-        ));
-    }
-    let interpolation = environment.top_options.interpolation;
-    if interpolation != SspInterpolation::AnalyticMunk && environment.sound_speed.points.len() < 2 {
-        diagnostics.push(error(
-            path,
-            "BH0201",
-            "non-analytic sound-speed models require at least two points",
-            "sound_speed.points",
-        ));
-    }
-    if environment
-        .sound_speed
-        .points
-        .windows(2)
-        .any(|pair| pair[1].depth_m <= pair[0].depth_m)
-    {
-        diagnostics.push(error(
-            path,
-            "BH0201",
-            "sound-speed depths must be strictly increasing",
-            "sound_speed.points",
-        ));
-    }
-    if let Some(field) = &case.range_dependent_sound_speed {
-        if field.ranges_m.len() < 2 || field.depths_m.len() < 2 {
-            diagnostics.push(error(
-                path,
-                "BH0201",
-                "range-dependent sound speed requires at least two ranges and depths",
-                "sound_speed.range_dependent",
-            ));
-        }
-        if field.ranges_m.windows(2).any(|v| v[1] <= v[0])
-            || field.depths_m.windows(2).any(|v| v[1] <= v[0])
-        {
-            diagnostics.push(error(
-                path,
-                "BH0201",
-                "range-dependent axes must be strictly increasing",
-                "sound_speed.range_dependent",
-            ));
-        }
-        if field.speeds_mps.len() != field.depths_m.len()
-            || field
-                .speeds_mps
-                .iter()
-                .any(|row| row.len() != field.ranges_m.len())
-        {
-            diagnostics.push(error(
-                path,
-                "BH0201",
-                "range-dependent speed matrix dimensions must match depths × ranges",
-                "sound_speed.range_dependent.speeds_mps",
-            ));
-        }
-        if field.speeds_mps.iter().flatten().any(|speed| *speed <= 0.0) {
-            diagnostics.push(error(
-                path,
-                "BH0201",
-                "range-dependent sound speeds must be positive",
-                "sound_speed.range_dependent.speeds_mps",
-            ));
-        }
-        let profile_depths: Vec<f64> = environment
-            .sound_speed
-            .points
-            .iter()
-            .map(|point| point.depth_m)
-            .collect();
-        if field.depths_m != profile_depths {
-            diagnostics.push(error(
-                path,
-                "BH0201",
-                "range-dependent depths must match the base sound-speed profile",
-                "sound_speed.range_dependent.depths_m",
-            ));
-        }
-    }
-    validate_boundary_shape(
-        case.altimetry.as_ref(),
-        true,
-        environment.sound_speed.top_depth_m,
-        path,
-        "top_boundary.shape",
-        diagnostics,
-    );
-    validate_boundary_shape(
-        case.bathymetry.as_ref(),
-        false,
-        environment.sound_speed.bottom_depth_m,
-        path,
-        "bottom_boundary.shape",
-        diagnostics,
-    );
-    validate_reflection_table(
-        case.top_reflection.as_ref(),
-        path,
-        "top_boundary.condition.table",
-        diagnostics,
-    );
-    validate_reflection_table(
-        case.bottom_reflection.as_ref(),
-        path,
-        "bottom_boundary.condition.table",
-        diagnostics,
-    );
-    if let Some(table) = &case.internal_reflection {
-        if table.frequency_hz <= 0.0
-            || table.points.len() < 2
-            || table.points.iter().any(|point| {
-                point.horizontal_wavenumber_squared < 0.0
-                    || !point.f.re.is_finite()
-                    || !point.f.im.is_finite()
-                    || !point.g.re.is_finite()
-                    || !point.g.im.is_finite()
-            })
-            || table.points.windows(2).any(|points| {
-                points[1].horizontal_wavenumber_squared <= points[0].horizontal_wavenumber_squared
-            })
-        {
-            diagnostics.push(error(
-                path,
-                "BH0201",
-                "internal reflection tables require at least two valid, strictly increasing squared wavenumbers",
-                "bottom_boundary.condition.table",
-            ));
-        }
-        if (table.frequency_hz - environment.frequency_hz).abs()
-            > 1.0e-9 * environment.frequency_hz.abs().max(1.0)
-        {
-            diagnostics.push(Diagnostic::warning(
-                "BH1004",
-                format!(
-                    "internal reflection-table frequency {} Hz differs from environment frequency {} Hz",
-                    table.frequency_hz, environment.frequency_hz
-                ),
-                "bottom_boundary.condition.table.frequency_hz",
-                SourceLocation::file(path),
-            ));
-        }
-    }
-    for (field, boundary) in [
-        ("top_boundary", &environment.top_boundary),
-        ("bottom_boundary", &environment.bottom_boundary),
-    ] {
-        if boundary.roughness_m < 0.0 {
-            diagnostics.push(error(
-                path,
-                "BH0201",
-                "boundary roughness must be non-negative",
-                format!("{field}.roughness_m"),
-            ));
-        }
-        if let BoundaryCondition::AcoustoElastic(half_space) = &boundary.condition
-            && !valid_material(
-                half_space.compressional_speed_mps,
-                half_space.shear_speed_mps,
-                half_space.density_g_cm3,
-                half_space.compressional_attenuation,
-                half_space.shear_attenuation,
-            )
-        {
-            diagnostics.push(error(
-                path,
-                "BH0201",
-                "half-space properties contain invalid physical values",
-                format!("{field}.condition.half_space"),
-            ));
-        }
-    }
-    if let Some(pattern) = &case.source_beam_pattern
-        && (pattern.points.len() < 2
-            || pattern
-                .points
-                .iter()
-                .any(|point| !point.amplitude.is_finite())
-            || pattern
-                .points
-                .windows(2)
-                .any(|v| v[1].angle_degrees <= v[0].angle_degrees))
-    {
-        diagnostics.push(error(
-            path,
-            "BH0201",
-            "source beam patterns require at least two finite, strictly increasing angles",
-            "source_beam_pattern.points",
-        ));
-    }
-}
-
-fn validate_boundary_shape(
-    shape: Option<&BoundaryShape>,
-    top: bool,
-    profile_depth_m: f64,
-    path: &Path,
-    field: &'static str,
-    diagnostics: &mut DiagnosticReport,
-) {
-    let Some(shape) = shape else {
-        return;
-    };
-    let invalid_geometry = shape.points.is_empty()
-        || shape
-            .points
-            .windows(2)
-            .any(|points| points[1].range_m <= points[0].range_m)
-        || shape.points.iter().any(|point| {
-            if top {
-                point.depth_m < profile_depth_m
-            } else {
-                point.depth_m > profile_depth_m
-            }
-        });
-    if invalid_geometry {
-        diagnostics.push(error(
-            path,
-            "BH0201",
-            "boundary shapes require valid depths and strictly increasing ranges",
-            field,
-        ));
-    }
-    if shape
-        .points
-        .iter()
-        .filter_map(|point| point.material.as_ref())
-        .any(|material| {
-            !valid_material(
-                material.compressional_speed_mps,
-                material.shear_speed_mps,
-                material.density_g_cm3,
-                material.compressional_attenuation,
-                material.shear_attenuation,
-            )
-        })
-    {
-        diagnostics.push(error(
-            path,
-            "BH0201",
-            "boundary material properties contain invalid physical values",
-            field,
-        ));
-    }
-}
-
-fn validate_reflection_table(
-    table: Option<&ReflectionCoefficientTable>,
-    path: &Path,
-    field: &'static str,
-    diagnostics: &mut DiagnosticReport,
-) {
-    if let Some(table) = table
-        && (table.points.len() < 2
-            || table.points.iter().any(|point| point.magnitude < 0.0)
-            || table
-                .points
-                .windows(2)
-                .any(|points| points[1].angle_degrees <= points[0].angle_degrees))
-    {
-        diagnostics.push(error(
-            path,
-            "BH0201",
-            "reflection tables require at least two valid, strictly increasing angles",
-            field,
-        ));
-    }
-}
-
-fn valid_material(
-    compressional_speed_mps: f64,
-    shear_speed_mps: f64,
-    density_g_cm3: f64,
-    compressional_attenuation: f64,
-    shear_attenuation: f64,
-) -> bool {
-    compressional_speed_mps.is_finite()
-        && compressional_speed_mps > 0.0
-        && shear_speed_mps.is_finite()
-        && shear_speed_mps >= 0.0
-        && density_g_cm3.is_finite()
-        && density_g_cm3 > 0.0
-        && compressional_attenuation.is_finite()
-        && shear_attenuation.is_finite()
-}
-
 fn import_boundary(
     document: BoundaryDocument,
-    top: bool,
-    path: &Path,
-    diagnostics: &mut DiagnosticReport,
 ) -> (
     Boundary,
     Option<BoundaryShape>,
@@ -1028,21 +642,11 @@ fn import_boundary(
             Some(import_reflection_table(table)),
             None,
         ),
-        BoundaryConditionDocument::PrecalculatedInternalReflection { table } => {
-            if top {
-                diagnostics.push(error(
-                    path,
-                    "BH0202",
-                    "precalculated internal reflection is only valid for the bottom boundary",
-                    "top_boundary.condition",
-                ));
-            }
-            (
-                BoundaryCondition::PrecalculatedReflectionCoefficient,
-                None,
-                Some(import_internal_reflection_table(table)),
-            )
-        }
+        BoundaryConditionDocument::PrecalculatedInternalReflection { table } => (
+            BoundaryCondition::PrecalculatedReflectionCoefficient,
+            None,
+            Some(import_internal_reflection_table(table)),
+        ),
     };
     (
         Boundary {

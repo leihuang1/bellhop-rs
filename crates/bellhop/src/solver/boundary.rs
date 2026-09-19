@@ -1,4 +1,5 @@
-use crate::model::{BoundaryInterpolation, BoundaryMaterial, BoundaryShape, Case};
+use crate::Case;
+use crate::model::{BoundaryInterpolation, BoundaryMaterial, BoundaryShape};
 
 const EXTENDED_RANGE_M: f64 = 1.340_780_792_994_259_6e149;
 

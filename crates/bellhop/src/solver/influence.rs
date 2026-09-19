@@ -2,9 +2,8 @@ use std::f64::consts::PI;
 
 use num_complex::{Complex32, Complex64};
 
-use crate::model::{
-    BeamComponent, BeamFamily, BeamWidth, Case, ReceiverGrid, RunKind, SourceGeometry,
-};
+use crate::Case;
+use crate::model::{BeamComponent, BeamFamily, BeamWidth, ReceiverGrid, RunKind, SourceGeometry};
 
 use super::integrator::RayState;
 use super::ssp::{SegmentState, SoundSpeedModel};

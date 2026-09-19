@@ -5,9 +5,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use bellhop::Case;
 use bellhop::Severity;
 use bellhop::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome};
-use bellhop::model::Case;
 use bellhop::solver::{SimulationLimits, run as run_simulation};
 use clap::{Parser, Subcommand};
 

@@ -4,8 +4,9 @@ mod integrator;
 mod reflection;
 mod ssp;
 
+use crate::Case;
 use crate::diagnostic::{Diagnostic, DiagnosticReport, SourceLocation};
-use crate::model::{BeamFamily, BoundaryCondition, Case, ReceiverGrid, RunKind, SourceBeamPattern};
+use crate::model::{BeamFamily, BoundaryCondition, ReceiverGrid, RunKind, SourceBeamPattern};
 
 use boundary::{BoundaryGeometry, BoundarySide};
 use influence::{

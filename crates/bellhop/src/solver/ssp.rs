@@ -2,8 +2,9 @@ use std::f64::consts::PI;
 
 use num_complex::Complex64;
 
+use crate::Case;
 use crate::diagnostic::{Diagnostic, SourceLocation};
-use crate::model::{AttenuationUnit, Case, SoundSpeedPoint, SspInterpolation, VolumeAttenuation};
+use crate::model::{AttenuationUnit, SoundSpeedPoint, SspInterpolation, VolumeAttenuation};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct SegmentState {

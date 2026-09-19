@@ -555,7 +555,7 @@ fn pressure_fields_match_pinned_linux_reference() {
     );
 }
 
-fn receiver_grid_shape(case: &bellhop::model::Case) -> (usize, usize) {
+fn receiver_grid_shape(case: &bellhop::Case) -> (usize, usize) {
     let positions = &case.environment.positions;
     match case.environment.run.receiver_grid {
         ReceiverGrid::Rectilinear => (

@@ -2,19 +2,6 @@ use std::path::PathBuf;
 
 use num_complex::Complex64;
 
-/// A fully loaded and validated two-dimensional BELLHOP input case.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Case {
-    pub environment: EnvironmentCase,
-    pub range_dependent_sound_speed: Option<RangeDependentSoundSpeed>,
-    pub altimetry: Option<BoundaryShape>,
-    pub bathymetry: Option<BoundaryShape>,
-    pub bottom_reflection: Option<ReflectionCoefficientTable>,
-    pub top_reflection: Option<ReflectionCoefficientTable>,
-    pub internal_reflection: Option<InternalReflectionCoefficientTable>,
-    pub source_beam_pattern: Option<SourceBeamPattern>,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct EnvironmentCase {
     pub source_path: PathBuf,

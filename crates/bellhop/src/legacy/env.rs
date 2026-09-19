@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::path::{Path, PathBuf};
 
+use crate::case::validate_environment;
 use crate::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome, SourceLocation};
 use crate::model::{
     AttenuationUnit, BeamComponent, BeamFamily, BeamWidth, BiologicalLayer, Boundary,
@@ -23,20 +24,42 @@ const MAX_LEGACY_VECTOR: usize = 1_000_000;
 const MAX_SSP_POINTS: usize = 100_001;
 const SSP_BOTTOM_TOLERANCE_M: f64 = 100.0 * f32::EPSILON as f64;
 
+pub(crate) struct ParsedEnvironment {
+    pub value: EnvironmentCase,
+    pub diagnostics: DiagnosticReport,
+    pub locations: HashMap<&'static str, SourceLocation>,
+}
+
+pub(crate) fn parse_unvalidated(
+    source: &str,
+    path: &Path,
+) -> Result<ParsedEnvironment, DiagnosticReport> {
+    let parser = EnvironmentParser::new(source, path);
+    let (value, diagnostics, locations) =
+        parser.parse().map_err(DiagnosticReport::from_diagnostic)?;
+    Ok(ParsedEnvironment {
+        value,
+        diagnostics,
+        locations,
+    })
+}
+
 pub(crate) fn parse(
     source: &str,
     path: &Path,
 ) -> Result<LoadOutcome<EnvironmentCase>, DiagnosticReport> {
-    let parser = EnvironmentParser::new(source, path);
-    let (case, mut diagnostics, locations) =
-        parser.parse().map_err(DiagnosticReport::from_diagnostic)?;
-    validate(&case, &locations, &mut diagnostics);
+    let ParsedEnvironment {
+        value,
+        mut diagnostics,
+        locations,
+    } = parse_unvalidated(source, path)?;
+    validate_environment(&value, &locations, &mut diagnostics);
 
     if diagnostics.has_errors() {
         Err(diagnostics)
     } else {
         Ok(LoadOutcome {
-            value: case,
+            value,
             warnings: diagnostics.diagnostics().to_vec(),
         })
     }
@@ -130,7 +153,7 @@ impl<'a> EnvironmentParser<'a> {
             parse_f32(&environment_header[1], "sound_speed.surface_roughness")?;
         let bottom_depth_m = parse_f64(&environment_header[2], "sound_speed.bottom_depth")?;
         self.locations.insert(
-            "sound_speed.bottom_depth",
+            "sound_speed.bottom_depth_m",
             environment_header[2].location.clone(),
         );
         top_boundary.roughness_m = surface_roughness_m;
@@ -165,9 +188,9 @@ impl<'a> EnvironmentParser<'a> {
             &bottom_fields[0].location,
         )?;
 
-        let source_depths_m = self.read_f32_vector("positions.source_depths", 1.0)?;
-        let receiver_depths_m = self.read_f32_vector("positions.receiver_depths", 1.0)?;
-        let receiver_ranges_m = self.read_f64_vector("positions.receiver_ranges", 1000.0)?;
+        let source_depths_m = self.read_f32_vector("positions.source_depths_m", 1.0)?;
+        let receiver_depths_m = self.read_f32_vector("positions.receiver_depths_m", 1.0)?;
+        let receiver_ranges_m = self.read_f64_vector("positions.receiver_ranges_m", 1000.0)?;
 
         let run_atom = self.reader.read_string("run_options")?;
         let run =
@@ -597,7 +620,7 @@ impl<'a> EnvironmentParser<'a> {
             .reader
             .read_fields("trace.launch_angles", launch_count)?;
         self.locations.insert(
-            "trace.launch_angles",
+            "trace.launch_angles_degrees",
             first_atom_location(&slots, &self.path),
         );
         let mut launch_angles_degrees =
@@ -1055,233 +1078,6 @@ fn automatic_launch_count(
         }
     }
     count
-}
-
-pub(crate) fn validate(
-    case: &EnvironmentCase,
-    locations: &HashMap<&'static str, SourceLocation>,
-    diagnostics: &mut DiagnosticReport,
-) {
-    let location = |field: &'static str| {
-        locations
-            .get(field)
-            .cloned()
-            .unwrap_or_else(|| SourceLocation::file(&case.source_path))
-    };
-
-    if !case.frequency_hz.is_finite() || case.frequency_hz <= 0.0 {
-        diagnostics.push(Diagnostic::error(
-            "BH0201",
-            "frequency must be finite and positive",
-            "frequency",
-            location("frequency"),
-        ));
-    }
-    if !case.sound_speed.top_depth_m.is_finite()
-        || !case.sound_speed.bottom_depth_m.is_finite()
-        || case.sound_speed.bottom_depth_m <= case.sound_speed.top_depth_m
-    {
-        diagnostics.push(Diagnostic::error(
-            "BH0201",
-            "bottom depth must be finite and greater than top depth",
-            "sound_speed.bottom_depth",
-            location("sound_speed.bottom_depth"),
-        ));
-    }
-
-    validate_finite_f32(
-        &case.positions.source_depths_m,
-        "positions.source_depths",
-        location("positions.source_depths"),
-        diagnostics,
-    );
-    validate_finite_f32(
-        &case.positions.receiver_depths_m,
-        "positions.receiver_depths",
-        location("positions.receiver_depths"),
-        diagnostics,
-    );
-    validate_finite_f64(
-        &case.positions.receiver_ranges_m,
-        "positions.receiver_ranges",
-        location("positions.receiver_ranges"),
-        diagnostics,
-    );
-
-    let top = case.sound_speed.top_depth_m as f32;
-    let bottom = case.sound_speed.bottom_depth_m as f32;
-    if case
-        .positions
-        .source_depths_m
-        .iter()
-        .any(|depth| *depth < top || *depth > bottom)
-    {
-        diagnostics.push(Diagnostic::error(
-            "BH0201",
-            "source depths must lie within the water column",
-            "positions.source_depths",
-            location("positions.source_depths"),
-        ));
-    }
-    if case
-        .positions
-        .receiver_depths_m
-        .iter()
-        .any(|depth| *depth < top || *depth > bottom)
-    {
-        diagnostics.push(Diagnostic::error(
-            "BH0201",
-            "receiver depths must lie within the water column",
-            "positions.receiver_depths",
-            location("positions.receiver_depths"),
-        ));
-    }
-    if case
-        .positions
-        .receiver_ranges_m
-        .windows(2)
-        .any(|pair| pair[1] <= pair[0])
-    {
-        diagnostics.push(Diagnostic::error(
-            "BH0201",
-            "receiver ranges must be strictly increasing",
-            "positions.receiver_ranges",
-            location("positions.receiver_ranges"),
-        ));
-    }
-
-    for (index, point) in case.sound_speed.points.iter().enumerate() {
-        if !point.depth_m.is_finite()
-            || !point.compressional_speed_mps.is_finite()
-            || point.compressional_speed_mps <= 0.0
-            || !point.density_g_cm3.is_finite()
-            || point.density_g_cm3 <= 0.0
-        {
-            diagnostics.push(Diagnostic::error(
-                "BH0201",
-                format!(
-                    "sound-speed point {} has invalid physical values",
-                    index + 1
-                ),
-                "sound_speed.points",
-                location("sound_speed.points"),
-            ));
-        }
-    }
-
-    if !case.trace.step_m.is_finite() || case.trace.step_m < 0.0 {
-        diagnostics.push(Diagnostic::error(
-            "BH0201",
-            "trace step must be finite and non-negative",
-            "trace.step",
-            location("trace.step"),
-        ));
-    }
-    if !case.trace.max_depth_m.is_finite() || case.trace.max_depth_m <= 0.0 {
-        diagnostics.push(Diagnostic::error(
-            "BH0201",
-            "trace depth limit must be finite and positive",
-            "trace.max_depth",
-            location("trace.max_depth"),
-        ));
-    }
-    if !case.trace.max_range_m.is_finite() || case.trace.max_range_m <= 0.0 {
-        diagnostics.push(Diagnostic::error(
-            "BH0201",
-            "trace range limit must be finite and positive",
-            "trace.max_range",
-            location("trace.max_range"),
-        ));
-    }
-    validate_finite_f64(
-        &case.trace.launch_angles_degrees,
-        "trace.launch_angles",
-        location("trace.launch_angles"),
-        diagnostics,
-    );
-
-    if case.run.kind == RunKind::Coherent {
-        validate_coherent_beam_count(case, &location, diagnostics);
-    }
-}
-
-fn validate_coherent_beam_count(
-    case: &EnvironmentCase,
-    location: &impl Fn(&'static str) -> SourceLocation,
-    diagnostics: &mut DiagnosticReport,
-) {
-    let source_speed = case
-        .sound_speed
-        .points
-        .first()
-        .map_or(1500.0, |point| point.compressional_speed_mps);
-    let maximum_range = case
-        .positions
-        .receiver_ranges_m
-        .last()
-        .copied()
-        .unwrap_or(0.0);
-    if maximum_range <= 0.0 || case.trace.launch_angles_degrees.len() <= 1 {
-        return;
-    }
-    let optimal_spacing = (source_speed / (6.0 * case.frequency_hz * maximum_range)).sqrt();
-    let angular_span = (case
-        .trace
-        .launch_angles_degrees
-        .last()
-        .copied()
-        .unwrap_or(0.0)
-        - case
-            .trace
-            .launch_angles_degrees
-            .first()
-            .copied()
-            .unwrap_or(0.0))
-    .to_radians();
-    let recommended = 2 + (angular_span / optimal_spacing) as usize;
-    if case.trace.launch_angles_degrees.len() < recommended {
-        diagnostics.push(Diagnostic::warning(
-            "BH1003",
-            format!(
-                "coherent run may use too few beams: {} configured, approximately {recommended} recommended",
-                case.trace.launch_angles_degrees.len()
-            ),
-            "trace.launch_count",
-            location("trace.launch_count"),
-        ));
-    }
-}
-
-fn validate_finite_f32(
-    values: &[f32],
-    field: &'static str,
-    location: SourceLocation,
-    diagnostics: &mut DiagnosticReport,
-) {
-    if values.iter().any(|value| !value.is_finite()) {
-        diagnostics.push(Diagnostic::error(
-            "BH0201",
-            "all values must be finite",
-            field,
-            location,
-        ));
-    }
-}
-
-fn validate_finite_f64(
-    values: &[f64],
-    field: &'static str,
-    location: SourceLocation,
-    diagnostics: &mut DiagnosticReport,
-) {
-    if values.iter().any(|value| !value.is_finite()) {
-        diagnostics.push(Diagnostic::error(
-            "BH0201",
-            "all values must be finite",
-            field,
-            location,
-        ));
-    }
 }
 
 #[cfg(test)]

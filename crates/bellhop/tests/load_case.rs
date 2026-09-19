@@ -84,7 +84,7 @@ fn loads_precalculated_internal_reflection_table() {
     .unwrap();
 
     let case = load_case(&environment).unwrap().value;
-    let table = case.internal_reflection.unwrap();
+    let table = case.internal_reflection.as_ref().unwrap();
     assert_eq!(table.title, "generated table");
     assert_eq!(table.points.len(), 2);
 }
@@ -120,6 +120,6 @@ fn resolves_top_and_bottom_reflection_tables() {
     fs::write(directory.join("reflection.trc"), table).unwrap();
 
     let case = load_case(&environment).unwrap().value;
-    assert_eq!(case.bottom_reflection.unwrap().points.len(), 2);
-    assert_eq!(case.top_reflection.unwrap().points.len(), 2);
+    assert_eq!(case.bottom_reflection.as_ref().unwrap().points.len(), 2);
+    assert_eq!(case.top_reflection.as_ref().unwrap().points.len(), 2);
 }

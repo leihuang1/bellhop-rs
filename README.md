@@ -29,9 +29,10 @@ curl -H 'Content-Type: application/json' \
 ```
 
 The multi-client service accepts modern JSON only. `/v1/run` returns the full
-HDF5 result, while `/v1/arrivals` returns a focused versioned JSON arrival
-result for cases whose `run.kind` is `arrivals`. It includes bounded blocking
-execution, timeouts, server-controlled simulation limits, optional Bearer
+HDF5 result, while `/v1/arrivals` and `/v1/field` return focused versioned JSON
+arrival and pressure-field results for their corresponding run kinds. It
+includes bounded blocking execution, timeouts, server-controlled simulation
+limits, optional Bearer
 authentication, tracing, health checks, generated OpenAPI at `/openapi.json`,
 and Swagger UI at `/docs`. See the [HTTP service guide](docs/api.md).
 

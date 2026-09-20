@@ -21,8 +21,8 @@ use bellhop::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome, Severity};
 use bellhop::json::{CaseDocument, DocumentErrorKind};
 use bellhop::model::RunKind;
 use bellhop::solver::{
-    Arrival, ReceiverArrivals, SimulationLimits, SimulationResult, SourceArrivals,
-    run as run_simulation,
+    Arrival, FieldSample, ReceiverArrivals, SimulationLimits, SimulationResult, SourceArrivals,
+    SourceField, run as run_simulation,
 };
 use serde::Serialize;
 use serde::ser::{SerializeSeq, SerializeStruct, Serializer};
@@ -93,6 +93,7 @@ pub fn app(config: ServerConfig) -> Router {
         .route("/v1/validate", post(validate_case))
         .route("/v1/run", post(run_case))
         .route("/v1/arrivals", post(arrivals_case))
+        .route("/v1/field", post(field_case))
         .layer(axum::extract::DefaultBodyLimit::max(config.max_body_bytes))
         .layer(middleware::from_fn_with_state(state.clone(), require_auth))
         .layer(
@@ -116,7 +117,7 @@ pub fn app(config: ServerConfig) -> Router {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(healthz, validate_case, run_case, arrivals_case),
+    paths(healthz, validate_case, run_case, arrivals_case, field_case),
     components(schemas(
         CaseDocument,
         HealthResponse,
@@ -130,7 +131,12 @@ pub fn app(config: ServerConfig) -> Router {
         ArrivalsResponse,
         ArrivalSourceResponse,
         ArrivalReceiverResponse,
-        ArrivalResponse
+        ArrivalResponse,
+        FieldResponse,
+        FieldRunKindResponse,
+        FieldSourceResponse,
+        FieldReceiverResponse,
+        PressureResponse
     )),
     modifiers(&SecurityAddon),
     tags(
@@ -267,6 +273,47 @@ struct ArrivalResponse {
     bottom_bounces: u32,
 }
 
+#[derive(ToSchema)]
+#[allow(dead_code)]
+struct FieldResponse {
+    schema_version: u32,
+    title: String,
+    frequency_hz: f64,
+    run_kind: FieldRunKindResponse,
+    warnings: Vec<DiagnosticResponse>,
+    sources: Vec<FieldSourceResponse>,
+}
+
+#[derive(Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum FieldRunKindResponse {
+    Coherent,
+    SemiCoherent,
+    Incoherent,
+}
+
+#[derive(ToSchema)]
+#[allow(dead_code)]
+struct FieldSourceResponse {
+    source_depth_m: f64,
+    receivers: Vec<FieldReceiverResponse>,
+}
+
+#[derive(ToSchema)]
+#[allow(dead_code)]
+struct FieldReceiverResponse {
+    range_m: f64,
+    depth_m: f64,
+    pressure: PressureResponse,
+}
+
+#[derive(ToSchema)]
+#[allow(dead_code)]
+struct PressureResponse {
+    real: f32,
+    imaginary: f32,
+}
+
 #[derive(Serialize)]
 struct BorrowedArrivalsResponse<'a> {
     schema_version: u32,
@@ -282,6 +329,22 @@ struct BorrowedArrivalReceivers<'a>(&'a [ReceiverArrivals]);
 struct BorrowedArrivalReceiver<'a>(&'a ReceiverArrivals);
 struct BorrowedArrivals<'a>(&'a [Arrival]);
 struct BorrowedArrival<'a>(&'a Arrival);
+
+#[derive(Serialize)]
+struct BorrowedFieldResponse<'a> {
+    schema_version: u32,
+    title: &'a str,
+    frequency_hz: f64,
+    run_kind: FieldRunKindResponse,
+    warnings: Vec<DiagnosticResponse>,
+    sources: BorrowedFieldSources<'a>,
+}
+
+struct BorrowedFieldSources<'a>(&'a [SourceField]);
+struct BorrowedFieldSource<'a>(&'a SourceField);
+struct BorrowedFieldReceivers<'a>(&'a [FieldSample]);
+struct BorrowedFieldReceiver<'a>(&'a FieldSample);
+struct BorrowedPressure<'a>(&'a FieldSample);
 
 impl Serialize for BorrowedArrivalSources<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -365,6 +428,69 @@ impl Serialize for BorrowedArrival<'_> {
     }
 }
 
+impl Serialize for BorrowedFieldSources<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for source in self.0 {
+            sequence.serialize_element(&BorrowedFieldSource(source))?;
+        }
+        sequence.end()
+    }
+}
+
+impl Serialize for BorrowedFieldSource<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("FieldSourceResponse", 2)?;
+        state.serialize_field("source_depth_m", &self.0.source_depth_m)?;
+        state.serialize_field("receivers", &BorrowedFieldReceivers(&self.0.samples))?;
+        state.end()
+    }
+}
+
+impl Serialize for BorrowedFieldReceivers<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for sample in self.0 {
+            sequence.serialize_element(&BorrowedFieldReceiver(sample))?;
+        }
+        sequence.end()
+    }
+}
+
+impl Serialize for BorrowedFieldReceiver<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("FieldReceiverResponse", 3)?;
+        state.serialize_field("range_m", &self.0.range_m)?;
+        state.serialize_field("depth_m", &self.0.depth_m)?;
+        state.serialize_field("pressure", &BorrowedPressure(self.0))?;
+        state.end()
+    }
+}
+
+impl Serialize for BorrowedPressure<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("PressureResponse", 2)?;
+        state.serialize_field("real", &self.0.pressure.re)?;
+        state.serialize_field("imaginary", &self.0.pressure.im)?;
+        state.end()
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct NonFiniteOutput {
     field: &'static str,
@@ -391,6 +517,20 @@ fn validate_arrival_result(result: &SimulationResult) -> Result<(), NonFiniteOut
                     "arrivals.receiver_angle_degrees",
                 )?;
             }
+        }
+    }
+    Ok(())
+}
+
+fn validate_field_result(result: &SimulationResult) -> Result<(), NonFiniteOutput> {
+    finite_f64(result.frequency_hz, "frequency_hz")?;
+    for source in &result.field_sources {
+        finite_f64(source.source_depth_m, "sources.source_depth_m")?;
+        for receiver in &source.samples {
+            finite_f64(receiver.range_m, "receivers.range_m")?;
+            finite_f64(receiver.depth_m, "receivers.depth_m")?;
+            finite_f32(receiver.pressure.re, "receivers.pressure.real")?;
+            finite_f32(receiver.pressure.im, "receivers.pressure.imaginary")?;
         }
     }
     Ok(())
@@ -442,7 +582,7 @@ impl Write for LimitedJsonBuffer {
 }
 
 #[derive(Debug)]
-enum ArrivalWorkerError {
+enum JsonWorkerError {
     Simulation(DiagnosticReport),
     NonFinite(NonFiniteOutput),
     ResponseTooLarge,
@@ -453,21 +593,47 @@ fn serialize_arrivals(
     result: &SimulationResult,
     warnings: &[Diagnostic],
     max_bytes: usize,
-) -> Result<Vec<u8>, ArrivalWorkerError> {
-    validate_arrival_result(result).map_err(ArrivalWorkerError::NonFinite)?;
-    let response = BorrowedArrivalsResponse {
-        schema_version: 1,
-        title: &result.title,
-        frequency_hz: result.frequency_hz,
-        warnings: warnings.iter().map(DiagnosticResponse::from).collect(),
-        sources: BorrowedArrivalSources(&result.arrival_sources),
-    };
+) -> Result<Vec<u8>, JsonWorkerError> {
+    validate_arrival_result(result).map_err(JsonWorkerError::NonFinite)?;
+    serialize_json(
+        &BorrowedArrivalsResponse {
+            schema_version: 1,
+            title: &result.title,
+            frequency_hz: result.frequency_hz,
+            warnings: warnings.iter().map(DiagnosticResponse::from).collect(),
+            sources: BorrowedArrivalSources(&result.arrival_sources),
+        },
+        max_bytes,
+    )
+}
+
+fn serialize_field(
+    result: &SimulationResult,
+    warnings: &[Diagnostic],
+    run_kind: FieldRunKindResponse,
+    max_bytes: usize,
+) -> Result<Vec<u8>, JsonWorkerError> {
+    validate_field_result(result).map_err(JsonWorkerError::NonFinite)?;
+    serialize_json(
+        &BorrowedFieldResponse {
+            schema_version: 1,
+            title: &result.title,
+            frequency_hz: result.frequency_hz,
+            run_kind,
+            warnings: warnings.iter().map(DiagnosticResponse::from).collect(),
+            sources: BorrowedFieldSources(&result.field_sources),
+        },
+        max_bytes,
+    )
+}
+
+fn serialize_json(response: &impl Serialize, max_bytes: usize) -> Result<Vec<u8>, JsonWorkerError> {
     let mut output = LimitedJsonBuffer::new(max_bytes);
-    if let Err(error) = serde_json::to_writer(&mut output, &response) {
+    if let Err(error) = serde_json::to_writer(&mut output, response) {
         return if output.limit_exceeded {
-            Err(ArrivalWorkerError::ResponseTooLarge)
+            Err(JsonWorkerError::ResponseTooLarge)
         } else {
-            Err(ArrivalWorkerError::Serialization(error.to_string()))
+            Err(JsonWorkerError::Serialization(error.to_string()))
         };
     }
     Ok(output.bytes)
@@ -696,7 +862,60 @@ async fn arrivals_case(
             "the /v1/arrivals endpoint requires run.kind to be arrivals",
         ));
     }
+    simulate_to_json(state, outcome, JsonOutput::Arrivals).await
+}
 
+#[utoipa::path(
+    post,
+    path = "/v1/field",
+    tag = "simulation",
+    request_body(content = CaseDocument, content_type = "application/json"),
+    security((), ("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "Versioned JSON pressure-field result", body = FieldResponse, content_type = "application/json"),
+        (status = 400, description = "Malformed JSON", body = ErrorResponse),
+        (status = 401, description = "Bearer authentication failed", body = ErrorResponse),
+        (status = 413, description = "Request body exceeds the configured limit", body = ErrorResponse),
+        (status = 415, description = "Request is not JSON", body = ErrorResponse),
+        (status = 422, description = "Case is invalid, unsupported, or not a pressure-field run", body = ErrorResponse),
+        (status = 429, description = "Simulation or JSON response resource limit exceeded", body = ErrorResponse),
+        (status = 500, description = "Internal execution or JSON output error", body = ErrorResponse),
+        (status = 504, description = "Request timed out", body = ErrorResponse)
+    )
+)]
+async fn field_case(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+) -> Result<Response, ApiError> {
+    let body = extract_json_body(&headers, body)?;
+    let outcome = parse_document(&body)?;
+    let run_kind = match outcome.value.environment.run.kind {
+        RunKind::Coherent => FieldRunKindResponse::Coherent,
+        RunKind::SemiCoherent => FieldRunKindResponse::SemiCoherent,
+        RunKind::Incoherent => FieldRunKindResponse::Incoherent,
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "unsupported_run_kind",
+                "the /v1/field endpoint requires a coherent, semi_coherent, or incoherent run.kind",
+            ));
+        }
+    };
+    simulate_to_json(state, outcome, JsonOutput::Field(run_kind)).await
+}
+
+#[derive(Clone, Copy)]
+enum JsonOutput {
+    Arrivals,
+    Field(FieldRunKindResponse),
+}
+
+async fn simulate_to_json(
+    state: AppState,
+    outcome: LoadOutcome<Case>,
+    output: JsonOutput,
+) -> Result<Response, ApiError> {
     let limits = state.simulation_limits;
     let max_json_response_bytes = state.max_json_response_bytes;
     let warnings = outcome.warnings;
@@ -715,13 +934,17 @@ async fn arrivals_case(
         })?;
     let task = tokio::task::spawn_blocking(move || {
         let _worker_permit = worker_permit;
-        let result =
-            run_simulation(&outcome.value, limits).map_err(ArrivalWorkerError::Simulation)?;
-        serialize_arrivals(&result, &warnings, max_json_response_bytes)
+        let result = run_simulation(&outcome.value, limits).map_err(JsonWorkerError::Simulation)?;
+        match output {
+            JsonOutput::Arrivals => serialize_arrivals(&result, &warnings, max_json_response_bytes),
+            JsonOutput::Field(run_kind) => {
+                serialize_field(&result, &warnings, run_kind, max_json_response_bytes)
+            }
+        }
     });
     let bytes = match task.await {
         Ok(Ok(bytes)) => bytes,
-        Ok(Err(ArrivalWorkerError::Simulation(report))) => {
+        Ok(Err(JsonWorkerError::Simulation(report))) => {
             let limit_exceeded = report
                 .diagnostics()
                 .iter()
@@ -741,7 +964,7 @@ async fn arrivals_case(
             };
             return Err(ApiError::from_report(status, code, message, &report));
         }
-        Ok(Err(ArrivalWorkerError::NonFinite(error))) => {
+        Ok(Err(JsonWorkerError::NonFinite(error))) => {
             tracing::error!(
                 field = error.field,
                 "simulation produced non-finite JSON output"
@@ -749,22 +972,22 @@ async fn arrivals_case(
             return Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "output_failed",
-                "simulation produced a non-finite arrival value",
+                "simulation produced a non-finite JSON output value",
             ));
         }
-        Ok(Err(ArrivalWorkerError::ResponseTooLarge)) => {
+        Ok(Err(JsonWorkerError::ResponseTooLarge)) => {
             return Err(ApiError::new(
                 StatusCode::TOO_MANY_REQUESTS,
                 "resource_limit_exceeded",
                 "JSON response exceeded the configured byte limit",
             ));
         }
-        Ok(Err(ArrivalWorkerError::Serialization(message))) => {
-            tracing::error!(%message, "failed to serialize JSON arrival response");
+        Ok(Err(JsonWorkerError::Serialization(message))) => {
+            tracing::error!(%message, "failed to serialize JSON simulation response");
             return Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "output_failed",
-                "unable to serialize the JSON arrival result",
+                "unable to serialize the JSON simulation result",
             ));
         }
         Err(error) => {
@@ -941,11 +1164,13 @@ mod tests {
                 .unwrap();
         assert!(openapi["paths"]["/v1/run"].is_object());
         assert!(openapi["paths"]["/v1/arrivals"].is_object());
+        assert!(openapi["paths"]["/v1/field"].is_object());
         assert_eq!(
             openapi["components"]["schemas"]["Hdf5Response"]["format"],
             "binary"
         );
         assert!(openapi["components"]["schemas"]["ArrivalsResponse"].is_object());
+        assert!(openapi["components"]["schemas"]["FieldResponse"].is_object());
 
         let valid = service
             .clone()
@@ -1077,6 +1302,71 @@ mod tests {
         assert_eq!(body["error"]["code"], "resource_limit_exceeded");
     }
 
+    #[tokio::test]
+    async fn field_returns_all_pressure_modes_and_rejects_other_run_kinds() {
+        for run_kind in ["coherent", "semi_coherent", "incoherent"] {
+            let mut field_case: Value = serde_json::from_str(CASE).unwrap();
+            field_case["run"]["kind"] = serde_json::json!(run_kind);
+            let response = app(ServerConfig::default())
+                .oneshot(json_request(
+                    "/v1/field",
+                    serde_json::to_vec(&field_case).unwrap(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+            let body: Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                    .unwrap();
+            assert_eq!(body["schema_version"], 1);
+            assert_eq!(body["run_kind"], run_kind);
+            assert_eq!(body["frequency_hz"], 1000.0);
+            assert!(body["warnings"].is_array());
+            assert_eq!(body["sources"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                body["sources"][0]["receivers"].as_array().unwrap().len(),
+                33
+            );
+            let receiver = &body["sources"][0]["receivers"][0];
+            assert!(receiver["range_m"].is_number());
+            assert!(receiver["depth_m"].is_number());
+            assert!(receiver["pressure"]["real"].is_number());
+            assert!(receiver["pressure"]["imaginary"].is_number());
+        }
+
+        let mut arrivals_case: Value = serde_json::from_str(CASE).unwrap();
+        arrivals_case["run"]["kind"] = serde_json::json!("arrivals");
+        let rejected = app(ServerConfig::default())
+            .oneshot(json_request(
+                "/v1/field",
+                serde_json::to_vec(&arrivals_case).unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(rejected.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["error"]["code"], "unsupported_run_kind");
+
+        let output_limited = app(ServerConfig {
+            max_json_response_bytes: 8,
+            ..ServerConfig::default()
+        })
+        .oneshot(json_request("/v1/field", CASE))
+        .await
+        .unwrap();
+        assert_eq!(output_limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        let body: Value = serde_json::from_slice(
+            &to_bytes(output_limited.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["error"]["code"], "resource_limit_exceeded");
+    }
+
     #[test]
     fn non_finite_arrivals_must_not_serialize_as_null() {
         let result = SimulationResult {
@@ -1110,6 +1400,24 @@ mod tests {
             validation,
             Err(super::NonFiniteOutput {
                 field: "arrivals.amplitude"
+            })
+        ));
+    }
+
+    #[test]
+    fn non_finite_pressure_must_not_serialize_as_null() {
+        let case = bellhop::json::load_case_document(CASE.as_bytes())
+            .unwrap()
+            .value;
+        let mut result =
+            bellhop::solver::run(&case, bellhop::solver::SimulationLimits::default()).unwrap();
+        result.field_sources[0].samples[0].pressure.re = f32::INFINITY;
+
+        let validation = super::validate_field_result(&result);
+        assert!(matches!(
+            validation,
+            Err(super::NonFiniteOutput {
+                field: "receivers.pressure.real"
             })
         ));
     }

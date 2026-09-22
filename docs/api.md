@@ -2,8 +2,9 @@
 
 `bellhop-server` is a stateless, synchronous HTTP facade. Each simulation
 request supplies one [self-contained JSON case](json-input.md) and waits for the
-solver. A caller can receive either the complete versioned HDF5 result or a
-focused JSON arrival result. The service does not retain cases or results.
+solver. A caller can receive the complete versioned HDF5 result or focused JSON
+arrival and pressure-field results. The service does not retain cases or
+results.
 
 ## Start the service
 
@@ -120,12 +121,59 @@ jq '.run.kind = "arrivals"' examples/field-g.json |
 A case with any other run kind returns `422` with error code
 `unsupported_run_kind`.
 
-Simulation, finite-value validation, and JSON serialization all run while the
-request holds a bounded worker slot. A borrowing serialization view writes the
-solver result directly into a size-limited buffer; it does not materialize a
-second source/receiver/arrival object graph. Exceeding
+For both JSON result endpoints, simulation, finite-value validation, and
+serialization run while the request holds a bounded worker slot. A borrowing
+serialization view writes the solver result directly into a size-limited
+buffer; it does not materialize a second result object graph. Exceeding
 `BELLHOP_MAX_JSON_RESPONSE_BYTES` returns `429`; a non-finite solver value
 returns a structured `500` instead of emitting schema-invalid JSON `null`.
+
+### `POST /v1/field`
+
+Accepts the same JSON document and requires `run.kind` to be `coherent`,
+`semi_coherent`, or `incoherent`. Success returns the solver's relative complex
+pressure directly as `application/json`:
+
+```json
+{
+  "schema_version": 1,
+  "title": "BELLHOP field influence golden",
+  "frequency_hz": 1000.0,
+  "run_kind": "coherent",
+  "warnings": [],
+  "sources": [
+    {
+      "source_depth_m": 50.0,
+      "receivers": [
+        {
+          "range_m": 1000.0,
+          "depth_m": 50.0,
+          "pressure": {
+            "real": 0.001,
+            "imaginary": -0.002
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Source and receiver coordinates are metres, with depth positive downward.
+Pressure components are dimensionless single-precision values. Receiver order
+matches the input grid: range-major for rectilinear grids and input order for
+irregular grids. The same finite-value and response-size protections as
+`/v1/arrivals` apply. Large pressure fields should use `/v1/run` and its HDF5
+response instead.
+
+```console
+curl --fail-with-body \
+  -H 'Content-Type: application/json' \
+  --data-binary @examples/field-g.json \
+  http://localhost:8080/v1/field
+```
+
+Other run kinds return `422` with error code `unsupported_run_kind`.
 
 ## Errors
 
@@ -171,7 +219,7 @@ Run `bellhop-server --help` for flag names.
 | `BELLHOP_WORKERS` | logical CPU count | maximum admitted blocking requests |
 | `BELLHOP_REQUEST_TIMEOUT_SECONDS` | `120` | queue plus execution timeout |
 | `BELLHOP_MAX_BODY_BYTES` | `16777216` | request-body limit |
-| `BELLHOP_MAX_JSON_RESPONSE_BYTES` | `67108864` | JSON arrival response limit |
+| `BELLHOP_MAX_JSON_RESPONSE_BYTES` | `67108864` | JSON response limit |
 | `BELLHOP_AUTH_TOKEN` | unset | optional static Bearer token |
 | `BELLHOP_MAX_RAYS` | `1000000` | total launch-ray limit |
 | `BELLHOP_MAX_STEPS_PER_RAY` | `100000` | per-ray integration limit |

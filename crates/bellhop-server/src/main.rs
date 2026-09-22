@@ -33,7 +33,7 @@ struct Args {
     #[arg(long, env = "BELLHOP_MAX_BODY_BYTES", default_value_t = 16 * 1024 * 1024)]
     max_body_bytes: usize,
 
-    /// Maximum serialized size of a JSON arrival response.
+    /// Maximum serialized size of a JSON simulation response.
     #[arg(
         long,
         env = "BELLHOP_MAX_JSON_RESPONSE_BYTES",

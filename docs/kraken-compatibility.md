@@ -1,35 +1,56 @@
 # KRAKEN Rust rewrite: compatibility target
 
-This document records the planned acceptance scope for a future `kraken` crate.
-It is not a claim that KRAKEN support exists in this repository yet. The
-numerical reference is Acoustics Toolbox `v2023.5`, commit
-`475108519289c6fb488b58980c644ea14eccc604`, using the same pinned Linux x86-64
-GNU Fortran 12.2 environment as the BELLHOP reference.
+The numerical reference is Acoustics Toolbox `v2023.5`, commit
+`475108519289c6fb488b58980c644ea14eccc604`, using the pinned Linux x86-64 GNU
+Fortran 12.2 environment described in [`reference.md`](reference.md).
+
+**Status:** the first Pekeris slice is implemented in `crates/kraken`. It is
+not the full matrix below; unsupported inputs in this slice are rejected.
 
 ## Products
 
-The Rust implementation will cover the two-dimensional normal-mode workflow:
+The target is the two-dimensional normal-mode workflow:
 
 1. `KRAKEN` computes real-eigenvalue normal modes.
 2. `KRAKENC` computes complex modes.
 3. `FIELD` synthesizes complex frequency-domain pressure from a mode set.
 
-The result model exposes both mode data and pressure fields. Modes contain the
-per-frequency modal wavenumber, attenuation, phase/group speeds, and sampled
-mode shapes. Pressure fields contain receiver coordinates and complex pressure.
-Rust output will use a versioned HDF5 schema rather than the Fortran `.mod` and
-`.shd` binary formats. Those Fortran files remain reference inputs to the
-pinned differential tests.
+The Rust result model exposes modes and pressure fields, not BELLHOP-style ray
+arrivals. Rust output will use a versioned HDF5 schema rather than the Fortran
+`.mod` and `.shd` binary formats. A wideband time-domain response would be a
+separate product and acceptance contract.
 
-This is not a ray-arrival model: BELLHOP-style discrete arrivals are out of
-scope. A wideband time-domain response would be a separate product and
-acceptance contract.
+## Current slice
 
-## Input and environment support
+`crates/kraken` currently accepts a narrow legacy `.env`/`.flp` subset:
 
-The planned legacy adapters accept KRAKEN `.env` files and FIELD `.flp` files,
-including same-stem auxiliary resources used by the selected cases. The modern
-adapter will provide a strict, self-contained JSON case, following BELLHOP's
+- one frequency and one homogeneous, lossless fluid water layer using `N`
+  interpolation;
+- a smooth pressure-release surface (`V`) and smooth acoustic fluid
+  half-space (`A`) with zero attenuation;
+- a coherent, omnidirectional line source (`X`, `O`, `C`) and one
+  range-independent FIELD profile at 0 km;
+- finite, in-water source/receiver depths, with FIELD depths covered by the
+  mode-sampling depths in `.env`.
+
+The mode solver uses the closed-form Pekeris dispersion relation, normalizes
+mode shapes including the decaying bottom-half-space tail, and synthesizes the
+line-source coherent field. The legacy parser rejects other solver, boundary,
+attenuation, source, and FIELD options instead of silently changing their
+meaning. The fixture is constructed for this repository; upstream `tests/PekerisRD`
+is a BELLHOP case, not a KRAKEN reference. The pinned Fortran golden comparison
+is `crates/kraken/tests/pekeris_reference.rs` against
+`crates/kraken/tests/fixtures/Pekeris.{env,flp}`.
+
+This is an implementation slice, not a reduction of the final support target.
+The measured difference from the pinned finite-difference reference is recorded
+in [`deviations.md`](deviations.md).
+
+## Planned environment support
+
+The planned legacy adapters accept KRAKEN `.env` and FIELD `.flp` files,
+including same-stem auxiliary resources used by selected cases. A strict,
+self-contained JSON adapter is also planned, following BELLHOP's
 single-document input convention.
 
 The v2023.5 KRAKEN environment reader supports these SSP interpolation options:
@@ -40,23 +61,18 @@ The v2023.5 KRAKEN environment reader supports these SSP interpolation options:
 - `S`: cubic spline
 - `A`: analytic profile
 
-Unlike BELLHOP, KRAKEN's normal-mode profile is range-independent; range
-variation is represented as a sequence of profiles for FIELD propagation.
-The planned environment support includes fluid and elastic layers, the
-reference's attenuation units (`N`, `F`, `M`, `m`, `W`, `Q`, `L`), volume
-attenuation (`T`, `F`, `B`), multiple frequencies, and the top/bottom boundary
-conditions implemented by the reference (`V`, `R`, `A`, `F`, `P`). The boundary
-codes cover vacuum, rigid, half-space, tabulated reflection, and precomputed
-impedance paths. Existing reflection tables are inputs; table generation by
-the separate `BOUNCE` program is not part of this rewrite.
+KRAKEN profiles are range-independent; range variation is represented as a
+sequence of profiles for FIELD propagation. The final environment matrix
+includes fluid and elastic layers, attenuation units (`N`, `F`, `M`, `m`, `W`,
+`Q`, `L`), volume attenuation (`T`, `F`, `B`), multiple frequencies, and the
+reference's top/bottom conditions (`V`, `R`, `A`, `F`, `P`). These cover vacuum,
+rigid, half-space, tabulated-reflection, and precomputed-impedance paths.
+Existing reflection tables are inputs; table generation by the separate
+`BOUNCE` program is excluded.
 
-The input validator will reject unsupported or inconsistent combinations with
-structured diagnostics; it will not silently substitute a different solver
-path.
+## Planned FIELD support
 
-## FIELD support
-
-The planned 2D FIELD behavior includes:
+The final 2D FIELD matrix includes:
 
 - point, line, and scaled-cylindrical source geometry;
 - omnidirectional and tabulated source patterns;
@@ -72,15 +88,8 @@ is out of scope, as are BOUNCE table generation and ray-arrival products.
 
 ## Incremental implementation and acceptance
 
-The first numerical slice is a single-frequency, non-attenuating fluid Pekeris
-waveguide. It must parse and validate its legacy input, compute modes, synthesize
-a range-independent coherent field, and compare both products with pinned
-Fortran. This is an implementation slice, not a reduction of the final support
-matrix.
-
-The Pekeris input will be constructed for this project: upstream
-`tests/PekerisRD` exercises BELLHOP rather than KRAKEN. Additional official
-v2023.5 cases provide feature coverage:
+The first slice compares modes and a range-independent coherent field against
+pinned Fortran. Further representative v2023.5 cases provide feature coverage:
 
 | Feature | Reference cases |
 |---|---|
@@ -90,16 +99,15 @@ v2023.5 cases provide feature coverage:
 | Adiabatic and coupled FIELD | `tests/Gulf/gulf_ad.flp`, `gulf_cm.flp` |
 | Reflection inputs | `tests/TabRefCoef/neggradK_*` |
 
-Acceptance requires pinned differential coverage for modal wavenumbers and
+Acceptance requires differential coverage for modal wavenumbers and
 attenuation, normalized/aligned mode shapes, and complex pressure-field samples.
-Mode-shape comparisons must account for the arbitrary sign/phase convention of
-eigenvectors. Small committed goldens will keep ordinary tests independent of
-Docker; the pinned reference workflow will cover official end-to-end cases.
+Mode-shape comparisons account for the arbitrary sign/phase convention of
+eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
+the pinned reference workflow covers official end-to-end cases.
 
 ## Repository shape
 
-The implementation will follow the existing BELLHOP boundaries: one
-`crates/kraken` library for model, validated case construction, input adapters,
-mode solvers, and FIELD; separate CLI and HDF5 adapters when those outputs are
-ready. No shared acoustics abstraction is planned until real duplication
-justifies one.
+The implementation follows the existing BELLHOP boundaries: `crates/kraken`
+contains validated cases, legacy adapters, mode solving, and FIELD. CLI and HDF5
+adapters can follow once the numerical path is stable. No shared acoustics
+abstraction is planned until real duplication justifies one.

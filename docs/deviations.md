@@ -2,6 +2,23 @@
 
 Only intentional differences that affect numerical or discrete behavior belong here. Ordinary porting defects are fixed directly and covered by tests.
 
+## Initial KRAKEN Pekeris slice
+
+`crates/kraken` uses the closed-form Pekeris dispersion relation and mode
+normalization for its initial homogeneous-fluid case. Pinned KRAKEN uses a
+finite-difference mesh; its `.mod` eigenvectors are sampled on the first
+`NG=1000` mesh, while the reported eigenvalues use mesh extrapolation. Against
+the constructed 50 Hz, 100 m Pekeris case, the modal wavenumber error is below
+`2.3e-11 m^-1`, the sampled mode-shape error is below `5.7e-7`, and the coherent
+field error is below `1.5e-6` absolute pressure over the committed grid. Group
+speed comparison is limited by the reference `.prt` print precision of
+`0.01 m/s`.
+
+These are measured analytic-versus-discrete differences, not tolerance
+allowances for unsupported inputs. The test keeps the Fortran-generated modal
+and pressure values as fixed goldens; general profiles require a different
+solver path and their own differential results.
+
 ## Double-precision source and receiver geometry
 
 bellhop-rs stores and interpolates source and receiver depths in `f64` instead

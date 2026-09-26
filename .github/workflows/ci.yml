@@ -49,6 +49,8 @@ jobs:
         run: tools/reference/run-kraken-case.sh kraken target/reference/cases/MunkK.env
       - name: Smoke pinned KRAKENC and FIELD
         run: tools/reference/run-kraken-case.sh krakenc target/reference/cases/MunkKleaky.env
+      - name: Pekeris KRAKEN/FIELD golden reference
+        run: tools/reference/run-kraken-case.sh kraken crates/kraken/tests/fixtures/Pekeris.env
       - name: Critical boundary/interface rays
         run: tools/reference/check-critical-rays.sh
       - name: Official full-grid coherent field (MunkB_Coh)

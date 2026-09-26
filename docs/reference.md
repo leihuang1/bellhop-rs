@@ -7,9 +7,12 @@ The compatibility oracle is the official Acoustics Toolbox release `v2023.5`:
 - Commit: `475108519289c6fb488b58980c644ea14eccc604`
 - License: GPL-3.0
 
-Small numerical goldens are committed under
+Small BELLHOP numerical goldens are committed under
 `crates/bellhop/tests/fixtures/golden`. Their per-file provenance, hashes,
-compiler, target, and flags are recorded alongside them. Ray trajectories
+compiler, target, and flags are recorded alongside them. The first KRAKEN golden
+uses the constructed Pekeris case in `crates/kraken/tests/fixtures` and compares
+typed modes and complex pressure against the pinned Fortran outputs; measured
+differences are recorded in [`deviations.md`](deviations.md). Ray trajectories
 cover all `N/C/P/S/Q/A` sound-speed models. Eigenray and arrival goldens cover
 Cartesian and ray-centered geometric-hat beams, Cartesian geometric-Gaussian
 beams, caustics, arrival combination, and multi-depth/multi-range receiver

@@ -339,7 +339,7 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
         option(3),
         option(4),
         option(5),
-    ] != [b'N', b'V', b'N', b' ', b' ', b' ']
+    ] != *b"NVN   "
         || options
             .text
             .as_bytes()

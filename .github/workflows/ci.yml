@@ -41,7 +41,14 @@ jobs:
           mkdir -p target/reference/cases
           docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/cases:/out" \
             --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 \
-            -c "cp /opt/acoustics-toolbox/tests/Munk/MunkB_Coh.env /out/ && cp /opt/acoustics-toolbox/tests/SBCX/sbcx_Arr_asc.env /out/"
+            -c "cp /opt/acoustics-toolbox/tests/Munk/MunkB_Coh.env /out/ && \
+                cp /opt/acoustics-toolbox/tests/SBCX/sbcx_Arr_asc.env /out/ && \
+                cp /opt/acoustics-toolbox/tests/Munk/MunkK.env /opt/acoustics-toolbox/tests/Munk/MunkK.flp /out/ && \
+                cp /opt/acoustics-toolbox/tests/MunkLeaky/MunkKleaky.env /opt/acoustics-toolbox/tests/MunkLeaky/MunkKleaky.flp /out/"
+      - name: Smoke pinned KRAKEN and FIELD
+        run: tools/reference/run-kraken-case.sh kraken target/reference/cases/MunkK.env
+      - name: Smoke pinned KRAKENC and FIELD
+        run: tools/reference/run-kraken-case.sh krakenc target/reference/cases/MunkKleaky.env
       - name: Critical boundary/interface rays
         run: tools/reference/check-critical-rays.sh
       - name: Official full-grid coherent field (MunkB_Coh)

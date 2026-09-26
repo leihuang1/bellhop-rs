@@ -3,9 +3,10 @@
 ## Pinned Fortran differential reference
 
 `reference/Dockerfile` builds the official Acoustics Toolbox `v2023.5`
-BELLHOP at commit `475108519289c6fb488b58980c644ea14eccc604` for Linux x86-64.
-The Debian base image, source-archive SHA-256, GNU Fortran version, and compiler
-flags are fixed in the image definition.
+BELLHOP, KRAKEN, KRAKENC, and 2D FIELD programs at commit
+`475108519289c6fb488b58980c644ea14eccc604` for Linux x86-64. The Debian base
+image, source-archive SHA-256, GNU Fortran version, and compiler flags are
+fixed in the image definition.
 
 Build the image:
 
@@ -17,10 +18,20 @@ The build script downloads the commit archive with retries, verifies
 SHA-256 `f8a7a2c1e80a73431cd230a10bef5fcfc996c88889a0e1540771c3922ee2a21f`,
 and removes the temporary archive after the image is built.
 
-Run the reference model for one case:
+Run the BELLHOP reference for one case:
 
 ```sh
 tools/reference/run-case.sh path/to/case.env
+```
+
+Run KRAKEN or KRAKENC on a legacy environment. If a same-stem `.flp` exists,
+the helper also runs 2D FIELD; it saves the reference `.mod` and `.shd` files
+under `target/reference/`. The planned Rust support matrix is in
+[the KRAKEN compatibility document](../docs/kraken-compatibility.md):
+
+```sh
+tools/reference/run-kraken-case.sh kraken path/to/MunkK.env
+tools/reference/run-kraken-case.sh krakenc path/to/MunkKleaky.env
 ```
 
 Compare an `R` run against Rust on the host, or on the authoritative pinned

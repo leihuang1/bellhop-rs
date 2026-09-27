@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 use std::path::Path;
 
-use num_complex::Complex64;
+use num_complex::{Complex32, Complex64};
 
 use crate::{
     Case, Diagnostic, DiagnosticReport, MAX_FIELD_SAMPLES, ModeSet, NormalMode, PressureField,
@@ -145,7 +145,7 @@ fn find_roots(
         if lower_value == 0.0 {
             roots.push(lower);
         } else if upper_value == 0.0 {
-            let cutoff_margin = 16.0 * f64::EPSILON * q_cutoff.max(1.0);
+            let cutoff_margin = 16.0 * f64::EPSILON * q_cutoff;
             if q_cutoff - upper > cutoff_margin {
                 roots.push(upper);
             }
@@ -169,6 +169,8 @@ fn dispersion(q: f64, q_cutoff: f64, water_depth: f64, density_ratio: f64) -> f6
     qh.cos() + density_ratio * gamma / q * qh.sin()
 }
 
+// Exact equality detects a bracket with no representable midpoint, at any scale.
+#[allow(clippy::float_cmp)]
 fn bisect_root(
     mut lower: f64,
     mut upper: f64,
@@ -180,7 +182,7 @@ fn bisect_root(
     for _ in 0..ROOT_ITERATIONS {
         let middle = lower + (upper - lower) * 0.5;
         let middle_value = dispersion(middle, q_cutoff, water_depth, density_ratio);
-        if middle_value == 0.0 || upper - lower <= 4.0 * f64::EPSILON * middle.abs().max(1.0) {
+        if middle_value == 0.0 || middle == lower || middle == upper {
             return middle;
         }
         if lower_value.is_sign_positive() == middle_value.is_sign_positive() {
@@ -242,8 +244,13 @@ fn synthesize_field(case: &Case, mode_set: &ModeSet) -> Result<PressureField, Di
         ));
     }
 
-    let factor =
-        Complex64::new(0.0, 1.0) * (2.0 * PI).sqrt() * Complex64::from_polar(1.0, PI * 0.25);
+    // Match FIELD's single-precision .mod input and arithmetic (EvaluateMod.f90),
+    // including its literal pi and separate range/offset exponentials.
+    #[allow(clippy::approx_constant)]
+    let field_pi = 3.141_592_6_f32;
+    let factor = Complex32::new(0.0, 1.0)
+        * (2.0 * field_pi).sqrt()
+        * Complex32::from_polar(1.0, field_pi * 0.25);
     let mut pressure = Vec::with_capacity(sample_count);
     for source_depth in &definition.source_depths_m {
         let source_shapes: Vec<_> = mode_set
@@ -273,7 +280,7 @@ fn synthesize_field(case: &Case, mode_set: &ModeSet) -> Result<PressureField, Di
                 })
                 .collect();
             for range in &definition.receiver_ranges_m {
-                let mut value = Complex64::new(0.0, 0.0);
+                let mut value = Complex32::new(0.0, 0.0);
                 for ((mode, source_shape), receiver_shape) in mode_set
                     .modes
                     .iter()
@@ -281,18 +288,13 @@ fn synthesize_field(case: &Case, mode_set: &ModeSet) -> Result<PressureField, Di
                     .zip(&source_shapes)
                     .zip(&receiver_shapes)
                 {
-                    let amplitude = factor * *source_shape * *receiver_shape
-                        / mode.horizontal_wavenumber_rad_per_m;
-                    let phase_argument = Complex64::new(0.0, -(range + receiver_offset))
-                        * mode.horizontal_wavenumber_rad_per_m;
-                    if !phase_argument.re.is_finite() || !phase_argument.im.is_finite() {
-                        return Err(error(
-                            "KR0302",
-                            "field phase exceeds the supported numeric range",
-                            "field_grid",
-                        ));
-                    }
-                    value += amplitude * phase_argument.exp();
+                    let k = single(mode.horizontal_wavenumber_rad_per_m);
+                    let amplitude = factor * single(*source_shape) / k;
+                    let ik = double(Complex32::new(0.0, -1.0) * k);
+                    let offset_shape = single(
+                        double(amplitude * single(*receiver_shape)) * (ik * receiver_offset).exp(),
+                    );
+                    value += offset_shape * single((ik * *range).exp());
                 }
                 if !value.re.is_finite() || !value.im.is_finite() {
                     return Err(error(
@@ -301,7 +303,7 @@ fn synthesize_field(case: &Case, mode_set: &ModeSet) -> Result<PressureField, Di
                         "field_grid",
                     ));
                 }
-                pressure.push(value);
+                pressure.push(double(value));
             }
         }
     }
@@ -315,17 +317,25 @@ fn synthesize_field(case: &Case, mode_set: &ModeSet) -> Result<PressureField, Di
     })
 }
 
+fn double(value: Complex32) -> Complex64 {
+    Complex64::new(f64::from(value.re), f64::from(value.im))
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn single(value: Complex64) -> Complex32 {
+    Complex32::new(value.re as f32, value.im as f32)
+}
+
 fn sample_shape(depths: &[f64], values: &[Complex64], depth: f64) -> Complex64 {
     if depth <= depths[0] {
         return values[0];
     }
-    for index in 1..depths.len() {
-        if depth <= depths[index] {
-            let weight = (depth - depths[index - 1]) / (depths[index] - depths[index - 1]);
-            return values[index - 1] + (values[index] - values[index - 1]) * weight;
-        }
+    let index = depths.partition_point(|sample| *sample < depth);
+    if index == depths.len() {
+        return values[values.len() - 1];
     }
-    values[values.len() - 1]
+    let weight = (depth - depths[index - 1]) / (depths[index] - depths[index - 1]);
+    values[index - 1] + (values[index] - values[index - 1]) * weight
 }
 
 fn error(code: &'static str, message: impl Into<String>, field: &str) -> DiagnosticReport {

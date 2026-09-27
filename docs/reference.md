@@ -9,10 +9,17 @@ The compatibility oracle is the official Acoustics Toolbox release `v2023.5`:
 
 Small BELLHOP numerical goldens are committed under
 `crates/bellhop/tests/fixtures/golden`. Their per-file provenance, hashes,
-compiler, target, and flags are recorded alongside them. The first KRAKEN golden
-uses the constructed Pekeris case in `crates/kraken/tests/fixtures` and compares
-typed modes and complex pressure against the pinned Fortran outputs; measured
-differences are recorded in [`deviations.md`](deviations.md). Ray trajectories
+compiler, target, and flags are recorded alongside them. KRAKEN has three
+constructed Pekeris cases and raw `.mod/.shd/.prt` goldens with
+[provenance and hashes](../crates/kraken/tests/fixtures/golden/README.md).
+`tools/reference/compare-kraken.sh CASE.env` regenerates reference outputs and
+compares mode counts, coordinates, wavenumbers, attenuation, phase/group speeds,
+phase-aligned shapes, and every complex pressure sample. The same comparator
+runs without Docker on committed goldens; CI also compares fresh outputs for
+all three cases. Official Munk KRAKEN/KRAKENC runs are reference smoke tests
+only. Measured differences are in [`deviations.md`](deviations.md).
+
+BELLHOP ray trajectories
 cover all `N/C/P/S/Q/A` sound-speed models. Eigenray and arrival goldens cover
 Cartesian and ray-centered geometric-hat beams, Cartesian geometric-Gaussian
 beams, caustics, arrival combination, and multi-depth/multi-range receiver

@@ -40,7 +40,38 @@ attenuation, source, and FIELD options instead of silently changing their
 meaning. The fixture is constructed for this repository; upstream `tests/PekerisRD`
 is a BELLHOP case, not a KRAKEN reference. The pinned Fortran golden comparison
 is `crates/kraken/tests/pekeris_reference.rs` against
-`crates/kraken/tests/fixtures/Pekeris.{env,flp}`.
+three constructed fixture pairs (`Pekeris`, `PekerisFiltered`, `PekerisDense`).
+The raw `.mod/.shd/.prt` goldens and their provenance are committed under
+[`fixtures/golden`](../crates/kraken/tests/fixtures/golden/README.md).
+CI reruns all three inputs through pinned Fortran and uses the same numerical
+comparator on the fresh output, not just a file-existence smoke test.
+
+### Legacy syntax and limits in this slice
+
+- Quotes, comments, comma separators, `D` exponents, and explicit vectors
+  spanning lines are accepted. Like upstream `ReadVector`, each legacy vector
+  is sorted independently, including receiver offsets.
+- Each SSP point occupies one record. The first supplies all six values;
+  later points may supply 2–5 followed by `/` to retain trailing material
+  values. `/` ends that record, **not** the SSP; the interface depth ends the
+  SSP. Complete six-value records need no slash.
+- Fortran null slots, repetition syntax, and subtabulated endpoint vectors
+  are not supported yet and are rejected. This is not a general Fortran
+  list-directed reader.
+- All parsed numeric values must be finite, including intermediate SSP points
+  that do not survive into the homogeneous case model. SSP depths must increase
+  from zero to the interface. Semantic diagnostics retain input-file records.
+- Each input file is capped at 1 MiB; vectors at 100,000 entries; root search
+  at 20,000 brackets; mode shapes at 5,000,000 values; pressure grids at
+  1,000,000 samples and 50,000,000 modal contributions.
+- `mesh_points` (10–1,000,000) and positive `max_range_m` are validated legacy
+  reference metadata. The analytical solver does not use a mesh or KRAKEN's
+  range-driven extrapolation; these settings do not change its modes.
+
+The analytical mode results remain double precision. FIELD uses single-precision
+wavenumbers, modal products, and accumulation, with separate range/offset phases,
+following the reference's `.mod`/FIELD rounding points. Returned pressure values
+are promoted to `Complex64`; that does not imply double-precision FIELD arithmetic.
 
 This is an implementation slice, not a reduction of the final support target.
 The measured difference from the pinned finite-difference reference is recorded
@@ -103,7 +134,9 @@ Acceptance requires differential coverage for modal wavenumbers and
 attenuation, normalized/aligned mode shapes, and complex pressure-field samples.
 Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
-the pinned reference workflow covers official end-to-end cases.
+the pinned reference workflow numerically compares the supported Pekeris cases.
+Official Munk KRAKEN/KRAKENC runs currently remain reference-only smoke tests;
+they are not evidence of Rust support for those profiles.
 
 ## Repository shape
 

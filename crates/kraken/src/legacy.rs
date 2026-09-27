@@ -1,4 +1,6 @@
-use std::fs;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::{Case, CaseDefinition, Diagnostic, DiagnosticReport, MAX_VECTOR_LENGTH};
@@ -10,21 +12,37 @@ const MAX_PROFILE_POINTS: usize = 100_001;
 /// # Errors
 ///
 /// Returns structured parse, validation, and input-file diagnostics.
-#[allow(clippy::float_cmp)]
 pub fn load_case(
     env_path: impl AsRef<Path>,
     flp_path: impl AsRef<Path>,
 ) -> Result<Case, DiagnosticReport> {
     let env_path = env_path.as_ref();
     let flp_path = flp_path.as_ref();
-    let environment = parse_environment(&read_file(env_path)?, env_path)?;
-    let field = parse_field(&read_file(flp_path)?, flp_path)?;
+    parse_case(
+        &read_file(env_path)?,
+        &read_file(flp_path)?,
+        env_path,
+        flp_path,
+    )
+}
+
+#[allow(clippy::float_cmp)]
+fn parse_case(
+    env_source: &str,
+    flp_source: &str,
+    env_path: &Path,
+    flp_path: &Path,
+) -> Result<Case, DiagnosticReport> {
+    let environment = parse_environment(env_source, env_path)?;
+    let field = parse_field(flp_source, flp_path)?;
 
     let mut mode_sample_depths_m = environment.source_depths;
     mode_sample_depths_m.extend(environment.receiver_depths);
     mode_sample_depths_m.sort_by(f64::total_cmp);
     mode_sample_depths_m.dedup_by(|left, right| *left == *right);
 
+    let env_locations = environment.locations;
+    let field_locations = field.locations;
     Case::from_definition(CaseDefinition {
         title: environment.title,
         frequency_hz: environment.frequency_hz,
@@ -44,19 +62,63 @@ pub fn load_case(
         receiver_ranges_m: field.receiver_ranges_m,
         receiver_offsets_m: field.receiver_offsets_m,
     })
+    .map_err(|mut report| {
+        for diagnostic in &mut report.diagnostics {
+            let (locations, path, record) = match diagnostic.field.as_str() {
+                "water_depth_m" | "mesh_points" => (&env_locations, env_path, "water_header"),
+                "water_sound_speed_mps" | "water_density_g_cm3" => {
+                    (&env_locations, env_path, "sound_speed_profile")
+                }
+                "bottom_sound_speed_mps" | "bottom_density_g_cm3" => {
+                    (&env_locations, env_path, "bottom_half_space")
+                }
+                "max_range_m" => (&env_locations, env_path, "max_range_km"),
+                "mode_sample_depths_m" => (&env_locations, env_path, "mode_receiver_depths_m"),
+                "source_depths_m" => (&field_locations, flp_path, "field_source_depths_m"),
+                "receiver_depths_m" => (&field_locations, flp_path, "field_receiver_depths_m"),
+                "receiver_ranges_m" | "field_grid" => {
+                    (&field_locations, flp_path, "receiver_ranges_km")
+                }
+                "receiver_offsets_m" => (&field_locations, flp_path, "receiver_offsets_m"),
+                "mode_limit" => (&field_locations, flp_path, "mode_limit"),
+                other => (&env_locations, env_path, other),
+            };
+            if let Some(&(line, column)) = locations.get(record) {
+                diagnostic.path = path.to_path_buf();
+                diagnostic.line = line;
+                diagnostic.column = column;
+            }
+        }
+        report
+    })
 }
 
 fn read_file(path: &Path) -> Result<String, DiagnosticReport> {
-    fs::read_to_string(path).map_err(|error| {
-        one(
-            "KR0001",
-            format!("unable to read input: {error}"),
+    const MAX_INPUT_BYTES: u64 = 1_048_576;
+    let mut source = String::new();
+    File::open(path)
+        .and_then(|file| file.take(MAX_INPUT_BYTES + 1).read_to_string(&mut source))
+        .map_err(|error| {
+            one(
+                "KR0001",
+                format!("unable to read input: {error}"),
+                "input",
+                path,
+                1,
+                1,
+            )
+        })?;
+    if source.len() as u64 > MAX_INPUT_BYTES {
+        return Err(one(
+            "KR0201",
+            "input file exceeds 1 MiB",
             "input",
             path,
             1,
             1,
-        )
-    })
+        ));
+    }
+    Ok(source)
 }
 
 #[derive(Clone)]
@@ -78,6 +140,7 @@ struct Reader {
     index: usize,
     last_line: usize,
     eof_line: usize,
+    locations: HashMap<String, (usize, usize)>,
 }
 
 impl Reader {
@@ -100,6 +163,7 @@ impl Reader {
             index: 0,
             last_line: 0,
             eof_line: source.lines().count() + 1,
+            locations: HashMap::new(),
         })
     }
 
@@ -116,6 +180,10 @@ impl Reader {
         };
         self.index += 1;
         self.last_line = record.line;
+        self.locations.entry(field.to_owned()).or_insert((
+            record.line,
+            record.tokens.first().map_or(1, |token| token.column),
+        ));
         Ok(Record {
             tokens: record.tokens.clone(),
             line: record.line,
@@ -219,9 +287,23 @@ fn tokenize(text: &str, line: usize, path: &Path) -> Result<(Vec<Token>, bool), 
     let mut tokens = Vec::new();
     let mut index = 0;
     let mut slash = false;
+    let mut comma_pending = false;
     while index < chars.len() {
         let ch = chars[index];
-        if ch.is_whitespace() || ch == ',' {
+        if ch.is_whitespace() {
+            index += 1;
+        } else if ch == ',' {
+            if comma_pending || tokens.is_empty() {
+                return Err(one(
+                    "KR0202",
+                    "Fortran null slots are not supported",
+                    "input",
+                    path,
+                    line,
+                    index + 1,
+                ));
+            }
+            comma_pending = true;
             index += 1;
         } else if ch == '!' {
             break;
@@ -229,6 +311,7 @@ fn tokenize(text: &str, line: usize, path: &Path) -> Result<(Vec<Token>, bool), 
             slash = true;
             break;
         } else if ch == '\'' || ch == '"' {
+            comma_pending = false;
             let quote = ch;
             let column = index + 1;
             index += 1;
@@ -265,6 +348,7 @@ fn tokenize(text: &str, line: usize, path: &Path) -> Result<(Vec<Token>, bool), 
                 column,
             });
         } else {
+            comma_pending = false;
             let start = index;
             while index < chars.len()
                 && !chars[index].is_whitespace()
@@ -283,7 +367,7 @@ fn tokenize(text: &str, line: usize, path: &Path) -> Result<(Vec<Token>, bool), 
 }
 
 fn number(token: &Token, path: &Path, field: &str) -> Result<f64, DiagnosticReport> {
-    token
+    let value = token
         .text
         .replace('D', "E")
         .replace('d', "e")
@@ -297,7 +381,18 @@ fn number(token: &Token, path: &Path, field: &str) -> Result<f64, DiagnosticRepo
                 token.line,
                 token.column,
             )
-        })
+        })?;
+    if !value.is_finite() {
+        return Err(one(
+            "KR0201",
+            "value must be finite",
+            field,
+            path,
+            token.line,
+            token.column,
+        ));
+    }
+    Ok(value)
 }
 
 struct Environment {
@@ -314,6 +409,7 @@ struct Environment {
     max_range_m: f64,
     source_depths: Vec<f64>,
     receiver_depths: Vec<f64>,
+    locations: HashMap<String, (usize, usize)>,
 }
 
 #[allow(clippy::float_cmp, clippy::too_many_lines)]
@@ -370,17 +466,21 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
     })?;
     let surface_roughness = number(&header.tokens[1], path, "surface_roughness")?;
     let water_depth_m = number(&header.tokens[2], path, "water_depth_m")?;
+    if surface_roughness != 0.0 {
+        return Err(reader.record_error(&header, "surface_roughness", "requires a smooth surface"));
+    }
 
     let mut points: Vec<[f64; 6]> = Vec::new();
     loop {
         let record = reader.record("sound_speed_profile")?;
         if !(2..=6).contains(&record.tokens.len())
             || (points.is_empty() && record.tokens.len() != 6)
+            || (record.tokens.len() < 6 && !record.slash)
         {
             return Err(reader.record_error(
                 &record,
                 "sound_speed_profile",
-                "expected 2..=6 values; the first point must specify all 6",
+                "expected 6 values, or 2..=5 followed by / to inherit trailing values; the first point must specify all 6",
             ));
         }
         let mut point = points
@@ -390,6 +490,32 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
         for (index, token) in record.tokens.iter().enumerate() {
             point[index] = number(token, path, "sound_speed_profile")?;
         }
+        if point[0] < 0.0
+            || point[0] > water_depth_m
+            || points
+                .last()
+                .is_some_and(|previous| point[0] <= previous[0])
+        {
+            return Err(reader.record_error(
+                &record,
+                "sound_speed_profile",
+                "depths must increase within the water column",
+            ));
+        }
+        if (points.is_empty() && point[0] != 0.0)
+            || point[2] != 0.0
+            || point[4] != 0.0
+            || point[5] != 0.0
+            || points
+                .first()
+                .is_some_and(|first| point[1] != first[1] || point[3] != first[3])
+        {
+            return Err(reader.record_error(
+                &record,
+                "sound_speed_profile",
+                "requires a constant, lossless fluid water column starting at 0 m",
+            ));
+        }
         points.push(point);
         if points.len() > MAX_PROFILE_POINTS {
             return Err(reader.record_error(
@@ -398,7 +524,7 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
                 "too many profile points",
             ));
         }
-        if record.slash {
+        if point[0] == water_depth_m {
             break;
         }
     }
@@ -412,24 +538,6 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
     }
     let water_speed = points[0][1];
     let water_density = points[0][3];
-    if points.iter().any(|point| {
-        point[1] != water_speed
-            || point[2] != 0.0
-            || point[3] != water_density
-            || point[4] != 0.0
-            || point[5] != 0.0
-    }) || points[0][0] != 0.0
-        || points.last().is_none_or(|point| point[0] != water_depth_m)
-        || points.windows(2).any(|pair| pair[1][0] <= pair[0][0])
-        || surface_roughness != 0.0
-    {
-        return Err(reader_error(
-            &reader,
-            "KR0202",
-            "requires a smooth, constant, lossless fluid water column",
-            "sound_speed_profile",
-        ));
-    }
 
     let bottom_option = reader.record("bottom_options")?;
     if bottom_option.tokens.len() != 2
@@ -471,12 +579,16 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
         max_range_m,
         source_depths,
         receiver_depths,
+        locations: reader.locations,
     })
 }
 
 fn read_vector(reader: &mut Reader, field: &str) -> Result<Vec<f64>, DiagnosticReport> {
     let count = reader.count(&format!("{field}.count"))?;
-    reader.vector(count, field)
+    let mut values = reader.vector(count, field)?;
+    // The reference ReadVector sorts each vector, including receiver offsets.
+    values.sort_by(f64::total_cmp);
+    Ok(values)
 }
 
 struct Field {
@@ -485,6 +597,7 @@ struct Field {
     receiver_depths: Vec<f64>,
     receiver_ranges_m: Vec<f64>,
     receiver_offsets_m: Vec<f64>,
+    locations: HashMap<String, (usize, usize)>,
 }
 
 fn parse_field(source: &str, path: &Path) -> Result<Field, DiagnosticReport> {
@@ -531,6 +644,7 @@ fn parse_field(source: &str, path: &Path) -> Result<Field, DiagnosticReport> {
         receiver_depths,
         receiver_ranges_m: ranges_km.into_iter().map(|range| range * 1000.0).collect(),
         receiver_offsets_m: receiver_offsets,
+        locations: reader.locations,
     })
 }
 
@@ -556,8 +670,99 @@ fn one(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_environment, parse_field};
+    use super::{parse_case, parse_environment, parse_field, read_file};
     use std::path::Path;
+
+    #[test]
+    fn oversized_files_are_rejected_before_parsing() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("kraken-input-{}-{stamp}.env", std::process::id()));
+        let file = std::fs::File::create_new(&path).unwrap();
+        file.set_len(1_048_577).unwrap();
+        drop(file);
+        let result = read_file(&path);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(result.unwrap_err().diagnostics()[0].code, "KR0201");
+    }
+
+    #[test]
+    fn semantic_errors_retain_file_locations() {
+        let env = include_str!("../tests/fixtures/Pekeris.env").replace("50.0\n", "-50.0\n");
+        let flp = include_str!("../tests/fixtures/Pekeris.flp").replace("75.0 /", "175.0 /");
+        let report =
+            parse_case(&env, &flp, Path::new("case.env"), Path::new("case.flp")).unwrap_err();
+        for (field, path, line) in [
+            ("frequency_hz", "case.env", 2),
+            ("source_depths_m", "case.flp", 9),
+        ] {
+            let diagnostic = report
+                .diagnostics()
+                .iter()
+                .find(|d| d.field == field)
+                .unwrap();
+            assert_eq!(diagnostic.path, Path::new(path));
+            assert_eq!(diagnostic.line, line);
+        }
+    }
+
+    #[test]
+    fn legacy_vectors_follow_reference_sorting_and_reject_unsupported_syntax() {
+        let flp = include_str!("../tests/fixtures/Pekeris.flp");
+        let source = flp
+            .replace("0.5 1.0 2.0 /", "2.0D0, 0.5d0, 1.0 /")
+            .replace("0.0 0.0 0.0 /", "10.0 -10.0 0.0 /");
+        let field = parse_field(&source, Path::new("case.flp")).unwrap();
+        assert_eq!(field.receiver_ranges_m, [500.0, 1000.0, 2000.0]);
+        assert_eq!(field.receiver_offsets_m, [-10.0, 0.0, 10.0]);
+        for vector in [
+            "0.5 2.0 /",
+            "3*0.5 /",
+            ",0.5,1.0 /",
+            "0.5,,1.0 /",
+            "0.5 NaN 2.0 /",
+        ] {
+            let source = flp.replace("0.5 1.0 2.0 /", vector);
+            assert!(
+                parse_field(&source, Path::new("case.flp")).is_err(),
+                "accepted {vector}"
+            );
+        }
+    }
+
+    #[test]
+    fn ssp_ends_at_interface_not_slash() {
+        let env = include_str!("../tests/fixtures/Pekeris.env");
+        for source in [
+            env.replace(
+                "0.0 1500.0 0.0 1.0 0.0 0.0\n",
+                "0.0 1500.0 0.0 1.0 0.0 0.0 /\n",
+            ),
+            env.replace("100.0 1500.0 /", "100.0 1500.0 0.0 1.0 0.0 0.0"),
+        ] {
+            assert!(parse_environment(&source, Path::new("Pekeris.env")).is_ok());
+        }
+    }
+
+    #[test]
+    fn invalid_ssp_numbers_and_ambiguous_records_are_rejected() {
+        let env = include_str!("../tests/fixtures/Pekeris.env");
+        for point in [
+            "NaN 1500.0 0.0 1.0 0.0 0.0",
+            "inf 1500.0 0.0 1.0 0.0 0.0",
+            "50.0,,1500.0,0.0,1.0,0.0,0.0",
+            "50.0 1500.0", // Missing values need an explicit slash, not implicit inheritance.
+        ] {
+            let source = env.replace("100.0 1500.0 /", &format!("{point}\n100.0 1500.0 /"));
+            assert!(
+                parse_environment(&source, Path::new("Pekeris.env")).is_err(),
+                "accepted {point}"
+            );
+        }
+    }
 
     #[test]
     fn unsupported_solver_and_field_options_are_rejected() {

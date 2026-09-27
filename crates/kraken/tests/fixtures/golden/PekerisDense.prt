@@ -1,0 +1,61 @@
+ _________________________________________________
+
+ KRAKEN- Pekeris different frequency, depth, speeds and densities
+ Nominal Frequency =   75.00    Hz
+ NMedia    =   1
+
+
+     N2-Linear approximation to SSP
+     Attenuation units: nepers/m
+     VACUUM
+
+       ( # mesh points =  4000  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1480.00      0.00     1.03       0.0000    0.0000
+     60.00      1480.00      0.00     1.03       0.0000    0.0000
+    120.00      1480.00      0.00     1.03       0.0000    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     ACOUSTO-ELASTIC half-space
+    120.00      1800.00      0.00     1.80       0.0000    0.0000
+
+ cLow =   1400.0     m/s      cHigh =   1800.0     m/s
+ RMax =   2.0000     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            2
+    Source   z-coordinates, Sz (m)
+                 30.0000       90.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            5
+    Receiver z-coordinates, Rz (m)
+                 0.00000       30.0000       60.0000       90.0000
+   120.000
+
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            7
+        1            0.485E-02s
+                --- Number of modes =            7
+        2            0.296E-02s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.3174799464       0.0       1484.310752       1476.32
+    2  0.3146756476       0.0       1497.538503       1464.98
+    3  0.3099065400       0.0       1520.583909       1445.20
+    4  0.3030422867       0.0       1555.026868       1416.11
+    5  0.2939133481       0.0       1603.325950       1377.01
+    6  0.2823169978       0.0       1669.183584       1327.95
+    7  0.2681074897       0.0       1757.649138       1276.42
+ _________________________________________________
+
+ End of environmental file

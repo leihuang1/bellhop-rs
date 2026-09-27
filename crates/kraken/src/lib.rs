@@ -106,9 +106,11 @@ pub struct CaseDefinition {
     pub water_density_g_cm3: f64,
     pub bottom_sound_speed_mps: f64,
     pub bottom_density_g_cm3: f64,
+    /// Legacy reference mesh size; the analytical Pekeris solver does not discretize.
     pub mesh_points: usize,
     pub c_low_mps: f64,
     pub c_high_mps: f64,
+    /// Legacy reference convergence control, not a FIELD range bound or solver input.
     pub max_range_m: f64,
     /// Depths at which the legacy mode file samples each eigenfunction.
     pub mode_sample_depths_m: Vec<f64>,
@@ -120,6 +122,12 @@ pub struct CaseDefinition {
 }
 
 /// A validated case. Its definition is read-only after construction.
+///
+/// ```compile_fail
+/// fn change_frequency(mut case: kraken::Case) {
+///     case.frequency_hz = 100.0;
+/// }
+/// ```
 #[derive(Clone, Debug, PartialEq)]
 pub struct Case(CaseDefinition);
 
@@ -154,16 +162,25 @@ impl Case {
         if definition.water_depth_m <= 0.0 {
             diagnostics.push(error("water_depth_m", "water depth must be positive"));
         }
-        if definition.water_sound_speed_mps <= 0.0
-            || definition.bottom_sound_speed_mps <= definition.water_sound_speed_mps
-        {
+        if definition.water_sound_speed_mps <= 0.0 {
+            diagnostics.push(error(
+                "water_sound_speed_mps",
+                "water sound speed must be positive",
+            ));
+        }
+        if definition.bottom_sound_speed_mps <= definition.water_sound_speed_mps {
             diagnostics.push(error(
                 "bottom_sound_speed_mps",
                 "a trapped Pekeris waveguide requires a faster fluid bottom",
             ));
         }
-        if definition.water_density_g_cm3 <= 0.0 || definition.bottom_density_g_cm3 <= 0.0 {
-            diagnostics.push(error("density", "densities must be positive"));
+        for (field, density) in [
+            ("water_density_g_cm3", definition.water_density_g_cm3),
+            ("bottom_density_g_cm3", definition.bottom_density_g_cm3),
+        ] {
+            if density <= 0.0 {
+                diagnostics.push(error(field, "density must be positive"));
+            }
         }
         if !(10..=MAX_MESH_POINTS).contains(&definition.mesh_points) {
             diagnostics.push(error(
@@ -209,17 +226,13 @@ impl Case {
             if values.iter().any(|value| !value.is_finite()) {
                 diagnostics.push(error(field, "values must be finite"));
             }
-        }
-        if definition
-            .source_depths_m
-            .iter()
-            .chain(&definition.receiver_depths_m)
-            .any(|depth| *depth < 0.0 || *depth > definition.water_depth_m)
-        {
-            diagnostics.push(error(
-                "field_depths_m",
-                "source and receiver depths must lie in water",
-            ));
+            if field != "receiver_ranges_m"
+                && values
+                    .iter()
+                    .any(|depth| *depth < 0.0 || *depth > definition.water_depth_m)
+            {
+                diagnostics.push(error(field, "depths must lie in water"));
+            }
         }
         if definition
             .receiver_ranges_m
@@ -321,6 +334,8 @@ pub struct PressureField {
     pub receiver_ranges_m: Vec<f64>,
     pub receiver_offsets_m: Vec<f64>,
     /// Row-major values indexed as `[source_depth][receiver_depth][receiver_range]`.
+    /// FIELD uses reference single-precision modal products and accumulation;
+    /// final values are promoted to `Complex64` for the result model.
     pub pressure: Vec<Complex64>,
 }
 

@@ -34,6 +34,22 @@ tools/reference/run-kraken-case.sh kraken path/to/MunkK.env
 tools/reference/run-kraken-case.sh krakenc path/to/MunkKleaky.env
 ```
 
+Numerically compare a supported Rust Pekeris `.env`/`.flp` pair against fresh
+KRAKEN/FIELD output (not merely a smoke test):
+
+```sh
+for case in Pekeris PekerisFiltered PekerisDense; do
+  tools/reference/compare-kraken.sh "crates/kraken/tests/fixtures/$case.env"
+done
+```
+
+This compares every mode and pressure sample, including modal print precision,
+mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
+three cases with fixed tolerances. Raw small reference goldens and their
+[hashes/provenance](../crates/kraken/tests/fixtures/golden/README.md) also run in
+ordinary tests without Docker. The official Munk reference smoke cases are
+not yet supported by the Rust solver.
+
 Compare an `R` run against Rust on the host, or on the authoritative pinned
 Linux x86-64 Rust 1.88 environment:
 
@@ -74,6 +90,6 @@ Run the committed critical boundary/interface cases with:
 tools/reference/check-critical-rays.sh
 ```
 
-Reference outputs are written below `target/reference/` and are not committed.
-Ordinary parser and numerical tests use the curated fixtures under
-`crates/bellhop/tests/fixtures`.
+Fresh reference outputs are written below `target/reference/` and are not
+committed automatically. Ordinary parser and numerical tests use curated
+fixtures under `crates/bellhop/tests/fixtures` and `crates/kraken/tests/fixtures`.

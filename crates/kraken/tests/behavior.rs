@@ -58,10 +58,12 @@ fn phase_speed_selection_and_field_mode_limit_are_independent() {
     let input = definition();
     let baseline = solve(&Case::from_definition(input.clone()).unwrap()).unwrap();
     let mut selected = input.clone();
-    selected.c_low_mps =
-        (baseline.modes.modes[0].phase_speed_mps + baseline.modes.modes[1].phase_speed_mps) * 0.5;
-    selected.c_high_mps =
-        (baseline.modes.modes[1].phase_speed_mps + baseline.modes.modes[2].phase_speed_mps) * 0.5;
+    selected.c_low_mps = baseline.modes.modes[0]
+        .phase_speed_mps
+        .midpoint(baseline.modes.modes[1].phase_speed_mps);
+    selected.c_high_mps = baseline.modes.modes[1]
+        .phase_speed_mps
+        .midpoint(baseline.modes.modes[2].phase_speed_mps);
     let result = solve(&Case::from_definition(selected).unwrap()).unwrap();
     assert_eq!(result.modes.modes.len(), 1);
     assert!(

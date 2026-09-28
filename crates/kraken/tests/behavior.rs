@@ -123,7 +123,7 @@ fn trapped_mode_cutoff_and_group_speed() {
     let cutoff_frequency = 1.0
         / (4.0
             * input.water_depth_m
-            * (input.water_sound_speed_mps.recip().powi(2)
+            * (input.sound_speed_profile[0].sound_speed_mps.recip().powi(2)
                 - input.bottom_sound_speed_mps.recip().powi(2))
             .sqrt());
     input.frequency_hz = cutoff_frequency * (1.0 - 1e-6);
@@ -134,7 +134,8 @@ fn trapped_mode_cutoff_and_group_speed() {
             .code,
         "KR0301"
     );
-    input.frequency_hz = cutoff_frequency * (1.0 + 1e-6);
+    // KRAKEN's xMin=1.00001*omega²/cHigh² excludes modes arbitrarily close to cutoff.
+    input.frequency_hz = cutoff_frequency * 1.05;
     assert_eq!(
         solve(&Case::from_definition(input).unwrap())
             .unwrap()
@@ -144,7 +145,8 @@ fn trapped_mode_cutoff_and_group_speed() {
         1
     );
 
-    let input = definition();
+    let mut input = definition();
+    input.max_range_m = 0.0; // group velocity is computed on the first mesh, not extrapolated.
     let baseline = solve(&Case::from_definition(input.clone()).unwrap()).unwrap();
     let mut lower = input.clone();
     let mut upper = input;
@@ -167,6 +169,9 @@ fn modal_roots_do_not_depend_on_an_absolute_q_tolerance() {
     let scale = 1e12;
     input.frequency_hz /= scale;
     input.water_depth_m *= scale;
+    for point in &mut input.sound_speed_profile {
+        point.depth_m *= scale;
+    }
     input.max_range_m *= scale;
     for values in [
         &mut input.mode_sample_depths_m,
@@ -195,6 +200,7 @@ fn modal_roots_do_not_depend_on_an_absolute_q_tolerance() {
 fn solver_limits_and_numeric_overflow_are_errors() {
     let mut input = definition();
     input.frequency_hz = 1_000_000.0;
+    input.mesh_points = 1_000_000;
     assert_eq!(
         solve(&Case::from_definition(input).unwrap())
             .unwrap_err()

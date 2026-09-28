@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
-  echo "usage: $0 CASE.env (requires same-stem .flp; supported Pekeris slice only)" >&2
+  echo "usage: $0 CASE.env (requires same-stem .flp; supported lossless single-fluid slice only)" >&2
   exit 2
 fi
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -18,5 +18,5 @@ output="$root/target/reference/$stem-kraken"
 KRAKEN_DIFFERENTIAL_ENV="$case_path" \
 KRAKEN_DIFFERENTIAL_ROOT="$output/$stem" \
 cargo test --release --manifest-path "$root/Cargo.toml" --package kraken \
-  --test pekeris_reference pekeris_matches_fresh_reference \
+  --test differential_reference fluid_matches_fresh_reference \
   -- --ignored --exact --nocapture

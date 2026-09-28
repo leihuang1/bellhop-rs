@@ -1,6 +1,6 @@
-// Adapted from Acoustics Toolbox v2023.5 misc/pchipMod.f90 and splinec.f90,
+// Adapted from Acoustics Toolbox v2023.5 misc/pchipMod.f90, splinec.f90, and munk.f90,
 // Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
-// Real, constant-density water-column interpolation only.
+// Real, constant-density water-column profiles only.
 use crate::solver::error;
 use crate::{CaseDefinition, DiagnosticReport, Interpolation};
 
@@ -14,10 +14,14 @@ pub(super) struct Profile<'a> {
 impl<'a> Profile<'a> {
     pub(super) fn new(case: &'a CaseDefinition) -> Result<Self, DiagnosticReport> {
         let points = &case.sound_speed_profile;
-        let mut minimum_speed = points
-            .iter()
-            .map(|point| point.sound_speed_mps)
-            .fold(f64::INFINITY, f64::min);
+        let mut minimum_speed = if case.interpolation == Interpolation::AnalyticMunk {
+            1500.0
+        } else {
+            points
+                .iter()
+                .map(|point| point.sound_speed_mps)
+                .fold(f64::INFINITY, f64::min)
+        };
         let mut cubic = Vec::new();
         if matches!(
             case.interpolation,
@@ -89,6 +93,11 @@ impl<'a> Profile<'a> {
     }
 
     pub(super) fn speed(&self, depth: f64) -> f64 {
+        if self.case.interpolation == Interpolation::AnalyticMunk {
+            // Acoustics Toolbox v2023.5 misc/munk.f90, medium 1.
+            let x = 2.0 * (depth - 1300.0) / 1300.0;
+            return 1500.0 * (1.0 + 0.00737 * (x - 1.0 + (-x).exp()));
+        }
         let points = &self.case.sound_speed_profile;
         let upper = points
             .partition_point(|p| p.depth_m < depth)
@@ -109,6 +118,7 @@ impl<'a> Profile<'a> {
                 let t = depth - a.depth_m;
                 c0 + t * (c1 + t * (c2 + t * c3))
             }
+            Interpolation::AnalyticMunk => unreachable!(),
         }
     }
 }

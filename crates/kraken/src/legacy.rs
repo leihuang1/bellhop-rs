@@ -463,7 +463,7 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
 
     let options = reader.text("top_options")?;
     let option = |index| options.text.as_bytes().get(index).copied().unwrap_or(b' ');
-    if !matches!(option(0), b'N' | b'C' | b'P' | b'S')
+    if !matches!(option(0), b'N' | b'C' | b'P' | b'S' | b'A')
         || !matches!(option(1), b'V' | b'R')
         || !matches!(option(2), b'N' | b'W')
         || [option(3), option(4), option(5)] != *b"   "
@@ -476,7 +476,7 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
     {
         return Err(one(
             "KR0202",
-            "requires N/C/P/S interpolation, vacuum or rigid surface, N/W attenuation without water loss, and one frequency",
+            "requires N/C/P/S or fixed analytic A interpolation, vacuum or rigid surface, N/W attenuation without water loss, and one frequency",
             "top_options",
             path,
             options.line,
@@ -488,7 +488,8 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
         b'N' => Interpolation::N2Linear,
         b'C' => Interpolation::CLinear,
         b'P' => Interpolation::Pchip,
-        _ => Interpolation::Spline,
+        b'S' => Interpolation::Spline,
+        _ => Interpolation::AnalyticMunk,
     };
     let header = reader.record("water_header")?;
     if header.tokens.len() != 3 {
@@ -508,67 +509,70 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
     }
 
     let mut points: Vec<[f64; 6]> = Vec::new();
-    loop {
-        let record = reader.record("sound_speed_profile")?;
-        if !(2..=6).contains(&record.tokens.len()) || (record.tokens.len() < 6 && !record.slash) {
-            return Err(reader.record_error(
-                &record,
-                "sound_speed_profile",
-                "expected 6 values, or 2..=5 followed by / to inherit trailing values",
-            ));
-        }
-        let mut point = points
-            .last()
-            .copied()
-            .unwrap_or([0.0, 1500.0, 0.0, 1.0, 0.0, 0.0]);
-        for (index, token) in record.tokens.iter().enumerate() {
-            point[index] = number(token, path, "sound_speed_profile")?;
-        }
-        if point[0] < 0.0
-            || point[0] > water_depth_m
-            || points
+    if interpolation != Interpolation::AnalyticMunk {
+        loop {
+            let record = reader.record("sound_speed_profile")?;
+            if !(2..=6).contains(&record.tokens.len()) || (record.tokens.len() < 6 && !record.slash)
+            {
+                return Err(reader.record_error(
+                    &record,
+                    "sound_speed_profile",
+                    "expected 6 values, or 2..=5 followed by / to inherit trailing values",
+                ));
+            }
+            let mut point = points
                 .last()
-                .is_some_and(|previous| point[0] <= previous[0])
-        {
-            return Err(reader.record_error(
-                &record,
-                "sound_speed_profile",
-                "depths must increase within the water column",
-            ));
+                .copied()
+                .unwrap_or([0.0, 1500.0, 0.0, 1.0, 0.0, 0.0]);
+            for (index, token) in record.tokens.iter().enumerate() {
+                point[index] = number(token, path, "sound_speed_profile")?;
+            }
+            if point[0] < 0.0
+                || point[0] > water_depth_m
+                || points
+                    .last()
+                    .is_some_and(|previous| point[0] <= previous[0])
+            {
+                return Err(reader.record_error(
+                    &record,
+                    "sound_speed_profile",
+                    "depths must increase within the water column",
+                ));
+            }
+            if (points.is_empty() && point[0] != 0.0)
+                || point[2] != 0.0
+                || point[4] != 0.0
+                || point[5] != 0.0
+                || points.first().is_some_and(|first| point[3] != first[3])
+            {
+                return Err(reader.record_error(
+                    &record,
+                    "sound_speed_profile",
+                    "requires a lossless, constant-density fluid water column starting at 0 m",
+                ));
+            }
+            points.push(point);
+            if points.len() > MAX_PROFILE_POINTS {
+                return Err(reader.record_error(
+                    &record,
+                    "sound_speed_profile",
+                    "too many profile points",
+                ));
+            }
+            if point[0] == water_depth_m {
+                break;
+            }
         }
-        if (points.is_empty() && point[0] != 0.0)
-            || point[2] != 0.0
-            || point[4] != 0.0
-            || point[5] != 0.0
-            || points.first().is_some_and(|first| point[3] != first[3])
-        {
-            return Err(reader.record_error(
-                &record,
+        if points.len() < 2 {
+            return Err(reader_error(
+                &reader,
+                "KR0202",
+                "a fluid profile needs top and interface points",
                 "sound_speed_profile",
-                "requires a lossless, constant-density fluid water column starting at 0 m",
             ));
-        }
-        points.push(point);
-        if points.len() > MAX_PROFILE_POINTS {
-            return Err(reader.record_error(
-                &record,
-                "sound_speed_profile",
-                "too many profile points",
-            ));
-        }
-        if point[0] == water_depth_m {
-            break;
         }
     }
-    if points.len() < 2 {
-        return Err(reader_error(
-            &reader,
-            "KR0202",
-            "a fluid profile needs top and interface points",
-            "sound_speed_profile",
-        ));
-    }
-    let water_density = points[0][3];
+    let water_density = points.first().map_or(1.0, |point| point[3]);
 
     let bottom_option = reader.record("bottom_options")?;
     if bottom_option.tokens.len() != 2
@@ -599,7 +603,17 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
                 "expected 6 values, or trailing defaults terminated by /",
             ));
         }
-        bottom = *points.last().unwrap();
+        if interpolation == Interpolation::AnalyticMunk && bottom_record.tokens.len() < 4 {
+            return Err(reader.record_error(
+                &bottom_record,
+                "bottom_half_space",
+                "analytic profile requires explicit bottom sound speed and density",
+            ));
+        }
+        bottom = points
+            .last()
+            .copied()
+            .unwrap_or([water_depth_m, 1500.0, 0.0, 1.0, 0.0, 0.0]);
         for (index, token) in bottom_record.tokens.iter().enumerate() {
             bottom[index] = number(token, path, "bottom_half_space")?;
         }
@@ -998,7 +1012,27 @@ mod tests {
                 .unwrap()
                 .diagnostics()[0]
                 .field,
-            "top_options"
+            "bottom_options"
+        );
+
+        let analytic = include_str!("../tests/fixtures/MunkAnalytic.env");
+        let extra_point = analytic.replace("'A' 0.0", "0 1500 /\n'A' 0.0");
+        assert_eq!(
+            parse_environment(&extra_point, Path::new("MunkAnalytic.env"))
+                .err()
+                .unwrap()
+                .diagnostics()[0]
+                .field,
+            "bottom_options"
+        );
+        let missing_material = analytic.replace("5000.0  1600.00 0.0 1.8 0.8 /", "5000 1600 /");
+        assert_eq!(
+            parse_environment(&missing_material, Path::new("MunkAnalytic.env"))
+                .err()
+                .unwrap()
+                .diagnostics()[0]
+                .field,
+            "bottom_half_space"
         );
 
         let lossy_water = include_str!("../tests/fixtures/MunkBottomLoss.env")

@@ -6,14 +6,21 @@ use std::path::{Path, PathBuf};
 use kraken::{Case, ModeSet, PressureField, legacy::load_case, solve};
 use num_complex::Complex64;
 
-const CASES: &[&str] = &["Pekeris", "PekerisFiltered", "PekerisDense"];
+const CASES: &[&str] = &[
+    "Pekeris",
+    "PekerisFiltered",
+    "PekerisDense",
+    "PekerisRefined",
+    "MunkLossless",
+    "SductTrapped",
+];
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
 #[test]
-fn pekeris_modes_and_field_match_pinned_goldens() {
+fn fluid_modes_and_field_match_pinned_goldens() {
     for name in CASES {
         compare(
             &fixtures().join(name).with_extension("env"),
@@ -24,7 +31,7 @@ fn pekeris_modes_and_field_match_pinned_goldens() {
 
 #[test]
 #[ignore = "requires a pinned external Fortran reference run"]
-fn pekeris_matches_fresh_reference() {
+fn fluid_matches_fresh_reference() {
     let env =
         std::env::var_os("KRAKEN_DIFFERENTIAL_ENV").expect("KRAKEN_DIFFERENTIAL_ENV is required");
     let root =
@@ -61,6 +68,7 @@ fn complex_close(actual: Complex64, expected: Complex64, tolerance: f64, field: 
     close((actual - expected).norm(), 0.0, tolerance, field)
 }
 
+#[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
 fn compare_modes(case: &Case, actual: &ModeSet, file: &Records, printed: &str) -> (f64, f64) {
     let header = file.record(0);
     assert_eq!(count(header, 84), 1, "mode frequency count");
@@ -83,7 +91,12 @@ fn compare_modes(case: &Case, actual: &ModeSet, file: &Records, printed: &str) -
         "mode frequency",
     );
     for (index, &depth) in actual.sampled_depths_m.iter().enumerate() {
-        close(depth, single(file.record(4), 4 * index), 1e-5, "mode depth");
+        close(
+            f64::from(depth as f32),
+            single(file.record(4), 4 * index),
+            0.0,
+            "mode depth",
+        );
     }
     let mode_count = count(file.record(5), 0);
     assert_eq!(mode_count, actual.modes.len(), "mode count");
@@ -107,10 +120,17 @@ fn compare_modes(case: &Case, actual: &ModeSet, file: &Records, printed: &str) -
                 .is_some_and(|word| word.parse::<usize>().is_ok())
         })
         .collect();
-    assert_eq!(rows.len(), mode_count, "printed mode count");
+    let print_stride = (mode_count / 30).max(1);
+    assert_eq!(
+        rows.len(),
+        mode_count.div_ceil(print_stride),
+        "printed mode count"
+    );
     let mut max_k = 0.0_f64;
     let mut max_shape = 0.0_f64;
-    for (index, (mode, row)) in actual.modes.iter().zip(rows).enumerate() {
+    for (row_index, row) in rows.into_iter().enumerate() {
+        let index = row_index * print_stride;
+        let mode = &actual.modes[index];
         let columns: Vec<_> = row.split_whitespace().collect();
         assert_eq!(columns.len(), 5, "modal print columns");
         assert_eq!(columns[0].parse::<usize>().unwrap(), index + 1);
@@ -132,11 +152,16 @@ fn compare_modes(case: &Case, actual: &ModeSet, file: &Records, printed: &str) -
         );
         close(mode.phase_speed_mps, values[2], 5e-6, "phase speed");
         close(mode.group_speed_mps, values[3], 0.005, "group speed");
+    }
+    for (index, mode) in actual.modes.iter().enumerate() {
         let k_record = file.record(7 + mode_count + index / modes_per_record);
         complex_close(
-            mode.horizontal_wavenumber_rad_per_m,
+            Complex64::new(
+                f64::from(mode.horizontal_wavenumber_rad_per_m.re as f32),
+                f64::from(mode.horizontal_wavenumber_rad_per_m.im as f32),
+            ),
             complex(k_record, 8 * (index % modes_per_record)),
-            2e-8,
+            0.0,
             "wavenumber (.mod)",
         );
         let shape = file.record(7 + index);
@@ -162,6 +187,7 @@ fn compare_modes(case: &Case, actual: &ModeSet, file: &Records, printed: &str) -
     (max_k, max_shape)
 }
 
+#[allow(clippy::cast_possible_truncation)]
 fn compare_field(case: &Case, actual: &PressureField, file: &Records) -> f64 {
     assert_eq!(&file.record(1)[..10], b"          ", "FIELD plot type");
     let header = file.record(2);
@@ -181,9 +207,9 @@ fn compare_field(case: &Case, actual: &PressureField, file: &Records) -> f64 {
     for (record, depths) in [(7, &actual.source_depths_m), (8, &actual.receiver_depths_m)] {
         for (index, &depth) in depths.iter().enumerate() {
             close(
-                depth,
+                f64::from(depth as f32),
                 single(file.record(record), 4 * index),
-                1e-5,
+                0.0,
                 "field depth",
             );
         }

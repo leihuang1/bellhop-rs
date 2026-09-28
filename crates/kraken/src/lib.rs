@@ -8,6 +8,9 @@ use std::path::{Path, PathBuf};
 use num_complex::Complex64;
 
 pub mod legacy;
+mod modes;
+#[cfg(test)]
+mod pekeris;
 mod solver;
 
 const MAX_FIELD_SAMPLES: usize = 1_000_000;
@@ -96,21 +99,34 @@ impl fmt::Display for DiagnosticReport {
 
 impl Error for DiagnosticReport {}
 
-/// Unvalidated input for the initial homogeneous-fluid Pekeris slice.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Interpolation {
+    N2Linear,
+    CLinear,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SoundSpeedPoint {
+    pub depth_m: f64,
+    pub sound_speed_mps: f64,
+}
+
+/// Unvalidated input for a single lossless fluid layer with a vacuum surface.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CaseDefinition {
     pub title: String,
     pub frequency_hz: f64,
     pub water_depth_m: f64,
-    pub water_sound_speed_mps: f64,
+    pub interpolation: Interpolation,
+    pub sound_speed_profile: Vec<SoundSpeedPoint>,
     pub water_density_g_cm3: f64,
     pub bottom_sound_speed_mps: f64,
     pub bottom_density_g_cm3: f64,
-    /// Legacy reference mesh size; the analytical Pekeris solver does not discretize.
+    /// Base finite-difference mesh size, or 0 for 20 points per bottom wavelength.
     pub mesh_points: usize,
     pub c_low_mps: f64,
     pub c_high_mps: f64,
-    /// Legacy reference convergence control, not a FIELD range bound or solver input.
+    /// Eigenvalue extrapolation convergence control; 0 selects the base mesh only.
     pub max_range_m: f64,
     /// Depths at which the legacy mode file samples each eigenfunction.
     pub mode_sample_depths_m: Vec<f64>,
@@ -132,19 +148,18 @@ pub struct CaseDefinition {
 pub struct Case(CaseDefinition);
 
 impl Case {
-    /// Validate a candidate Pekeris case.
+    /// Validate a candidate fluid-profile case.
     ///
     /// # Errors
     ///
     /// Returns every invalid field in the case definition.
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines, clippy::float_cmp)]
     pub fn from_definition(definition: CaseDefinition) -> Result<Self, DiagnosticReport> {
         let mut diagnostics = DiagnosticReport::default();
 
         for (field, value) in [
             ("frequency_hz", definition.frequency_hz),
             ("water_depth_m", definition.water_depth_m),
-            ("water_sound_speed_mps", definition.water_sound_speed_mps),
             ("water_density_g_cm3", definition.water_density_g_cm3),
             ("bottom_sound_speed_mps", definition.bottom_sound_speed_mps),
             ("bottom_density_g_cm3", definition.bottom_density_g_cm3),
@@ -162,16 +177,40 @@ impl Case {
         if definition.water_depth_m <= 0.0 {
             diagnostics.push(error("water_depth_m", "water depth must be positive"));
         }
-        if definition.water_sound_speed_mps <= 0.0 {
+        let profile = &definition.sound_speed_profile;
+        if !(2..=MAX_VECTOR_LENGTH).contains(&profile.len())
+            || profile.iter().any(|point| {
+                !point.depth_m.is_finite()
+                    || !point.sound_speed_mps.is_finite()
+                    || point.sound_speed_mps <= 0.0
+            })
+            || profile.first().is_none_or(|point| point.depth_m != 0.0)
+            || profile
+                .last()
+                .is_none_or(|point| point.depth_m != definition.water_depth_m)
+            || profile
+                .windows(2)
+                .any(|pair| pair[1].depth_m <= pair[0].depth_m)
+        {
             diagnostics.push(error(
-                "water_sound_speed_mps",
-                "water sound speed must be positive",
+                "sound_speed_profile",
+                "require finite increasing depths from 0 to water depth and positive sound speeds",
             ));
         }
-        if definition.bottom_sound_speed_mps <= definition.water_sound_speed_mps {
+        let minimum_speed = profile
+            .iter()
+            .map(|point| point.sound_speed_mps)
+            .fold(f64::INFINITY, f64::min);
+        if definition.bottom_sound_speed_mps <= minimum_speed {
             diagnostics.push(error(
                 "bottom_sound_speed_mps",
-                "a trapped Pekeris waveguide requires a faster fluid bottom",
+                "trapped modes require a bottom faster than the minimum water sound speed",
+            ));
+        }
+        if definition.c_high_mps > definition.bottom_sound_speed_mps {
+            diagnostics.push(error(
+                "phase_speed_limits",
+                "leaky modes above the bottom sound speed are not supported yet",
             ));
         }
         for (field, density) in [
@@ -182,17 +221,18 @@ impl Case {
                 diagnostics.push(error(field, "density must be positive"));
             }
         }
-        if !(10..=MAX_MESH_POINTS).contains(&definition.mesh_points) {
+        if definition.mesh_points != 0 && !(10..=MAX_MESH_POINTS).contains(&definition.mesh_points)
+        {
             diagnostics.push(error(
                 "mesh_points",
-                format!("mesh points must be in 10..={MAX_MESH_POINTS}"),
+                format!("mesh points must be 0 (automatic) or in 10..={MAX_MESH_POINTS}"),
             ));
         }
         if definition.c_low_mps <= 0.0 || definition.c_high_mps <= definition.c_low_mps {
             diagnostics.push(error("phase_speed_limits", "require 0 < c_low < c_high"));
         }
-        if definition.max_range_m <= 0.0 {
-            diagnostics.push(error("max_range_m", "maximum range must be positive"));
+        if definition.max_range_m < 0.0 {
+            diagnostics.push(error("max_range_m", "maximum range must be non-negative"));
         }
         if definition.mode_limit == 0 || definition.mode_limit > MAX_MODE_LIMIT {
             diagnostics.push(error(

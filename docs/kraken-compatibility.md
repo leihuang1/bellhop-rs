@@ -4,8 +4,9 @@ The numerical reference is Acoustics Toolbox `v2023.5`, commit
 `475108519289c6fb488b58980c644ea14eccc604`, using the pinned Linux x86-64 GNU
 Fortran 12.2 environment described in [`reference.md`](reference.md).
 
-**Status:** the first Pekeris slice is implemented in `crates/kraken`. It is
-not the full matrix below; unsupported inputs in this slice are rejected.
+**Status:** `crates/kraken` supports lossless, range-independent, single-fluid-layer
+trapped modes and coherent line-source FIELD. It is not the full matrix below;
+unsupported inputs are rejected.
 
 ## Products
 
@@ -24,8 +25,9 @@ separate product and acceptance contract.
 
 `crates/kraken` currently accepts a narrow legacy `.env`/`.flp` subset:
 
-- one frequency and one homogeneous, lossless fluid water layer using `N`
-  interpolation;
+- one frequency and one lossless, constant-density fluid water layer using
+  `N` (N²-linear) or `C` (sound-speed-linear) interpolation; depth-varying
+  sound speed is supported, but density gradients and additional layers are not;
 - a smooth pressure-release surface (`V`) and smooth acoustic fluid
   half-space (`A`) with zero attenuation;
 - a coherent, omnidirectional line source (`X`, `O`, `C`) and one
@@ -33,42 +35,53 @@ separate product and acceptance contract.
 - finite, in-water source/receiver depths, with FIELD depths covered by the
   mode-sampling depths in `.env`.
 
-The mode solver uses the closed-form Pekeris dispersion relation, normalizes
-mode shapes including the decaying bottom-half-space tail, and synthesizes the
-line-source coherent field. The legacy parser rejects other solver, boundary,
-attenuation, source, and FIELD options instead of silently changing their
-meaning. The fixture is constructed for this repository; upstream `tests/PekerisRD`
-is a BELLHOP case, not a KRAKEN reference. The pinned Fortran golden comparison
-is `crates/kraken/tests/pekeris_reference.rs` against
-three constructed fixture pairs (`Pekeris`, `PekerisFiltered`, `PekerisDense`).
-The raw `.mod/.shd/.prt` goldens and their provenance are committed under
-[`fixtures/golden`](../crates/kraken/tests/fixtures/golden/README.md).
-CI reruns all three inputs through pinned Fortran and uses the same numerical
-comparator on the fresh output, not just a file-existence smoke test.
+The solver uses a real acoustic finite-difference mesh with Sturm mode counts,
+inverse iteration for mode shapes and group speeds on the first mesh, and up to
+five Richardson-extrapolated eigenvalue meshes controlled by `RMax`. It includes
+the decaying bottom-half-space contribution to normalization. The former
+closed-form Pekeris solver is retained **only in tests** as an independent
+analytical cross-check. The legacy parser rejects unsupported boundaries,
+loss, source types, and FIELD options rather than silently changing their meaning.
+
+Six constructed fixture pairs cover Pekeris (including forced extrapolation),
+lossless `N` Munk and lossless `C` sduct-derived trapped modes. These are **not**
+the unmodified official `MunkK` or `sductK` inputs: the former specifies bottom
+loss (`NVW`, 0.8 dB/wavelength), and the latter specifies `CVW` and a leaky
+phase-speed interval. Unmodified official KRAKEN/KRAKENC examples remain
+reference-only smoke tests. Upstream `tests/PekerisRD` is a BELLHOP, not a
+KRAKEN, case. The same comparator in
+[`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)
+checks committed `.mod/.shd/.prt` goldens and newly generated pinned Fortran
+output in CI; provenance is recorded
+[with the goldens](../crates/kraken/tests/fixtures/golden/README.md).
 
 ### Legacy syntax and limits in this slice
 
-- Quotes, comments, comma separators, `D` exponents, and explicit vectors
-  spanning lines are accepted. Like upstream `ReadVector`, each legacy vector
-  is sorted independently, including receiver offsets.
-- Each SSP point occupies one record. The first supplies all six values;
-  later points may supply 2–5 followed by `/` to retain trailing material
-  values. `/` ends that record, **not** the SSP; the interface depth ends the
-  SSP. Complete six-value records need no slash.
-- Fortran null slots, repetition syntax, and subtabulated endpoint vectors
-  are not supported yet and are rejected. This is not a general Fortran
-  list-directed reader.
-- All parsed numeric values must be finite, including intermediate SSP points
-  that do not survive into the homogeneous case model. SSP depths must increase
-  from zero to the interface. Semantic diagnostics retain input-file records.
-- Each input file is capped at 1 MiB; vectors at 100,000 entries; root search
-  at 20,000 brackets; mode shapes at 5,000,000 values; pressure grids at
-  1,000,000 samples and 50,000,000 modal contributions.
-- `mesh_points` (10–1,000,000) and positive `max_range_m` are validated legacy
-  reference metadata. The analytical solver does not use a mesh or KRAKEN's
-  range-driven extrapolation; these settings do not change its modes.
+- Quotes, comments, comma separators, `D` exponents, explicit vectors spanning
+  lines, and endpoint-subtabulated vectors (`count ≥ 3`, one or two endpoint
+  values followed by `/`) are accepted. Depth vectors use upstream single
+  precision; ranges and offsets use double precision. Like `ReadVector`, each
+  legacy vector is sorted independently, including receiver offsets.
+- Each SSP point occupies one record. Omitted trailing material values retain
+  the previous point's values (Fortran defaults on the first). `/` ends that
+  record, **not** the SSP; the interface depth ends the SSP. The bottom
+  half-space record may similarly inherit omitted trailing values.
+- Fortran null slots and repetition syntax remain unsupported and are rejected;
+  this is not a general Fortran list-directed reader. All parsed numbers must
+  be finite, SSP depths strictly increase from zero to the interface, and
+  semantic diagnostics retain input-file records.
+- Each input file is capped at 1 MiB; vectors at 100,000 entries; mesh at
+  1,000,000 grid intervals; roots at 20,000 modes; mode shapes at 5,000,000
+  values; all mesh searches at 300,000,000 counted operations; pressure grids
+  at 1,000,000 samples and 50,000,000 modal contributions.
+- `mesh_points` = 0 selects the reference's automatic base mesh (at least ten,
+  ~20 points per wavelength); otherwise 10–1,000,000 is allowed if not too
+  coarse. `max_range_m` = 0 uses the base mesh only; larger values control
+  the reference-style extrapolation convergence criterion. If limits prevent
+  convergence, the solver returns a diagnostic rather than an unverified mode.
 
-The analytical mode results remain double precision. FIELD uses single-precision
+Modes are computed in double precision and shapes stored at reference `.mod`
+sampling precision. FIELD uses single-precision
 wavenumbers, modal products, and accumulation, with separate range/offset phases,
 following the reference's `.mod`/FIELD rounding points. Returned pressure values
 are promoted to `Complex64`; that does not imply double-precision FIELD arithmetic.
@@ -134,9 +147,9 @@ Acceptance requires differential coverage for modal wavenumbers and
 attenuation, normalized/aligned mode shapes, and complex pressure-field samples.
 Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
-the pinned reference workflow numerically compares the supported Pekeris cases.
-Official Munk KRAKEN/KRAKENC runs currently remain reference-only smoke tests;
-they are not evidence of Rust support for those profiles.
+the pinned reference workflow numerically compares all six supported fixtures.
+Unmodified official Munk and sduct runs remain reference-only smoke tests;
+they are not evidence of Rust support for their attenuation and leaky modes.
 
 ## Repository shape
 

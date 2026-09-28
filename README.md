@@ -41,9 +41,10 @@ unavailable. BELLHOP v2023.5's `W` boundary option is rejected because the
 reference advertises table generation but contains neither a generator nor the
 layer inputs needed to produce a table.
 
-The workspace also starts a separate KRAKEN rewrite: `kraken` currently covers
-a validated homogeneous-fluid Pekeris modes and coherent FIELD slice. Its full
-2D acceptance target and explicit exclusions are in
+The workspace also contains a separate KRAKEN rewrite: `kraken` currently covers
+validated, lossless single-fluid-layer `N/C` sound-speed profiles, trapped normal
+modes, and range-independent coherent line-source FIELD. Its full 2D acceptance
+target and explicit exclusions are in
 [the KRAKEN compatibility matrix](docs/kraken-compatibility.md).
 
 ## Workspace
@@ -52,7 +53,7 @@ a validated homogeneous-fluid Pekeris modes and coherent FIELD slice. Its full
 - `bellhop-hdf5`: shared HDF5 schema writer
 - `bellhop-cli`: local validation, conversion, and simulation
 - `bellhop-server`: synchronous JSON/HDF5 HTTP service
-- `kraken`: initial 2D KRAKEN modes and FIELD slice
+- `kraken`: single-fluid-layer 2D KRAKEN modes and FIELD slice
 
 ## License
 

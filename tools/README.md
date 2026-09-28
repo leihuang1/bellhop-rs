@@ -34,20 +34,21 @@ tools/reference/run-kraken-case.sh kraken path/to/MunkK.env
 tools/reference/run-kraken-case.sh krakenc path/to/MunkKleaky.env
 ```
 
-Numerically compare a supported Rust Pekeris `.env`/`.flp` pair against fresh
-KRAKEN/FIELD output (not merely a smoke test):
+Numerically compare a supported Rust lossless single-fluid `.env`/`.flp` pair
+against fresh KRAKEN/FIELD output (not merely a smoke test):
 
 ```sh
-for case in Pekeris PekerisFiltered PekerisDense; do
+for case in Pekeris PekerisFiltered PekerisDense PekerisRefined MunkLossless SductTrapped; do
   tools/reference/compare-kraken.sh "crates/kraken/tests/fixtures/$case.env"
 done
 ```
 
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
-three cases with fixed tolerances. Raw small reference goldens and their
+six cases with fixed tolerances. Raw small reference goldens and their
 [hashes/provenance](../crates/kraken/tests/fixtures/golden/README.md) also run in
-ordinary tests without Docker. The official Munk reference smoke cases are
+ordinary tests without Docker. MunkLossless and SductTrapped are derived cases;
+the original upstream Munk/sduct inputs include loss or leaky modes and are
 not yet supported by the Rust solver.
 
 Compare an `R` run against Rust on the host, or on the authoritative pinned

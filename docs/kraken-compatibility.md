@@ -46,8 +46,11 @@ inverse iteration for mode shapes and group speeds on the first mesh, and up to
 five Richardson-extrapolated eigenvalue meshes controlled by `RMax`. A rigid
 surface includes the half-weight surface node in the Sturm and inverse-iteration
 matrices; a vacuum surface fixes its pressure to zero. A rigid bottom uses a
-half-weight terminal node with no half-space contribution; a fluid bottom
-includes the decaying half-space contribution to normalization and the pinned
+half-weight terminal node with no half-space contribution. For a constant
+profile between two rigid boundaries, the zero-order plane mode lies at the
+upper spectral endpoint; the search includes the rounded finite-difference
+endpoint. A fluid bottom includes the decaying half-space contribution to
+normalization and the pinned
 reference's first-order perturbation for bottom attenuation. Point-source FIELD
 uses the reference's `sqrt(k)` modal factor and cylindrical spreading. The
 former closed-form Pekeris solver remains **only in tests** as an independent
@@ -55,10 +58,10 @@ analytical cross-check. The parser rejects other boundary types, water loss,
 other loss units, analytic `A` interpolation, source types, and FIELD options
 instead of silently changing meaning.
 
-Fifteen constructed fixture pairs cover Pekeris (including a three-point
+Sixteen constructed fixture pairs cover Pekeris (including a three-point
 spline with forced extrapolation, an alternate lossy bottom, derived rigid
-surfaces with/without bottom loss, and two derived `S` waveguides with a rigid
-bottom), lossless
+surfaces with/without bottom loss, two derived `S` waveguides with a rigid
+bottom, and a constant `S` rigid-rigid plane mode at the spectral endpoint), lossless
 `N` Munk, lossy-bottom `N` Munk with point-source FIELD, and derived trapped
 `C/P/S` sduct profiles. The PCHIP sduct derivative also has bottom `W` loss.
 **Additionally, the unmodified upstream `tests/Munk/MunkK.env` and `.flp` are
@@ -167,7 +170,7 @@ Acceptance requires differential coverage for modal wavenumbers and
 attenuation, normalized/aligned mode shapes, and complex pressure-field samples.
 Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
-the pinned reference workflow numerically compares all fifteen supported
+the pinned reference workflow numerically compares all sixteen supported
 fixtures and unmodified official MunkK. Unmodified sduct remains a reference-only
 smoke test; its leaky modes are not yet supported.
 

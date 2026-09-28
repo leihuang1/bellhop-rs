@@ -251,7 +251,20 @@ impl<'a> Mesh<'a> {
     fn roots(&self, work: &mut usize) -> Result<Vec<f64>, DiagnosticReport> {
         // Preserve Solve1's lower search guard, including its cutoff exclusion.
         let low = 1.00001 * (self.omega / self.case.c_high_mps).powi(2);
-        let high = (self.omega / self.case.c_low_mps.max(self.min_speed)).powi(2);
+        let mut high = (self.omega / self.case.c_low_mps.max(self.min_speed)).powi(2);
+        if self.case.surface_boundary == SurfaceBoundary::Rigid
+            && self.case.bottom_boundary == BottomBoundary::Rigid
+            && self.case.c_low_mps <= self.min_speed
+            && self
+                .case
+                .sound_speed_profile
+                .iter()
+                .all(|point| point.sound_speed_mps == self.min_speed)
+        {
+            // The constant-profile plane eigenvalue can round just above omega²/c²
+            // in the finite-difference diagonal; keep the inclusive endpoint.
+            high = high.max((self.b1[0] + 2.0) / (self.h * self.h)).next_up();
+        }
         if low >= high
             || !high.is_finite()
             || (self.case.bottom_boundary == BottomBoundary::FluidHalfSpace

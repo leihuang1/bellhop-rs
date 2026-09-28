@@ -46,13 +46,32 @@ fn fluid_modes_and_field_match_pinned_goldens() {
 
 #[test]
 fn complex_fluid_modes_match_pinned_fortran() {
-    let case = load_complex_case(
-        fixtures().join("PekerisComplex.env"),
-        fixtures().join("Pekeris.flp"),
-    )
-    .unwrap();
+    for (name, golden) in [
+        ("PekerisComplex", "PekerisComplex"),
+        ("PekerisComplexBlank", "PekerisComplex"),
+        ("PekerisComplexSlow", "PekerisComplexSlow"),
+    ] {
+        compare_complex(
+            &fixtures().join(format!("{name}.env")),
+            &fixtures().join("golden").join(golden),
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires a pinned external Fortran reference run"]
+fn complex_fluid_matches_fresh_reference() {
+    let name = std::env::var("KRAKEN_COMPLEX_CASE").expect("KRAKEN_COMPLEX_CASE is required");
+    let reference = PathBuf::from(
+        std::env::var_os("KRAKEN_COMPLEX_REFERENCE_ROOT")
+            .expect("KRAKEN_COMPLEX_REFERENCE_ROOT is required"),
+    );
+    compare_complex(&fixtures().join(format!("{name}.env")), &reference);
+}
+
+fn compare_complex(env: &Path, reference: &Path) {
+    let case = load_complex_case(env, fixtures().join("Pekeris.flp")).unwrap();
     let actual = solve_complex_modes(&case).unwrap();
-    let reference = fixtures().join("golden/PekerisComplex");
     let errors = compare_modes(
         &case,
         &actual,
@@ -60,32 +79,8 @@ fn complex_fluid_modes_match_pinned_fortran() {
         &fs::read_to_string(reference.with_extension("prt")).unwrap(),
     );
     eprintln!(
-        "complex Pekeris: {} modes, errors {errors:?}",
-        actual.modes.len()
-    );
-}
-
-#[test]
-#[ignore = "requires a pinned external Fortran reference run"]
-fn complex_fluid_matches_fresh_reference() {
-    let case = load_complex_case(
-        fixtures().join("PekerisComplex.env"),
-        fixtures().join("Pekeris.flp"),
-    )
-    .unwrap();
-    let actual = solve_complex_modes(&case).unwrap();
-    let root = PathBuf::from(
-        std::env::var_os("KRAKEN_COMPLEX_REFERENCE_ROOT")
-            .expect("KRAKEN_COMPLEX_REFERENCE_ROOT is required"),
-    );
-    let errors = compare_modes(
-        &case,
-        &actual,
-        &Records::read(&root.with_extension("mod")),
-        &fs::read_to_string(root.with_extension("prt")).unwrap(),
-    );
-    eprintln!(
-        "fresh KRAKENC: {} modes, errors {errors:?}",
+        "{}: {} KRAKENC modes, errors {errors:?}",
+        env.display(),
         actual.modes.len()
     );
 }

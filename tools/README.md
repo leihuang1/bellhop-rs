@@ -43,14 +43,18 @@ for case in Pekeris PekerisFiltered PekerisDense PekerisDenseLoss PekerisRefined
 done
 ```
 
-For the modes-only, derived KRAKENC Pekeris case (four modes including one
-leaky mode), run the same pinned Fortran calculation and comparator used by CI:
+For the modes-only, derived KRAKENC Pekeris cases (faster or slower fluid
+bottom, default or explicit restart option), run the same pinned Fortran
+calculation and comparator used by CI:
 
 ```sh
-tools/reference/run-kraken-case.sh krakenc crates/kraken/tests/fixtures/PekerisComplex.env
-KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/PekerisComplex-krakenc/PekerisComplex" \
-  cargo test --release -p kraken --test differential_reference \
-  complex_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow; do
+  tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
+  KRAKEN_COMPLEX_CASE="$case" \
+  KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
+    cargo test --release -p kraken --test differential_reference \
+      complex_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+done
 ```
 
 This compares every mode and pressure sample, including modal print precision,

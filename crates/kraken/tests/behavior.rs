@@ -38,6 +38,25 @@ fn complex_modes_have_an_explicit_modes_only_boundary() {
 }
 
 #[test]
+fn complex_case_accepts_slow_bottom_and_default_restart_setting() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for name in ["PekerisComplexSlow", "PekerisComplexBlank"] {
+        let case =
+            load_complex_case(root.join(format!("{name}.env")), root.join("Pekeris.flp")).unwrap();
+        assert_eq!(case.mode_solver, kraken::ModeSolver::Krakenc);
+    }
+    let mut trapped = definition();
+    trapped.bottom_sound_speed_mps = 1400.0;
+    assert!(
+        Case::from_definition(trapped)
+            .unwrap_err()
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.field == "bottom_sound_speed_mps")
+    );
+}
+
+#[test]
 fn validation_collects_errors_and_bounds_allocations() {
     let mut input = definition();
     input.frequency_hz = f64::NAN;

@@ -266,7 +266,8 @@ impl Case {
         if !profile_invalid {
             match profile::Profile::new(&definition) {
                 Ok(profile) => {
-                    if definition.bottom_boundary == BottomBoundary::FluidHalfSpace
+                    if definition.mode_solver == ModeSolver::Kraken
+                        && definition.bottom_boundary == BottomBoundary::FluidHalfSpace
                         && definition.bottom_sound_speed_mps <= profile.minimum_speed()
                     {
                         diagnostics.push(error(

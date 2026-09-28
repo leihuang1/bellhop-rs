@@ -24,10 +24,10 @@ all seventeen cases and the unmodified upstream `MunkK.env`/`.flp` (102 modes,
 The unmodified official sduct case still includes
 leaky modes and is **not** covered by the derived trapped-mode comparison.
 Measured errors and input provenance are recorded alongside the goldens.
-A separate modes-only KRAKENC regression compares four modes (one leaky) of
-the **derived** `PekerisComplex.env` against pinned `.mod/.prt` goldens and
-fresh CI output; it does not validate complex FIELD or the original MunkLeaky
-examples.
+Separate modes-only KRAKENC regressions compare four modes each for the
+**derived** `PekerisComplex.env`, its blank-restart variant, and a slower-fluid-
+bottom variant against pinned `.mod/.prt` goldens and fresh CI output; they do
+not validate complex FIELD or the original MunkLeaky examples.
 
 BELLHOP ray trajectories
 cover all `N/C/P/S/Q/A` sound-speed models. Eigenray and arrival goldens cover

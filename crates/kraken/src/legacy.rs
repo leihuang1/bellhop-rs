@@ -515,7 +515,7 @@ fn parse_environment_with_solver(
         || !matches!(option(2), b'N' | b'W')
         || (mode_solver == ModeSolver::Kraken && [option(3), option(4), option(5)] != *b"   ")
         || (mode_solver == ModeSolver::Krakenc
-            && !matches!([option(3), option(4), option(5)], [b' ', b'.', b' ']))
+            && !matches!([option(3), option(4), option(5)], [b' ', b' ' | b'.', b' ']))
         || options
             .text
             .as_bytes()

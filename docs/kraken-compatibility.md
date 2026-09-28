@@ -84,11 +84,15 @@ still remove the original leaky phase-speed interval; unmodified `sductK` is
 not supported.
 The separate KRAKENC `load_complex_case`/`solve_complex_modes` path currently
 supports only a constant, lossless `N`-profile, vacuum surface, lossless fluid
-half-space, a leaky phase-speed interval, and `RMax=0`. It uses the `.flp` only
-to select mode-sampling depths; `solve` rejects this case because KRAKENC FIELD
-is not yet implemented. The derived `PekerisComplex.env` extends Pekeris to
-`cHigh=2000 m/s` and enables Fortran restarts; all four modes, including one
-leaky mode, are compared against committed and fresh v2023.5 `.mod/.prt`.
+half-space (including a bottom slower than the water), a leaky phase-speed
+interval, and `RMax=0`. The KRAKENC legacy reader accepts both blank and dotted
+restart options. It uses the `.flp` only to select mode-sampling depths; `solve`
+rejects this case because KRAKENC FIELD is not yet implemented. The derived
+`PekerisComplex.env` extends Pekeris to `cHigh=2000 m/s` and enables Fortran
+restarts; `PekerisComplexBlank` uses the default restart setting and
+`PekerisComplexSlow` lowers the bottom speed to 1400 m/s. All four modes in
+each case, including leaky modes, are compared against committed and fresh
+v2023.5 `.mod/.prt`.
 Original KRAKENC examples remain reference-only smoke tests. Upstream
 `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)

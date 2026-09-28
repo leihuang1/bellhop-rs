@@ -45,15 +45,19 @@ jobs:
                 cp /opt/acoustics-toolbox/tests/SBCX/sbcx_Arr_asc.env /out/ && \
                 cp /opt/acoustics-toolbox/tests/Munk/MunkK.env /opt/acoustics-toolbox/tests/Munk/MunkK.flp /out/ && \
                 cp /opt/acoustics-toolbox/tests/MunkLeaky/MunkKleaky.env /opt/acoustics-toolbox/tests/MunkLeaky/MunkKleaky.flp /out/"
-      - name: Smoke pinned KRAKEN and FIELD
+      - name: Prepare pinned original MunkK modes and FIELD
         run: tools/reference/run-kraken-case.sh kraken target/reference/cases/MunkK.env
       - name: Smoke pinned KRAKENC and FIELD
         run: tools/reference/run-kraken-case.sh krakenc target/reference/cases/MunkKleaky.env
-      - name: Lossless fluid modes and FIELD numerical differential
+      - name: Fluid modes and FIELD numerical differential
         run: |
-          for case in Pekeris PekerisFiltered PekerisDense PekerisRefined MunkLossless SductTrapped; do
+          for case in Pekeris PekerisFiltered PekerisDense PekerisDenseLoss PekerisRefined MunkLossless MunkBottomLoss SductTrapped; do
             tools/reference/compare-kraken.sh "crates/kraken/tests/fixtures/$case.env"
           done
+          KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/MunkK.env" \
+          KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/MunkK-kraken/MunkK" \
+          cargo test --release -p kraken --test differential_reference \
+            fluid_matches_fresh_reference -- --ignored --exact --nocapture
       - name: Critical boundary/interface rays
         run: tools/reference/check-critical-rays.sh
       - name: Official full-grid coherent field (MunkB_Coh)

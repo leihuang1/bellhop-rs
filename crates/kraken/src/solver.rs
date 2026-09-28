@@ -1,11 +1,12 @@
 use crate::{
-    Case, Diagnostic, DiagnosticReport, MAX_FIELD_SAMPLES, ModeSet, PressureField, SimulationResult,
+    Case, Diagnostic, DiagnosticReport, MAX_FIELD_SAMPLES, ModeSet, PressureField,
+    SimulationResult, SourceGeometry,
 };
 use num_complex::{Complex32, Complex64};
 use std::path::Path;
 
-// ponytail: bounded eager fields; streaming is only needed beyond this work ceiling.
-const MAX_FIELD_WORK: usize = 50_000_000;
+// ponytail: 60m contributions cover full original MunkK; revisit ceiling with measured throughput.
+const MAX_FIELD_WORK: usize = 60_000_000;
 
 pub(super) fn solve(case: &Case) -> Result<SimulationResult, DiagnosticReport> {
     let modes = crate::modes::solve(case)?;
@@ -76,12 +77,22 @@ fn synthesize_field(case: &Case, mode_set: &ModeSet) -> Result<PressureField, Di
                     .zip(&receiver_shapes)
                 {
                     let k = single(mode.horizontal_wavenumber_rad_per_m);
-                    let amplitude = factor * single(*source_shape) / k;
+                    let amplitude = factor * single(*source_shape)
+                        / if case.source_geometry == SourceGeometry::Point {
+                            k.sqrt()
+                        } else {
+                            k
+                        };
                     let ik = double(Complex32::new(0.0, -1.0) * k);
                     let offset_shape = single(
                         double(amplitude * single(*receiver_shape)) * (ik * receiver_offset).exp(),
                     );
                     value += offset_shape * single((ik * range).exp());
+                }
+                if case.source_geometry == SourceGeometry::Point && range + receiver_offset > 0.0 {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let spreading = (range + receiver_offset).sqrt() as f32;
+                    value /= spreading;
                 }
                 if !value.re.is_finite() || !value.im.is_finite() {
                     return Err(error(

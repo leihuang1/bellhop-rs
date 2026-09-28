@@ -8,7 +8,8 @@
 use crate::profile::Profile;
 use crate::solver::error;
 use crate::{
-    Case, DiagnosticReport, MAX_MESH_POINTS, MAX_MODE_LIMIT, ModeSet, NormalMode, SurfaceBoundary,
+    BottomBoundary, Case, DiagnosticReport, MAX_MESH_POINTS, MAX_MODE_LIMIT, ModeSet, NormalMode,
+    SurfaceBoundary,
 };
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -26,14 +27,20 @@ const ROOT_STEPS: usize = 64;
 )]
 pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let omega = 2.0 * PI * case.frequency_hz;
-    let bottom_k2 = (omega / case.bottom_sound_speed_mps).powi(2);
-    // AttenMod::CRCI converts dB/wavelength to a positive imaginary sound speed.
-    let bottom_c = Complex64::new(
-        case.bottom_sound_speed_mps,
-        case.bottom_attenuation_db_per_wavelength * case.bottom_sound_speed_mps
-            / (8.685_889_6 * 2.0 * PI),
-    );
-    let bottom_complex_k2 = (Complex64::new(omega, 0.0) / bottom_c).powi(2);
+    let (bottom_k2, bottom_complex_k2) = if case.bottom_boundary == BottomBoundary::Rigid {
+        (0.0, Complex64::new(0.0, 0.0))
+    } else {
+        // AttenMod::CRCI converts dB/wavelength to a positive imaginary sound speed.
+        let bottom_c = Complex64::new(
+            case.bottom_sound_speed_mps,
+            case.bottom_attenuation_db_per_wavelength * case.bottom_sound_speed_mps
+                / (8.685_889_6 * 2.0 * PI),
+        );
+        (
+            (omega / case.bottom_sound_speed_mps).powi(2),
+            (Complex64::new(omega, 0.0) / bottom_c).powi(2),
+        )
+    };
     let last_speed = case.sound_speed_profile.last().unwrap().sound_speed_mps;
     let needed = (case.water_depth_m / (last_speed / case.frequency_hz / 20.0))
         .floor()
@@ -201,9 +208,14 @@ impl<'a> Mesh<'a> {
     }
 
     fn bottom_diagonal(&self, x: f64) -> f64 {
-        (self.b1.last().unwrap() - self.h * self.h * x) * 0.5
-            - self.h * self.case.water_density_g_cm3 / self.case.bottom_density_g_cm3
-                * self.bottom_gamma(x).re
+        let diagonal = (self.b1.last().unwrap() - self.h * self.h * x) * 0.5;
+        if self.case.bottom_boundary == BottomBoundary::Rigid {
+            diagonal
+        } else {
+            diagonal
+                - self.h * self.case.water_density_g_cm3 / self.case.bottom_density_g_cm3
+                    * self.bottom_gamma(x).re
+        }
     }
 
     // Inertia of the symmetric tridiagonal acoustic operator A(x): number of roots above x.
@@ -239,11 +251,28 @@ impl<'a> Mesh<'a> {
     fn roots(&self, work: &mut usize) -> Result<Vec<f64>, DiagnosticReport> {
         // Preserve Solve1's lower search guard, including its cutoff exclusion.
         let low = 1.00001 * (self.omega / self.case.c_high_mps).powi(2);
-        let high = (self.omega / self.case.c_low_mps.max(self.min_speed)).powi(2);
-        if low >= high || !high.is_finite() || low <= self.bottom_k2 {
+        let mut high = (self.omega / self.case.c_low_mps.max(self.min_speed)).powi(2);
+        if self.case.surface_boundary == SurfaceBoundary::Rigid
+            && self.case.bottom_boundary == BottomBoundary::Rigid
+            && self.case.c_low_mps <= self.min_speed
+            && self
+                .case
+                .sound_speed_profile
+                .iter()
+                .all(|point| point.sound_speed_mps == self.min_speed)
+        {
+            // The constant-profile plane eigenvalue can round just above omega²/c²
+            // in the finite-difference diagonal; keep the inclusive endpoint.
+            high = high.max((self.b1[0] + 2.0) / (self.h * self.h)).next_up();
+        }
+        if low >= high
+            || !high.is_finite()
+            || (self.case.bottom_boundary == BottomBoundary::FluidHalfSpace
+                && low <= self.bottom_k2)
+        {
             return Err(error(
                 "KR0301",
-                "phase-speed limits contain no trapped modes",
+                "phase-speed limits contain no supported modes",
                 "phase_speed_limits",
             ));
         }
@@ -326,17 +355,19 @@ impl<'a> Mesh<'a> {
             norm += mass;
             slow += mass * (self.b1[i] + 2.0) / (self.omega * self.omega * self.h * self.h);
         }
-        let gamma = (x - self.bottom_complex_k2.re).sqrt();
-        let x1 = 0.999_999_9 * x;
-        let x2 = 1.000_000_1 * x;
-        let derivative = (self.bottom_gamma(x2).re - self.bottom_gamma(x1).re)
-            / (self.case.bottom_density_g_cm3 * (x2 - x1));
-        norm += derivative * phi[n - 1].powi(2);
-        slow += phi[n - 1].powi(2)
-            / (2.0
-                * gamma
-                * self.case.bottom_density_g_cm3
-                * self.case.bottom_sound_speed_mps.powi(2));
+        if self.case.bottom_boundary == BottomBoundary::FluidHalfSpace {
+            let gamma = (x - self.bottom_complex_k2.re).sqrt();
+            let x1 = 0.999_999_9 * x;
+            let x2 = 1.000_000_1 * x;
+            let derivative = (self.bottom_gamma(x2).re - self.bottom_gamma(x1).re)
+                / (self.case.bottom_density_g_cm3 * (x2 - x1));
+            norm += derivative * phi[n - 1].powi(2);
+            slow += phi[n - 1].powi(2)
+                / (2.0
+                    * gamma
+                    * self.case.bottom_density_g_cm3
+                    * self.case.bottom_sound_speed_mps.powi(2));
+        }
         if norm <= 0.0 || !norm.is_finite() || !slow.is_finite() {
             return Err(error("KR0303", "invalid mode normalization", "modes"));
         }
@@ -370,8 +401,11 @@ impl<'a> Mesh<'a> {
             .collect();
         // BCImpedance returns the real admittance for mode finding and the
         // complex admittance for first-order attenuation (Normalize in kraken.f90).
-        let loss_k2 =
-            -self.bottom_gamma(x).im * phi[n - 1].powi(2) / self.case.bottom_density_g_cm3;
+        let loss_k2 = if self.case.bottom_boundary == BottomBoundary::Rigid {
+            0.0
+        } else {
+            -self.bottom_gamma(x).im * phi[n - 1].powi(2) / self.case.bottom_density_g_cm3
+        };
         let k = Complex64::new(x, loss_k2).sqrt();
         Ok(NormalMode {
             horizontal_wavenumber_rad_per_m: k,

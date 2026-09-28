@@ -5,7 +5,8 @@ The numerical reference is Acoustics Toolbox `v2023.5`, commit
 Fortran 12.2 environment described in [`reference.md`](reference.md).
 
 **Status:** `crates/kraken` supports range-independent, single-fluid-layer
-trapped modes with optional bottom-half-space `W` attenuation, and coherent
+trapped or rigid-bottom confined modes with optional bottom-half-space `W`
+attenuation, and coherent
 line- or point-source FIELD. It is not the full matrix below; unsupported
 inputs are rejected.
 
@@ -30,10 +31,11 @@ separate product and acceptance contract.
   `N` (N²-linear), `C` (sound-speed-linear), `P` (monotone PCHIP), or `S`
   (not-a-knot cubic spline) interpolation; depth-varying sound speed is
   supported, but density gradients and additional layers are not;
-- a smooth vacuum (`V`) or rigid (`R`) surface and a smooth acoustic fluid
-  bottom half-space (`A`) with zero loss (`N`) or non-negative `W` bottom loss
-  (dB/wavelength). Water-column loss, other loss units, elastic layers, rigid
-  bottoms, and rough boundaries are not supported;
+- a smooth vacuum (`V`) or rigid (`R`) surface and either a smooth acoustic
+  fluid bottom half-space (`A`) with zero loss (`N`) or non-negative `W` bottom
+  loss (dB/wavelength), or a smooth rigid (`R`) bottom with no half-space record
+  or material properties. Water-column loss, other loss units, elastic layers,
+  and rough boundaries are not supported;
 - a coherent, omnidirectional line (`X`) or point (`R`) source (`O`, `C`),
   with one range-independent FIELD profile at 0 km;
 - finite, in-water source/receiver depths, with FIELD depths covered by the
@@ -43,8 +45,12 @@ The solver uses a real acoustic finite-difference mesh with Sturm mode counts,
 inverse iteration for mode shapes and group speeds on the first mesh, and up to
 five Richardson-extrapolated eigenvalue meshes controlled by `RMax`. A rigid
 surface includes the half-weight surface node in the Sturm and inverse-iteration
-matrices; a vacuum surface fixes its pressure to zero. It includes
-the decaying bottom-half-space contribution to normalization and the pinned
+matrices; a vacuum surface fixes its pressure to zero. A rigid bottom uses a
+half-weight terminal node with no half-space contribution. For a constant
+profile between two rigid boundaries, the zero-order plane mode lies at the
+upper spectral endpoint; the search includes the rounded finite-difference
+endpoint. A fluid bottom includes the decaying half-space contribution to
+normalization and the pinned
 reference's first-order perturbation for bottom attenuation. Point-source FIELD
 uses the reference's `sqrt(k)` modal factor and cylindrical spreading. The
 former closed-form Pekeris solver remains **only in tests** as an independent
@@ -52,9 +58,10 @@ analytical cross-check. The parser rejects other boundary types, water loss,
 other loss units, analytic `A` interpolation, source types, and FIELD options
 instead of silently changing meaning.
 
-Thirteen constructed fixture pairs cover Pekeris (including a three-point
-spline with forced extrapolation, an alternate lossy bottom, and derived rigid
-surfaces with/without bottom loss), lossless
+Sixteen constructed fixture pairs cover Pekeris (including a three-point
+spline with forced extrapolation, an alternate lossy bottom, derived rigid
+surfaces with/without bottom loss, two derived `S` waveguides with a rigid
+bottom, and a constant `S` rigid-rigid plane mode at the spectral endpoint), lossless
 `N` Munk, lossy-bottom `N` Munk with point-source FIELD, and derived trapped
 `C/P/S` sduct profiles. The PCHIP sduct derivative also has bottom `W` loss.
 **Additionally, the unmodified upstream `tests/Munk/MunkK.env` and `.flp` are
@@ -78,8 +85,10 @@ output in CI; provenance is recorded
   legacy vector is sorted independently, including receiver offsets.
 - Each SSP point occupies one record. Omitted trailing material values retain
   the previous point's values (Fortran defaults on the first). `/` ends that
-  record, **not** the SSP; the interface depth ends the SSP. The bottom
-  half-space record may similarly inherit omitted trailing values.
+  record, **not** the SSP; the interface depth ends the SSP. The acoustic bottom
+  half-space record may similarly inherit omitted trailing values; a rigid
+  bottom has **no** half-space record. In a direct `CaseDefinition`, rigid bottom
+  sound speed, density, and loss must all be zero (absent material).
 - Fortran null slots and repetition syntax remain unsupported and are rejected;
   this is not a general Fortran list-directed reader. All parsed numbers must
   be finite, SSP depths strictly increase from zero to the interface, and
@@ -161,7 +170,7 @@ Acceptance requires differential coverage for modal wavenumbers and
 attenuation, normalized/aligned mode shapes, and complex pressure-field samples.
 Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
-the pinned reference workflow numerically compares all thirteen supported
+the pinned reference workflow numerically compares all sixteen supported
 fixtures and unmodified official MunkK. Unmodified sduct remains a reference-only
 smoke test; its leaky modes are not yet supported.
 

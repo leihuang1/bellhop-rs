@@ -4,13 +4,13 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    Case, CaseDefinition, Diagnostic, DiagnosticReport, Interpolation, MAX_VECTOR_LENGTH,
-    SoundSpeedPoint, SourceGeometry, SurfaceBoundary,
+    BottomBoundary, Case, CaseDefinition, Diagnostic, DiagnosticReport, Interpolation,
+    MAX_VECTOR_LENGTH, SoundSpeedPoint, SourceGeometry, SurfaceBoundary,
 };
 
 const MAX_PROFILE_POINTS: usize = MAX_VECTOR_LENGTH;
 
-/// Load the single-fluid trapped-mode subset of a KRAKEN `.env` and FIELD `.flp` pair.
+/// Load the supported single-fluid subset of a KRAKEN `.env` and FIELD `.flp` pair.
 ///
 /// # Errors
 ///
@@ -60,6 +60,11 @@ fn parse_case(
     mode_sample_depths_m.sort_by(f64::total_cmp);
     mode_sample_depths_m.dedup_by(|left, right| *left == *right);
 
+    let bottom_location = if environment.bottom_boundary == BottomBoundary::Rigid {
+        "bottom_options"
+    } else {
+        "bottom_half_space"
+    };
     let env_locations = environment.locations;
     let field_locations = field.locations;
     Case::from_definition(CaseDefinition {
@@ -70,6 +75,7 @@ fn parse_case(
         surface_boundary: environment.surface_boundary,
         sound_speed_profile: environment.profile,
         water_density_g_cm3: environment.water_density,
+        bottom_boundary: environment.bottom_boundary,
         bottom_sound_speed_mps: environment.bottom_speed,
         bottom_density_g_cm3: environment.bottom_density,
         bottom_attenuation_db_per_wavelength: environment.bottom_attenuation,
@@ -95,7 +101,7 @@ fn parse_case(
                 "bottom_sound_speed_mps"
                 | "bottom_density_g_cm3"
                 | "bottom_attenuation_db_per_wavelength" => {
-                    (&env_locations, env_path, "bottom_half_space")
+                    (&env_locations, env_path, bottom_location)
                 }
                 "max_range_m" => (&env_locations, env_path, "max_range_km"),
                 "mode_sample_depths_m" => (&env_locations, env_path, "mode_receiver_depths_m"),
@@ -428,6 +434,7 @@ struct Environment {
     surface_boundary: SurfaceBoundary,
     profile: Vec<SoundSpeedPoint>,
     water_density: f64,
+    bottom_boundary: BottomBoundary,
     bottom_speed: f64,
     bottom_density: f64,
     bottom_attenuation: f64,
@@ -565,40 +572,49 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
 
     let bottom_option = reader.record("bottom_options")?;
     if bottom_option.tokens.len() != 2
-        || bottom_option.tokens[0].text != "A"
+        || !matches!(bottom_option.tokens[0].text.as_str(), "A" | "R")
         || number(&bottom_option.tokens[1], path, "bottom_roughness")? != 0.0
+        || (bottom_option.tokens[0].text == "R" && option(2) != b'N')
     {
         return Err(reader.record_error(
             &bottom_option,
             "bottom_options",
-            "requires a smooth acoustic fluid half-space",
+            "requires a smooth acoustic fluid half-space or rigid bottom without loss units",
         ));
     }
-    let bottom_record = reader.record("bottom_half_space")?;
-    if !(1..=6).contains(&bottom_record.tokens.len())
-        || (bottom_record.tokens.len() < 6 && !bottom_record.slash)
-    {
-        return Err(reader.record_error(
-            &bottom_record,
-            "bottom_half_space",
-            "expected 6 values, or trailing defaults terminated by /",
-        ));
-    }
-    let mut bottom = *points.last().unwrap();
-    for (index, token) in bottom_record.tokens.iter().enumerate() {
-        bottom[index] = number(token, path, "bottom_half_space")?;
-    }
-    if bottom[0] != water_depth_m
-        || bottom[2] != 0.0
-        || bottom[5] != 0.0
-        || (option(2) != b'W' && bottom[4] != 0.0)
-    {
-        return Err(reader_error(
-            &reader,
-            "KR0202",
-            "bottom half-space must be fluid, start at the interface, and use supported loss units",
-            "bottom_half_space",
-        ));
+    let bottom_boundary = if bottom_option.tokens[0].text == "R" {
+        BottomBoundary::Rigid
+    } else {
+        BottomBoundary::FluidHalfSpace
+    };
+    let mut bottom = [0.0; 6];
+    if bottom_boundary == BottomBoundary::FluidHalfSpace {
+        let bottom_record = reader.record("bottom_half_space")?;
+        if !(1..=6).contains(&bottom_record.tokens.len())
+            || (bottom_record.tokens.len() < 6 && !bottom_record.slash)
+        {
+            return Err(reader.record_error(
+                &bottom_record,
+                "bottom_half_space",
+                "expected 6 values, or trailing defaults terminated by /",
+            ));
+        }
+        bottom = *points.last().unwrap();
+        for (index, token) in bottom_record.tokens.iter().enumerate() {
+            bottom[index] = number(token, path, "bottom_half_space")?;
+        }
+        if bottom[0] != water_depth_m
+            || bottom[2] != 0.0
+            || bottom[5] != 0.0
+            || (option(2) != b'W' && bottom[4] != 0.0)
+        {
+            return Err(reader_error(
+                &reader,
+                "KR0202",
+                "bottom half-space must be fluid, start at the interface, and use supported loss units",
+                "bottom_half_space",
+            ));
+        }
     }
     let limits = reader.numbers("phase_speed_limits", 2)?;
     let max_range_m = reader.scalar("max_range_km")? * 1000.0;
@@ -624,6 +640,7 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
             })
             .collect(),
         water_density,
+        bottom_boundary,
         bottom_speed: bottom[1],
         bottom_density: bottom[3],
         bottom_attenuation: bottom[4],
@@ -933,6 +950,29 @@ mod tests {
     }
 
     #[test]
+    fn rigid_bottom_has_no_half_space_record_or_loss_unit() {
+        let env = include_str!("../tests/fixtures/PekerisHard.env");
+        let unexpected = env.replace("'R' 0.0\n", "'R' 0.0\n100.0 1700.0 0.0 1.5 0.0 0.0 /\n");
+        assert_eq!(
+            parse_environment(&unexpected, Path::new("case.env"))
+                .err()
+                .unwrap()
+                .diagnostics()[0]
+                .field,
+            "phase_speed_limits"
+        );
+        let wrong_unit = env.replace("'SVN'", "'SVW'");
+        assert_eq!(
+            parse_environment(&wrong_unit, Path::new("case.env"))
+                .err()
+                .unwrap()
+                .diagnostics()[0]
+                .field,
+            "bottom_options"
+        );
+    }
+
+    #[test]
     fn unsupported_solver_and_field_options_are_rejected() {
         let env = include_str!("../tests/fixtures/Pekeris.env").replace("'NVN'", "'NVM'");
         let error = parse_environment(&env, Path::new("Pekeris.env"))
@@ -971,10 +1011,10 @@ mod tests {
                 .field,
             "sound_speed_profile"
         );
-        let rigid_bottom =
-            include_str!("../tests/fixtures/Pekeris.env").replace("'A' 0.0", "'R' 0.0");
+        let unsupported_bottom =
+            include_str!("../tests/fixtures/Pekeris.env").replace("'A' 0.0", "'V' 0.0");
         assert_eq!(
-            parse_environment(&rigid_bottom, Path::new("Pekeris.env"))
+            parse_environment(&unsupported_bottom, Path::new("Pekeris.env"))
                 .err()
                 .unwrap()
                 .diagnostics()[0]

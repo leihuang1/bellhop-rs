@@ -43,8 +43,8 @@ layer inputs needed to produce a table.
 
 The workspace also contains a separate KRAKEN rewrite: `kraken` currently covers
 validated single-fluid-layer `N/C/P/S` sound-speed profiles, vacuum or rigid
-surface, trapped modes with optional bottom `W` attenuation, and coherent line- or
-point-source FIELD. Its full 2D acceptance
+surface, modes with a fluid (`A`) or rigid (`R`) bottom and optional fluid-bottom
+`W` attenuation, and coherent line- or point-source FIELD. Its full 2D acceptance
 target and explicit exclusions are in
 [the KRAKEN compatibility matrix](docs/kraken-compatibility.md).
 

@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 use std::path::Path;
 
-use kraken::{Case, CaseDefinition, SurfaceBoundary, legacy::load_case, solve};
+use kraken::{BottomBoundary, Case, CaseDefinition, SurfaceBoundary, legacy::load_case, solve};
 use num_complex::Complex64;
 
 fn definition() -> CaseDefinition {
@@ -95,6 +95,101 @@ fn rigid_surface_changes_surface_pressure_and_retains_vacuum_default() {
             .iter()
             .all(|mode| mode.eigenfunction[0].norm() > 1e-3)
     );
+}
+
+#[test]
+fn rigid_bottom_rejects_half_space_material_in_public_definition() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/PekerisHard");
+    let mut input = load_case(root.with_extension("env"), root.with_extension("flp"))
+        .unwrap()
+        .into_definition();
+    assert_eq!(input.bottom_boundary, BottomBoundary::Rigid);
+    assert!(input.c_high_mps > input.sound_speed_profile[0].sound_speed_mps);
+    for field in [
+        "bottom_sound_speed_mps",
+        "bottom_density_g_cm3",
+        "bottom_attenuation_db_per_wavelength",
+    ] {
+        let mut bad = input.clone();
+        match field {
+            "bottom_sound_speed_mps" => bad.bottom_sound_speed_mps = 1700.0,
+            "bottom_density_g_cm3" => bad.bottom_density_g_cm3 = 1.5,
+            _ => bad.bottom_attenuation_db_per_wavelength = 1.0,
+        }
+        let report = Case::from_definition(bad).unwrap_err();
+        assert!(
+            report.diagnostics().iter().any(|d| d.field == field),
+            "{report}"
+        );
+    }
+    input.c_high_mps = 100_000.0;
+    assert!(Case::from_definition(input).is_ok());
+}
+
+#[test]
+fn rigid_rigid_constant_profile_keeps_plane_mode_across_meshes() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/PekerisRigidPlane");
+    let mut input = load_case(root.with_extension("env"), root.with_extension("flp"))
+        .unwrap()
+        .into_definition();
+    for interpolation in [
+        kraken::Interpolation::N2Linear,
+        kraken::Interpolation::CLinear,
+        kraken::Interpolation::Pchip,
+        kraken::Interpolation::Spline,
+    ] {
+        input.interpolation = interpolation;
+        for max_range_m in [0.0, 1_000_000.0] {
+            input.max_range_m = max_range_m;
+            let result = solve(&Case::from_definition(input.clone()).unwrap()).unwrap();
+            assert_eq!(result.modes.modes.len(), 2, "{interpolation:?}");
+            let plane_k =
+                2.0 * PI * input.frequency_hz / input.sound_speed_profile[0].sound_speed_mps;
+            assert!(
+                (result.modes.modes[0].horizontal_wavenumber_rad_per_m.re - plane_k).abs() < 5e-10
+            );
+        }
+    }
+    input.c_low_mps = input.sound_speed_profile[0].sound_speed_mps;
+    assert_eq!(
+        solve(&Case::from_definition(input.clone()).unwrap())
+            .unwrap()
+            .modes
+            .modes
+            .len(),
+        2
+    );
+    input.c_low_mps += 1.0;
+    assert_eq!(
+        solve(&Case::from_definition(input).unwrap())
+            .unwrap()
+            .modes
+            .modes
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn rigid_bottom_accepts_an_underflowing_phase_speed_bound() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for name in ["PekerisHard", "PekerisHardBoth"] {
+        let root = fixtures.join(name);
+        let mut input = load_case(root.with_extension("env"), root.with_extension("flp"))
+            .unwrap()
+            .into_definition();
+        let baseline = solve(&Case::from_definition(input.clone()).unwrap()).unwrap();
+        input.c_high_mps = f64::MAX;
+        let actual = solve(&Case::from_definition(input).unwrap()).unwrap();
+        assert!(actual.modes.modes.len() >= baseline.modes.modes.len());
+        for (wide, narrow) in actual.modes.modes.iter().zip(&baseline.modes.modes) {
+            assert!(
+                (wide.horizontal_wavenumber_rad_per_m - narrow.horizontal_wavenumber_rad_per_m)
+                    .norm()
+                    < 1e-10
+            );
+        }
+    }
 }
 
 #[test]

@@ -5,5 +5,7 @@
 *.ray
 *.arr
 *.shd
+!/crates/kraken/tests/fixtures/golden/*.prt
+!/crates/kraken/tests/fixtures/golden/*.shd
 .DS_Store
 vendor

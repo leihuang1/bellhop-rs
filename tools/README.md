@@ -3,9 +3,10 @@
 ## Pinned Fortran differential reference
 
 `reference/Dockerfile` builds the official Acoustics Toolbox `v2023.5`
-BELLHOP at commit `475108519289c6fb488b58980c644ea14eccc604` for Linux x86-64.
-The Debian base image, source-archive SHA-256, GNU Fortran version, and compiler
-flags are fixed in the image definition.
+BELLHOP, KRAKEN, KRAKENC, and 2D FIELD programs at commit
+`475108519289c6fb488b58980c644ea14eccc604` for Linux x86-64. The Debian base
+image, source-archive SHA-256, GNU Fortran version, and compiler flags are
+fixed in the image definition.
 
 Build the image:
 
@@ -17,11 +18,37 @@ The build script downloads the commit archive with retries, verifies
 SHA-256 `f8a7a2c1e80a73431cd230a10bef5fcfc996c88889a0e1540771c3922ee2a21f`,
 and removes the temporary archive after the image is built.
 
-Run the reference model for one case:
+Run the BELLHOP reference for one case:
 
 ```sh
 tools/reference/run-case.sh path/to/case.env
 ```
+
+Run KRAKEN or KRAKENC on a legacy environment. If a same-stem `.flp` exists,
+the helper also runs 2D FIELD; it saves the reference `.mod` and `.shd` files
+under `target/reference/`. The planned Rust support matrix is in
+[the KRAKEN compatibility document](../docs/kraken-compatibility.md):
+
+```sh
+tools/reference/run-kraken-case.sh kraken path/to/MunkK.env
+tools/reference/run-kraken-case.sh krakenc path/to/MunkKleaky.env
+```
+
+Numerically compare a supported Rust Pekeris `.env`/`.flp` pair against fresh
+KRAKEN/FIELD output (not merely a smoke test):
+
+```sh
+for case in Pekeris PekerisFiltered PekerisDense; do
+  tools/reference/compare-kraken.sh "crates/kraken/tests/fixtures/$case.env"
+done
+```
+
+This compares every mode and pressure sample, including modal print precision,
+mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
+three cases with fixed tolerances. Raw small reference goldens and their
+[hashes/provenance](../crates/kraken/tests/fixtures/golden/README.md) also run in
+ordinary tests without Docker. The official Munk reference smoke cases are
+not yet supported by the Rust solver.
 
 Compare an `R` run against Rust on the host, or on the authoritative pinned
 Linux x86-64 Rust 1.88 environment:
@@ -63,6 +90,6 @@ Run the committed critical boundary/interface cases with:
 tools/reference/check-critical-rays.sh
 ```
 
-Reference outputs are written below `target/reference/` and are not committed.
-Ordinary parser and numerical tests use the curated fixtures under
-`crates/bellhop/tests/fixtures`.
+Fresh reference outputs are written below `target/reference/` and are not
+committed automatically. Ordinary parser and numerical tests use curated
+fixtures under `crates/bellhop/tests/fixtures` and `crates/kraken/tests/fixtures`.

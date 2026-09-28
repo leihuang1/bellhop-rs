@@ -65,6 +65,36 @@ fn validation_collects_errors_and_bounds_allocations() {
 }
 
 #[test]
+fn spline_trapped_medium_checks_interpolated_minimum() {
+    let mut input = definition();
+    input.interpolation = kraken::Interpolation::Spline;
+    input.bottom_sound_speed_mps = 1400.0;
+    input.c_low_mps = 1300.0;
+    input.c_high_mps = 1400.0;
+    let report = Case::from_definition(input.clone()).unwrap_err();
+    assert!(
+        report
+            .diagnostics()
+            .iter()
+            .any(|d| d.field == "bottom_sound_speed_mps")
+    );
+
+    // The not-a-knot quadratic through (1500, 1500, 1700) dips to 1475 m/s
+    // between knots. A 1490 m/s bottom is faster than that actual minimum.
+    input.sound_speed_profile.insert(
+        1,
+        kraken::SoundSpeedPoint {
+            depth_m: 50.0,
+            sound_speed_mps: 1500.0,
+        },
+    );
+    input.sound_speed_profile[2].sound_speed_mps = 1700.0;
+    input.bottom_sound_speed_mps = 1490.0;
+    input.c_high_mps = 1490.0;
+    assert!(Case::from_definition(input).is_ok());
+}
+
+#[test]
 fn phase_speed_selection_and_field_mode_limit_are_independent() {
     let input = definition();
     let baseline = solve(&Case::from_definition(input.clone()).unwrap()).unwrap();

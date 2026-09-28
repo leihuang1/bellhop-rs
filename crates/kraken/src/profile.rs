@@ -2,17 +2,22 @@
 // Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
 // Real, constant-density water-column interpolation only.
 use crate::solver::error;
-use crate::{Case, DiagnosticReport, Interpolation};
+use crate::{CaseDefinition, DiagnosticReport, Interpolation};
 
 pub(super) struct Profile<'a> {
-    case: &'a Case,
+    case: &'a CaseDefinition,
+    minimum_speed: f64,
     // Local polynomial coefficients, c0 + t * (c1 + t * (c2 + t * c3)).
     cubic: Vec<[f64; 4]>,
 }
 
 impl<'a> Profile<'a> {
-    pub(super) fn new(case: &'a Case) -> Result<Self, DiagnosticReport> {
+    pub(super) fn new(case: &'a CaseDefinition) -> Result<Self, DiagnosticReport> {
         let points = &case.sound_speed_profile;
+        let mut minimum_speed = points
+            .iter()
+            .map(|point| point.sound_speed_mps)
+            .fold(f64::INFINITY, f64::min);
         let mut cubic = Vec::new();
         if matches!(
             case.interpolation,
@@ -57,11 +62,14 @@ impl<'a> Profile<'a> {
             if cubic.iter().flatten().any(|v| !v.is_finite()) {
                 return Err(invalid_profile());
             }
-            if cubic
-                .iter()
-                .zip(&h)
-                .any(|(&coefficients, &step)| !positive_segment(coefficients, step))
-            {
+            for (&coefficients, &step) in cubic.iter().zip(&h) {
+                let segment_minimum = segment_minimum(coefficients, step);
+                if !segment_minimum.is_finite() {
+                    return Err(invalid_profile());
+                }
+                minimum_speed = minimum_speed.min(segment_minimum);
+            }
+            if minimum_speed <= 0.0 {
                 return Err(error(
                     "KR0302",
                     "interpolated sound speed must stay positive between profile points",
@@ -69,7 +77,15 @@ impl<'a> Profile<'a> {
                 ));
             }
         }
-        Ok(Self { case, cubic })
+        Ok(Self {
+            case,
+            minimum_speed,
+            cubic,
+        })
+    }
+
+    pub(super) fn minimum_speed(&self) -> f64 {
+        self.minimum_speed
     }
 
     pub(super) fn speed(&self, depth: f64) -> f64 {
@@ -97,30 +113,45 @@ impl<'a> Profile<'a> {
     }
 }
 
-// Check cubic extrema, including narrow dips that a finite-difference mesh might miss.
-fn positive_segment([c0, c1, c2, c3]: [f64; 4], step: f64) -> bool {
+// Cubic extrema can lie between mesh nodes; use them for validation and trapping.
+fn segment_minimum([c0, c1, c2, c3]: [f64; 4], step: f64) -> f64 {
     let evaluate = |t: f64| c0 + t * (c1 + t * (c2 + t * c3));
-    if c3 == 0.0 {
-        let t = -c1 / (2.0 * c2);
-        return c2 == 0.0 || t <= 0.0 || t >= step || evaluate(t) > 0.0;
+    let end = evaluate(step);
+    if !end.is_finite() {
+        return f64::NAN;
     }
-    let discriminant = c2 * c2 - 3.0 * c3 * c1;
-    if !discriminant.is_finite() {
-        return false;
-    }
-    if discriminant < 0.0 {
-        return true;
-    }
-    let root = discriminant.sqrt();
-    let q = -c2 - root.copysign(c2);
-    let candidates = if q == 0.0 {
-        [0.0, 0.0]
+    let mut minimum = c0.min(end);
+    let roots = if c3 == 0.0 {
+        if c2 == 0.0 {
+            return minimum;
+        }
+        [-c1 / (2.0 * c2), 0.0]
     } else {
-        [q / (3.0 * c3), c1 / q]
+        let discriminant = c2 * c2 - 3.0 * c3 * c1;
+        if !discriminant.is_finite() {
+            return f64::NAN;
+        }
+        if discriminant < 0.0 {
+            return minimum;
+        }
+        let root = discriminant.sqrt();
+        let q = -c2 - root.copysign(c2);
+        if q == 0.0 {
+            [0.0, 0.0]
+        } else {
+            [q / (3.0 * c3), c1 / q]
+        }
     };
-    candidates
-        .into_iter()
-        .all(|t| t <= 0.0 || t >= step || evaluate(t) > 0.0)
+    for t in roots {
+        if t > 0.0 && t < step {
+            let value = evaluate(t);
+            if !value.is_finite() {
+                return f64::NAN;
+            }
+            minimum = minimum.min(value);
+        }
+    }
+    minimum
 }
 
 fn invalid_profile() -> DiagnosticReport {
@@ -300,9 +331,8 @@ mod tests {
                 sound_speed_mps,
             })
             .to_vec();
-        let case = Case::from_definition(input).unwrap();
         assert_eq!(
-            Profile::new(&case).err().unwrap().diagnostics()[0].field,
+            Case::from_definition(input).unwrap_err().diagnostics()[0].field,
             "sound_speed_profile"
         );
     }

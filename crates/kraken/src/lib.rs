@@ -194,7 +194,7 @@ impl Case {
             diagnostics.push(error("water_depth_m", "water depth must be positive"));
         }
         let profile = &definition.sound_speed_profile;
-        if !(2..=MAX_VECTOR_LENGTH).contains(&profile.len())
+        let profile_invalid = !(2..=MAX_VECTOR_LENGTH).contains(&profile.len())
             || profile.iter().any(|point| {
                 !point.depth_m.is_finite()
                     || !point.sound_speed_mps.is_finite()
@@ -206,25 +206,28 @@ impl Case {
                 .is_none_or(|point| point.depth_m != definition.water_depth_m)
             || profile
                 .windows(2)
-                .any(|pair| pair[1].depth_m <= pair[0].depth_m)
-        {
+                .any(|pair| pair[1].depth_m <= pair[0].depth_m);
+        if profile_invalid {
             diagnostics.push(error(
                 "sound_speed_profile",
                 "require finite increasing depths from 0 to water depth and positive sound speeds",
             ));
         }
-        let minimum_speed = profile
-            .iter()
-            .map(|point| point.sound_speed_mps)
-            .fold(f64::INFINITY, f64::min);
-        // A spline may have a slower interior extremum than any tabulated knot.
-        if definition.interpolation != Interpolation::Spline
-            && definition.bottom_sound_speed_mps <= minimum_speed
-        {
-            diagnostics.push(error(
-                "bottom_sound_speed_mps",
-                "trapped modes require a bottom faster than the minimum water sound speed",
-            ));
+        if !profile_invalid {
+            match profile::Profile::new(&definition) {
+                Ok(profile) => {
+                    if definition.bottom_sound_speed_mps <= profile.minimum_speed() {
+                        diagnostics.push(error(
+                            "bottom_sound_speed_mps",
+                            "trapped modes require a bottom faster than the minimum water sound speed",
+                        ));
+                    }
+                }
+                Err(report) => diagnostics.push(error(
+                    "sound_speed_profile",
+                    &report.diagnostics()[0].message,
+                )),
+            }
         }
         if definition.bottom_attenuation_db_per_wavelength < 0.0
             || definition.bottom_attenuation_db_per_wavelength

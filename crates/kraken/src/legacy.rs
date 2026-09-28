@@ -905,6 +905,27 @@ mod tests {
     }
 
     #[test]
+    fn spline_with_no_trapped_water_is_rejected_at_legacy_boundary() {
+        let env = include_str!("../tests/fixtures/Pekeris.env")
+            .replace("'NVN'", "'SVN'")
+            .replace(
+                "100.0 1700.0 0.0 1.5 0.0 0.0 /",
+                "100.0 1400.0 0.0 1.5 0.0 0.0 /",
+            )
+            .replace("1400.0 1700.0", "1300.0 1400.0");
+        let report = parse_case(
+            &env,
+            include_str!("../tests/fixtures/Pekeris.flp"),
+            Path::new("Pekeris.env"),
+            Path::new("Pekeris.flp"),
+        )
+        .unwrap_err();
+        assert!(report.diagnostics().iter().any(|d| {
+            d.field == "bottom_sound_speed_mps" && d.path == Path::new("Pekeris.env")
+        }));
+    }
+
+    #[test]
     fn unsupported_solver_and_field_options_are_rejected() {
         let env = include_str!("../tests/fixtures/Pekeris.env").replace("'NVN'", "'NVM'");
         let error = parse_environment(&env, Path::new("Pekeris.env"))

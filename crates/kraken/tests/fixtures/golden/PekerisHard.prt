@@ -1,0 +1,57 @@
+ _________________________________________________
+
+ KRAKEN- Derived spline waveguide: vacuum surface, rigid bottom
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   1
+
+
+     Spline approximation to SSP
+     Attenuation units: nepers/m
+     VACUUM
+
+       ( # mesh points =   100  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1500.00      0.00     1.00       0.0000    0.0000
+     43.00      1530.00      0.00     1.00       0.0000    0.0000
+    100.00      1500.00      0.00     1.00       0.0000    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     Perfectly RIGID
+
+ cLow =   1400.0     m/s      cHigh =   2000.0     m/s
+ RMax =   1000.0     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            1
+    Source   z-coordinates, Sz (m)
+                 75.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            3
+    Receiver z-coordinates, Rz (m)
+                 25.0000       75.0000       99.0000
+
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            4
+        1            0.279E-02s
+                --- Number of modes =            4
+        2            0.694E-03s
+        4            0.581E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2062474877       0.0       1523.214992       1511.50
+    2  0.2010752665       0.0       1562.396364       1482.70
+    3  0.1910995587       0.0       1643.955996       1406.86
+    4  0.1749400431       0.0       1795.811067       1287.70
+ _________________________________________________
+
+ End of environmental file

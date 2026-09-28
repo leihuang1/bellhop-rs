@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 use std::path::Path;
 
-use kraken::{Case, CaseDefinition, SurfaceBoundary, legacy::load_case, solve};
+use kraken::{BottomBoundary, Case, CaseDefinition, SurfaceBoundary, legacy::load_case, solve};
 use num_complex::Complex64;
 
 fn definition() -> CaseDefinition {
@@ -95,6 +95,35 @@ fn rigid_surface_changes_surface_pressure_and_retains_vacuum_default() {
             .iter()
             .all(|mode| mode.eigenfunction[0].norm() > 1e-3)
     );
+}
+
+#[test]
+fn rigid_bottom_rejects_half_space_material_in_public_definition() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/PekerisHard");
+    let mut input = load_case(root.with_extension("env"), root.with_extension("flp"))
+        .unwrap()
+        .into_definition();
+    assert_eq!(input.bottom_boundary, BottomBoundary::Rigid);
+    assert!(input.c_high_mps > input.sound_speed_profile[0].sound_speed_mps);
+    for field in [
+        "bottom_sound_speed_mps",
+        "bottom_density_g_cm3",
+        "bottom_attenuation_db_per_wavelength",
+    ] {
+        let mut bad = input.clone();
+        match field {
+            "bottom_sound_speed_mps" => bad.bottom_sound_speed_mps = 1700.0,
+            "bottom_density_g_cm3" => bad.bottom_density_g_cm3 = 1.5,
+            _ => bad.bottom_attenuation_db_per_wavelength = 1.0,
+        }
+        let report = Case::from_definition(bad).unwrap_err();
+        assert!(
+            report.diagnostics().iter().any(|d| d.field == field),
+            "{report}"
+        );
+    }
+    input.c_high_mps = 100_000.0;
+    assert!(Case::from_definition(input).is_ok());
 }
 
 #[test]

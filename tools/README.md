@@ -38,14 +38,14 @@ Numerically compare a supported Rust single-fluid `.env`/`.flp` pair
 against fresh KRAKEN/FIELD output (not merely a smoke test):
 
 ```sh
-for case in Pekeris PekerisFiltered PekerisDense PekerisDenseLoss PekerisRefined PekerisSpline3 PekerisRigid PekerisRigidLoss MunkLossless MunkBottomLoss SductTrapped SductPchip SductSpline; do
+for case in Pekeris PekerisFiltered PekerisDense PekerisDenseLoss PekerisRefined PekerisSpline3 PekerisRigid PekerisRigidLoss PekerisHard PekerisHardBoth MunkLossless MunkBottomLoss SductTrapped SductPchip SductSpline; do
   tools/reference/compare-kraken.sh "crates/kraken/tests/fixtures/$case.env"
 done
 ```
 
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
-thirteen cases with fixed tolerances, plus the full unmodified upstream MunkK case
+fifteen cases with fixed tolerances, plus the full unmodified upstream MunkK case
 in CI (reusing its pinned reference smoke output). Raw small reference goldens
 and their [hashes/provenance](../crates/kraken/tests/fixtures/golden/README.md)
 also run in ordinary tests without Docker. MunkBottomLoss, MunkLossless and

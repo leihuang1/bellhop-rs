@@ -120,13 +120,19 @@ pub enum SurfaceBoundary {
     Rigid,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BottomBoundary {
+    FluidHalfSpace,
+    Rigid,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SoundSpeedPoint {
     pub depth_m: f64,
     pub sound_speed_mps: f64,
 }
 
-/// Unvalidated input for a single fluid layer with a vacuum surface.
+/// Unvalidated input for a single fluid layer with smooth boundaries.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CaseDefinition {
     pub title: String,
@@ -136,9 +142,12 @@ pub struct CaseDefinition {
     pub surface_boundary: SurfaceBoundary,
     pub sound_speed_profile: Vec<SoundSpeedPoint>,
     pub water_density_g_cm3: f64,
+    pub bottom_boundary: BottomBoundary,
+    /// Zero for a rigid bottom (no half-space material).
     pub bottom_sound_speed_mps: f64,
+    /// Zero for a rigid bottom (no half-space material).
     pub bottom_density_g_cm3: f64,
-    /// Bottom half-space attenuation in dB per wavelength (0 for lossless).
+    /// Bottom half-space attenuation in dB per wavelength (0 for lossless or rigid).
     pub bottom_attenuation_db_per_wavelength: f64,
     pub source_geometry: SourceGeometry,
     /// Base finite-difference mesh size, or 0 for 20 points per bottom wavelength.
@@ -223,7 +232,9 @@ impl Case {
         if !profile_invalid {
             match profile::Profile::new(&definition) {
                 Ok(profile) => {
-                    if definition.bottom_sound_speed_mps <= profile.minimum_speed() {
+                    if definition.bottom_boundary == BottomBoundary::FluidHalfSpace
+                        && definition.bottom_sound_speed_mps <= profile.minimum_speed()
+                    {
                         diagnostics.push(error(
                             "bottom_sound_speed_mps",
                             "trapped modes require a bottom faster than the minimum water sound speed",
@@ -236,7 +247,20 @@ impl Case {
                 )),
             }
         }
-        if definition.bottom_attenuation_db_per_wavelength < 0.0
+        if definition.bottom_boundary == BottomBoundary::Rigid {
+            for (field, value) in [
+                ("bottom_sound_speed_mps", definition.bottom_sound_speed_mps),
+                ("bottom_density_g_cm3", definition.bottom_density_g_cm3),
+                (
+                    "bottom_attenuation_db_per_wavelength",
+                    definition.bottom_attenuation_db_per_wavelength,
+                ),
+            ] {
+                if value != 0.0 {
+                    diagnostics.push(error(field, "rigid bottom has no half-space material"));
+                }
+            }
+        } else if definition.bottom_attenuation_db_per_wavelength < 0.0
             || definition.bottom_attenuation_db_per_wavelength
                 > 8.685_889_6 * 2.0 * std::f64::consts::PI
         {
@@ -245,19 +269,21 @@ impl Case {
                 "bottom attenuation must yield a complex speed with imaginary part no larger than real part",
             ));
         }
-        if definition.c_high_mps > definition.bottom_sound_speed_mps {
+        if definition.bottom_boundary == BottomBoundary::FluidHalfSpace
+            && definition.c_high_mps > definition.bottom_sound_speed_mps
+        {
             diagnostics.push(error(
                 "phase_speed_limits",
                 "leaky modes above the bottom sound speed are not supported yet",
             ));
         }
-        for (field, density) in [
-            ("water_density_g_cm3", definition.water_density_g_cm3),
-            ("bottom_density_g_cm3", definition.bottom_density_g_cm3),
-        ] {
-            if density <= 0.0 {
-                diagnostics.push(error(field, "density must be positive"));
-            }
+        if definition.water_density_g_cm3 <= 0.0 {
+            diagnostics.push(error("water_density_g_cm3", "density must be positive"));
+        }
+        if definition.bottom_boundary == BottomBoundary::FluidHalfSpace
+            && definition.bottom_density_g_cm3 <= 0.0
+        {
+            diagnostics.push(error("bottom_density_g_cm3", "density must be positive"));
         }
         if definition.mesh_points != 0 && !(10..=MAX_MESH_POINTS).contains(&definition.mesh_points)
         {
@@ -440,7 +466,7 @@ pub struct SimulationResult {
 ///
 /// # Errors
 ///
-/// Returns a diagnostic if the phase-speed range contains no trapped modes or
+/// Returns a diagnostic if the phase-speed range contains no supported modes or
 /// the field exceeds the bounded modal-work limit.
 pub fn solve(case: &Case) -> Result<SimulationResult, DiagnosticReport> {
     solver::solve(case)

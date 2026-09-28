@@ -15,6 +15,8 @@ const CASES: &[&str] = &[
     "PekerisSpline3",
     "PekerisRigid",
     "PekerisRigidLoss",
+    "PekerisHard",
+    "PekerisHardBoth",
     "MunkLossless",
     "MunkBottomLoss",
     "SductTrapped",

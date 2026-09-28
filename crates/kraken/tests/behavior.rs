@@ -127,6 +127,28 @@ fn rigid_bottom_rejects_half_space_material_in_public_definition() {
 }
 
 #[test]
+fn rigid_bottom_accepts_an_underflowing_phase_speed_bound() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for name in ["PekerisHard", "PekerisHardBoth"] {
+        let root = fixtures.join(name);
+        let mut input = load_case(root.with_extension("env"), root.with_extension("flp"))
+            .unwrap()
+            .into_definition();
+        let baseline = solve(&Case::from_definition(input.clone()).unwrap()).unwrap();
+        input.c_high_mps = f64::MAX;
+        let actual = solve(&Case::from_definition(input).unwrap()).unwrap();
+        assert!(actual.modes.modes.len() >= baseline.modes.modes.len());
+        for (wide, narrow) in actual.modes.modes.iter().zip(&baseline.modes.modes) {
+            assert!(
+                (wide.horizontal_wavenumber_rad_per_m - narrow.horizontal_wavenumber_rad_per_m)
+                    .norm()
+                    < 1e-10
+            );
+        }
+    }
+}
+
+#[test]
 fn spline_trapped_medium_checks_interpolated_minimum() {
     let mut input = definition();
     input.interpolation = kraken::Interpolation::Spline;

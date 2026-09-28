@@ -252,7 +252,11 @@ impl<'a> Mesh<'a> {
         // Preserve Solve1's lower search guard, including its cutoff exclusion.
         let low = 1.00001 * (self.omega / self.case.c_high_mps).powi(2);
         let high = (self.omega / self.case.c_low_mps.max(self.min_speed)).powi(2);
-        if low >= high || !high.is_finite() || low <= self.bottom_k2 {
+        if low >= high
+            || !high.is_finite()
+            || (self.case.bottom_boundary == BottomBoundary::FluidHalfSpace
+                && low <= self.bottom_k2)
+        {
             return Err(error(
                 "KR0301",
                 "phase-speed limits contain no supported modes",

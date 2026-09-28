@@ -6,9 +6,10 @@ Fortran 12.2 environment described in [`reference.md`](reference.md).
 
 **Status:** `crates/kraken` supports range-independent, single-fluid-layer
 trapped or rigid-bottom confined modes with optional bottom-half-space `W`
-attenuation, and coherent
-line- or point-source FIELD. It is not the full matrix below; unsupported
-inputs are rejected.
+attenuation, and coherent line- or point-source FIELD. A separate **modes-only**
+KRAKENC slice computes leaky modes for a constant, lossless `N` water column,
+vacuum surface and lossless fluid bottom, with a base mesh and no extrapolation.
+It is not the full matrix below; unsupported inputs are rejected.
 
 ## Products
 
@@ -25,7 +26,8 @@ separate product and acceptance contract.
 
 ## Current slice
 
-`crates/kraken` currently accepts a narrow legacy `.env`/`.flp` subset:
+The KRAKEN `load_case`/`solve` path currently accepts a narrow legacy
+`.env`/`.flp` subset:
 
 - one frequency and one lossless, constant-density fluid water layer using
   `N` (N²-linear), `C` (sound-speed-linear), `P` (monotone PCHIP), `S`
@@ -80,6 +82,21 @@ three-line `MunkAnalytic.flp` cannot be parsed by v2023.5 FIELD itself, so the
 original `.env/.flp` *pair* is not claimed as accepted. The sduct derivatives
 still remove the original leaky phase-speed interval; unmodified `sductK` is
 not supported.
+The separate KRAKENC `load_complex_case`/`solve_complex_modes` path currently
+supports only a constant, lossless `N`-profile, vacuum surface, lossless fluid
+half-space (including a bottom slower than the water), a leaky phase-speed
+interval, and `RMax=0`. The KRAKENC legacy reader accepts both blank and dotted
+restart options. It uses the `.flp` only to select mode-sampling depths; `solve`
+rejects this case because KRAKENC FIELD is not yet implemented. The derived
+`PekerisComplex.env` extends Pekeris to `cHigh=2000 m/s` and enables Fortran
+restarts; `PekerisComplexBlank` uses the default restart setting and
+`PekerisComplexSlow` lowers the bottom speed to 1400 m/s.
+`PekerisComplexCLow` uses a 1550 m/s lower phase-speed bound and blank
+restarts, returning only the three in-band modes (the excluded first root is
+still used for deflation). All modes in these cases are compared against
+committed and fresh v2023.5 `.mod/.prt`; scaled depth/frequency regression
+checks that duplicate-root detection retains distinct modes. Fluid-bottom
+sound speed must be positive for both KRAKEN and KRAKENC.
 Original KRAKENC examples remain reference-only smoke tests. Upstream
 `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)
@@ -185,7 +202,7 @@ Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
 the pinned reference workflow numerically compares all seventeen supported
 fixtures and unmodified official MunkK. Unmodified sduct remains a reference-only
-smoke test; its leaky modes are not yet supported.
+smoke test; its nonconstant leaky modes are not yet supported.
 
 ## Repository shape
 

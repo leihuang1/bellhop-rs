@@ -3,7 +3,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use kraken::{Case, ModeSet, PressureField, legacy::load_case, solve};
+use kraken::{
+    Case, ModeSet, PressureField,
+    legacy::{load_case, load_complex_case},
+    solve, solve_complex_modes,
+};
 use num_complex::Complex64;
 
 const CASES: &[&str] = &[
@@ -38,6 +42,48 @@ fn fluid_modes_and_field_match_pinned_goldens() {
             &fixtures().join("golden").join(name),
         );
     }
+}
+
+#[test]
+fn complex_fluid_modes_match_pinned_fortran() {
+    for (name, golden) in [
+        ("PekerisComplex", "PekerisComplex"),
+        ("PekerisComplexBlank", "PekerisComplex"),
+        ("PekerisComplexSlow", "PekerisComplexSlow"),
+        ("PekerisComplexCLow", "PekerisComplexCLow"),
+    ] {
+        compare_complex(
+            &fixtures().join(format!("{name}.env")),
+            &fixtures().join("golden").join(golden),
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires a pinned external Fortran reference run"]
+fn complex_fluid_matches_fresh_reference() {
+    let name = std::env::var("KRAKEN_COMPLEX_CASE").expect("KRAKEN_COMPLEX_CASE is required");
+    let reference = PathBuf::from(
+        std::env::var_os("KRAKEN_COMPLEX_REFERENCE_ROOT")
+            .expect("KRAKEN_COMPLEX_REFERENCE_ROOT is required"),
+    );
+    compare_complex(&fixtures().join(format!("{name}.env")), &reference);
+}
+
+fn compare_complex(env: &Path, reference: &Path) {
+    let case = load_complex_case(env, fixtures().join("Pekeris.flp")).unwrap();
+    let actual = solve_complex_modes(&case).unwrap();
+    let errors = compare_modes(
+        &case,
+        &actual,
+        &Records::read(&reference.with_extension("mod")),
+        &fs::read_to_string(reference.with_extension("prt")).unwrap(),
+    );
+    eprintln!(
+        "{}: {} KRAKENC modes, errors {errors:?}",
+        env.display(),
+        actual.modes.len()
+    );
 }
 
 #[test]

@@ -1,0 +1,54 @@
+ _________________________________________________
+
+ KRAKENC-Pekeris fluid range independent
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   1
+
+
+     N2-Linear approximation to SSP
+     Attenuation units: nepers/m
+     VACUUM
+
+       ( # mesh points =  1000  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1500.00      0.00     1.00       0.0000    0.0000
+    100.00      1500.00      0.00     1.00       0.0000    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     ACOUSTO-ELASTIC half-space
+    100.00      1700.00      0.00     1.50       0.0000    0.0000
+
+ cLow =   1400.0     m/s      cHigh =   2000.0     m/s
+ RMax =   0.0000     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            1
+    Source   z-coordinates, Sz (m)
+                 75.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            3
+    Receiver z-coordinates, Rz (m)
+                 25.0000       75.0000       99.0000
+
+
+ Mesh multiplier   CPU seconds
+ Max. number of restarts in root finder, MaxTries =           20
+        1            0.677E-02s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2076486528       0.0       1512.936690       1490.38
+    2  0.2021046276       0.0       1554.438753       1459.18
+    3  0.1924506022       0.0       1632.415080       1406.66
+    4  0.1785173666     -0.19E-02   1759.824668       1188.92
+ _________________________________________________
+
+ End of environmental file

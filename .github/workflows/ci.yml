@@ -50,6 +50,15 @@ jobs:
         run: tools/reference/run-kraken-case.sh kraken target/reference/cases/MunkK.env
       - name: Smoke pinned KRAKENC and FIELD
         run: tools/reference/run-kraken-case.sh krakenc target/reference/cases/MunkKleaky.env
+      - name: Fluid KRAKENC modes numerical differential
+        run: |
+          for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow; do
+            tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
+            KRAKEN_COMPLEX_CASE="$case" \
+            KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
+            cargo test --release -p kraken --test differential_reference \
+              complex_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+          done
       - name: Fluid modes and FIELD numerical differential
         run: |
           for case in Pekeris PekerisFiltered PekerisDense PekerisDenseLoss PekerisRefined PekerisSpline3 PekerisRigid PekerisRigidLoss PekerisHard PekerisHardBoth PekerisRigidPlane MunkLossless MunkBottomLoss MunkAnalytic SductTrapped SductPchip SductSpline; do

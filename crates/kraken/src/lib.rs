@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use num_complex::Complex64;
 
+mod complex_modes;
 pub mod legacy;
 mod modes;
 #[cfg(test)]
@@ -111,6 +112,12 @@ pub enum Interpolation {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModeSolver {
+    Kraken,
+    Krakenc,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceGeometry {
     Line,
     Point,
@@ -138,6 +145,7 @@ pub struct SoundSpeedPoint {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CaseDefinition {
     pub title: String,
+    pub mode_solver: ModeSolver,
     pub frequency_hz: f64,
     pub water_depth_m: f64,
     pub interpolation: Interpolation,
@@ -258,7 +266,9 @@ impl Case {
         if !profile_invalid {
             match profile::Profile::new(&definition) {
                 Ok(profile) => {
-                    if definition.bottom_boundary == BottomBoundary::FluidHalfSpace
+                    if definition.mode_solver == ModeSolver::Kraken
+                        && definition.bottom_boundary == BottomBoundary::FluidHalfSpace
+                        && definition.bottom_sound_speed_mps > 0.0
                         && definition.bottom_sound_speed_mps <= profile.minimum_speed()
                     {
                         diagnostics.push(error(
@@ -295,7 +305,8 @@ impl Case {
                 "bottom attenuation must yield a complex speed with imaginary part no larger than real part",
             ));
         }
-        if definition.bottom_boundary == BottomBoundary::FluidHalfSpace
+        if definition.mode_solver == ModeSolver::Kraken
+            && definition.bottom_boundary == BottomBoundary::FluidHalfSpace
             && definition.c_high_mps > definition.bottom_sound_speed_mps
         {
             diagnostics.push(error(
@@ -306,10 +317,16 @@ impl Case {
         if definition.water_density_g_cm3 <= 0.0 {
             diagnostics.push(error("water_density_g_cm3", "density must be positive"));
         }
-        if definition.bottom_boundary == BottomBoundary::FluidHalfSpace
-            && definition.bottom_density_g_cm3 <= 0.0
-        {
-            diagnostics.push(error("bottom_density_g_cm3", "density must be positive"));
+        if definition.bottom_boundary == BottomBoundary::FluidHalfSpace {
+            if definition.bottom_sound_speed_mps <= 0.0 {
+                diagnostics.push(error(
+                    "bottom_sound_speed_mps",
+                    "fluid bottom sound speed must be positive",
+                ));
+            }
+            if definition.bottom_density_g_cm3 <= 0.0 {
+                diagnostics.push(error("bottom_density_g_cm3", "density must be positive"));
+            }
         }
         if definition.mesh_points != 0 && !(10..=MAX_MESH_POINTS).contains(&definition.mesh_points)
         {
@@ -495,5 +512,26 @@ pub struct SimulationResult {
 /// Returns a diagnostic if the phase-speed range contains no supported modes or
 /// the field exceeds the bounded modal-work limit.
 pub fn solve(case: &Case) -> Result<SimulationResult, DiagnosticReport> {
+    if case.mode_solver == ModeSolver::Krakenc {
+        return Err(DiagnosticReport::one(error(
+            "mode_solver",
+            "KRAKENC FIELD is not supported; call solve_complex_modes for modes only",
+        )));
+    }
     solver::solve(case)
+}
+
+/// Compute complex normal modes without synthesizing a FIELD.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the fluid complex-mode subset cannot be solved.
+pub fn solve_complex_modes(case: &Case) -> Result<ModeSet, DiagnosticReport> {
+    if case.mode_solver != ModeSolver::Krakenc {
+        return Err(DiagnosticReport::one(error(
+            "mode_solver",
+            "requires KRAKENC input",
+        )));
+    }
+    complex_modes::solve(case)
 }

@@ -27,8 +27,9 @@ separate product and acceptance contract.
 `crates/kraken` currently accepts a narrow legacy `.env`/`.flp` subset:
 
 - one frequency and one lossless, constant-density fluid water layer using
-  `N` (N²-linear) or `C` (sound-speed-linear) interpolation; depth-varying
-  sound speed is supported, but density gradients and additional layers are not;
+  `N` (N²-linear), `C` (sound-speed-linear), `P` (monotone PCHIP), or `S`
+  (not-a-knot cubic spline) interpolation; depth-varying sound speed is
+  supported, but density gradients and additional layers are not;
 - a smooth pressure-release surface (`V`) and smooth acoustic fluid
   half-space (`A`) with zero loss (`N`) or non-negative `W` bottom loss
   (dB/wavelength). Water-column loss, other loss units, volume attenuation,
@@ -46,16 +47,18 @@ reference's first-order perturbation for bottom attenuation. Point-source FIELD
 uses the reference's `sqrt(k)` modal factor and cylindrical spreading. The
 former closed-form Pekeris solver remains **only in tests** as an independent
 analytical cross-check. The parser rejects unsupported boundaries, water loss,
-other loss units, source types, and FIELD options instead of silently changing
-meaning.
+other loss units, analytic `A` interpolation, source types, and FIELD options
+instead of silently changing meaning.
 
-Eight constructed fixture pairs cover Pekeris (including forced extrapolation
-and an alternate lossy bottom), lossless `N` Munk, lossy-bottom `N` Munk with
-point-source FIELD, and lossless `C` sduct-derived trapped modes. **Additionally, the unmodified upstream
-`tests/Munk/MunkK.env` and `.flp` are compared in CI:** 102 modes and 501,501
-complex pressures. The committed `MunkBottomLoss` golden is a *reduced-grid
-derivative*, not the unmodified input. The sduct fixture still removes the
-original leaky phase-speed interval; unmodified `sductK` is not supported.
+Eleven constructed fixture pairs cover Pekeris (including a three-point
+spline with forced extrapolation and an alternate lossy bottom), lossless
+`N` Munk, lossy-bottom `N` Munk with point-source FIELD, and derived trapped
+`C/P/S` sduct profiles. The PCHIP sduct derivative also has bottom `W` loss.
+**Additionally, the unmodified upstream `tests/Munk/MunkK.env` and `.flp` are
+compared in CI:** 102 modes and 501,501 complex pressures. The committed
+`MunkBottomLoss` golden is a *reduced-grid derivative*, not the unmodified
+input. The sduct derivatives still remove the original leaky phase-speed
+interval; unmodified `sductK` is not supported.
 Original KRAKENC examples remain reference-only smoke tests. Upstream
 `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)
@@ -155,7 +158,7 @@ Acceptance requires differential coverage for modal wavenumbers and
 attenuation, normalized/aligned mode shapes, and complex pressure-field samples.
 Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
-the pinned reference workflow numerically compares all eight supported
+the pinned reference workflow numerically compares all eleven supported
 fixtures and unmodified official MunkK. Unmodified sduct remains a reference-only
 smoke test; its leaky modes are not yet supported.
 

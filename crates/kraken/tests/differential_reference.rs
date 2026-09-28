@@ -20,6 +20,7 @@ const CASES: &[&str] = &[
     "PekerisRigidPlane",
     "MunkLossless",
     "MunkBottomLoss",
+    "MunkAnalytic",
     "SductTrapped",
     "SductPchip",
     "SductSpline",
@@ -187,7 +188,7 @@ fn compare_modes(
             f64::from(mode.horizontal_wavenumber_rad_per_m.re as f32),
             stored.re,
             0.0,
-            "real wavenumber (.mod)",
+            &format!("real wavenumber (.mod) mode {}", index + 1),
         );
         // Loss depends on the first-mesh root; a different root rounding can
         // shift small imaginary parts even when the extrapolated real k agrees.

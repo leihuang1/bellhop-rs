@@ -106,6 +106,8 @@ pub enum Interpolation {
     CLinear,
     Pchip,
     Spline,
+    /// The fixed 5000 m Munk profile from the pinned Fortran `misc/munk.f90`.
+    AnalyticMunk,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -140,6 +142,7 @@ pub struct CaseDefinition {
     pub water_depth_m: f64,
     pub interpolation: Interpolation,
     pub surface_boundary: SurfaceBoundary,
+    /// Empty for `AnalyticMunk`; otherwise depths from the surface to the interface.
     pub sound_speed_profile: Vec<SoundSpeedPoint>,
     pub water_density_g_cm3: f64,
     pub bottom_boundary: BottomBoundary,
@@ -210,24 +213,47 @@ impl Case {
             diagnostics.push(error("water_depth_m", "water depth must be positive"));
         }
         let profile = &definition.sound_speed_profile;
-        let profile_invalid = !(2..=MAX_VECTOR_LENGTH).contains(&profile.len())
-            || profile.iter().any(|point| {
-                !point.depth_m.is_finite()
-                    || !point.sound_speed_mps.is_finite()
-                    || point.sound_speed_mps <= 0.0
-            })
-            || profile.first().is_none_or(|point| point.depth_m != 0.0)
-            || profile
-                .last()
-                .is_none_or(|point| point.depth_m != definition.water_depth_m)
-            || profile
-                .windows(2)
-                .any(|pair| pair[1].depth_m <= pair[0].depth_m);
+        let analytic = definition.interpolation == Interpolation::AnalyticMunk;
+        let profile_invalid = if analytic {
+            !profile.is_empty()
+        } else {
+            !(2..=MAX_VECTOR_LENGTH).contains(&profile.len())
+                || profile.iter().any(|point| {
+                    !point.depth_m.is_finite()
+                        || !point.sound_speed_mps.is_finite()
+                        || point.sound_speed_mps <= 0.0
+                })
+                || profile.first().is_none_or(|point| point.depth_m != 0.0)
+                || profile
+                    .last()
+                    .is_none_or(|point| point.depth_m != definition.water_depth_m)
+                || profile
+                    .windows(2)
+                    .any(|pair| pair[1].depth_m <= pair[0].depth_m)
+        };
         if profile_invalid {
             diagnostics.push(error(
                 "sound_speed_profile",
-                "require finite increasing depths from 0 to water depth and positive sound speeds",
+                if analytic {
+                    "analytic Munk profile has no point records"
+                } else {
+                    "require finite increasing depths from 0 to water depth and positive sound speeds"
+                },
             ));
+        }
+        if analytic {
+            if definition.water_depth_m != 5000.0 {
+                diagnostics.push(error(
+                    "water_depth_m",
+                    "analytic Munk profile requires 5000 m",
+                ));
+            }
+            if definition.water_density_g_cm3 != 1.0 {
+                diagnostics.push(error(
+                    "water_density_g_cm3",
+                    "analytic Munk profile requires density 1",
+                ));
+            }
         }
         if !profile_invalid {
             match profile::Profile::new(&definition) {

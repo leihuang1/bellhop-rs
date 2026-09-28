@@ -41,7 +41,12 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             (Complex64::new(omega, 0.0) / bottom_c).powi(2),
         )
     };
-    let last_speed = case.sound_speed_profile.last().unwrap().sound_speed_mps;
+    let profile = Profile::new(case)?;
+    // Analytic INIT does not read points, leaving Fortran's alphaR default at 1500.
+    let last_speed = case
+        .sound_speed_profile
+        .last()
+        .map_or(1500.0, |p| p.sound_speed_mps);
     let needed = (case.water_depth_m / (last_speed / case.frequency_hz / 20.0))
         .floor()
         .max(10.0);
@@ -70,7 +75,6 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             "mesh_points",
         ));
     }
-    let profile = Profile::new(case)?;
     let mut table: Vec<Vec<f64>> = Vec::new();
     let mut modes = Vec::new();
     let mut work = 0_usize;

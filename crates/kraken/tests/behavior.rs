@@ -65,6 +65,31 @@ fn validation_collects_errors_and_bounds_allocations() {
 }
 
 #[test]
+fn analytic_munk_requires_the_fixed_lossless_water_column() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/MunkAnalytic");
+    let case = load_case(root.with_extension("env"), root.with_extension("flp")).unwrap();
+    assert_eq!(case.interpolation, kraken::Interpolation::AnalyticMunk);
+    assert!(case.sound_speed_profile.is_empty());
+    let result = solve(&case).unwrap();
+    assert_eq!(result.modes.modes.len(), 102);
+    assert_eq!(result.field.pressure.len(), 25);
+
+    let definition = case.into_definition();
+    for change in ["depth", "density", "profile"] {
+        let mut invalid = definition.clone();
+        match change {
+            "depth" => invalid.water_depth_m = 4000.0,
+            "density" => invalid.water_density_g_cm3 = 1.1,
+            _ => invalid.sound_speed_profile.push(kraken::SoundSpeedPoint {
+                depth_m: 0.0,
+                sound_speed_mps: 1500.0,
+            }),
+        }
+        assert!(Case::from_definition(invalid).is_err(), "{change}");
+    }
+}
+
+#[test]
 fn rigid_surface_changes_surface_pressure_and_retains_vacuum_default() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let vacuum = load_case(

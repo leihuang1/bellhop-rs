@@ -28,9 +28,10 @@ separate product and acceptance contract.
 `crates/kraken` currently accepts a narrow legacy `.env`/`.flp` subset:
 
 - one frequency and one lossless, constant-density fluid water layer using
-  `N` (N²-linear), `C` (sound-speed-linear), `P` (monotone PCHIP), or `S`
-  (not-a-knot cubic spline) interpolation; depth-varying sound speed is
-  supported, but density gradients and additional layers are not;
+  `N` (N²-linear), `C` (sound-speed-linear), `P` (monotone PCHIP), `S`
+  (not-a-knot cubic spline), or `A` (the fixed 5000 m analytic Munk profile
+  from upstream `misc/munk.f90`); depth-varying sound speed is supported,
+  but density gradients and additional layers are not;
 - a smooth vacuum (`V`) or rigid (`R`) surface and either a smooth acoustic
   fluid bottom half-space (`A`) with zero loss (`N`) or non-negative `W` bottom
   loss (dB/wavelength), or a smooth rigid (`R`) bottom with no half-space record
@@ -54,20 +55,25 @@ normalization and the pinned
 reference's first-order perturbation for bottom attenuation. Point-source FIELD
 uses the reference's `sqrt(k)` modal factor and cylindrical spreading. The
 former closed-form Pekeris solver remains **only in tests** as an independent
-analytical cross-check. The parser rejects other boundary types, water loss,
-other loss units, analytic `A` interpolation, source types, and FIELD options
-instead of silently changing meaning.
+analytical cross-check. Analytic `A` has no SSP point records, uses density 1,
+and requires the upstream formula's 5000 m water column; it is not a general
+configurable analytic profile. The parser rejects other boundary types, water
+loss, other loss units, source types, and FIELD options instead of silently
+changing meaning.
 
-Sixteen constructed fixture pairs cover Pekeris (including a three-point
+Seventeen constructed fixture pairs cover Pekeris (including a three-point
 spline with forced extrapolation, an alternate lossy bottom, derived rigid
 surfaces with/without bottom loss, two derived `S` waveguides with a rigid
 bottom, and a constant `S` rigid-rigid plane mode at the spectral endpoint), lossless
-`N` Munk, lossy-bottom `N` Munk with point-source FIELD, and derived trapped
+`N` Munk, lossy-bottom `N` Munk with point-source FIELD, a derived analytic
+`A` Munk with fixed-depth formula and `W` bottom loss, and derived trapped
 `C/P/S` sduct profiles. The PCHIP sduct derivative also has bottom `W` loss.
 **Additionally, the unmodified upstream `tests/Munk/MunkK.env` and `.flp` are
 compared in CI:** 102 modes and 501,501 complex pressures. The committed
 `MunkBottomLoss` golden is a *reduced-grid derivative*, not the unmodified
-input. The sduct derivatives still remove the original leaky phase-speed
+input. The analytic `A` golden is also derived; the unmodified analytic
+input with mesh extrapolation still misses two exact complex32 `.mod` rounding
+comparisons and is **not** claimed as an accepted upstream case. The sduct derivatives still remove the original leaky phase-speed
 interval; unmodified `sductK` is not supported.
 Original KRAKENC examples remain reference-only smoke tests. Upstream
 `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
@@ -83,8 +89,10 @@ output in CI; provenance is recorded
   values followed by `/`) are accepted. Depth vectors use upstream single
   precision; ranges and offsets use double precision. Like `ReadVector`, each
   legacy vector is sorted independently, including receiver offsets.
-- Each SSP point occupies one record. Omitted trailing material values retain
-  the previous point's values (Fortran defaults on the first). `/` ends that
+- Each `N/C/P/S` SSP point occupies one record; `A` has no SSP point records
+  and requires an explicit bottom sound speed and density for a fluid bottom.
+  Omitted trailing material values retain the previous point's values (Fortran
+  defaults on the first). `/` ends that
   record, **not** the SSP; the interface depth ends the SSP. The acoustic bottom
   half-space record may similarly inherit omitted trailing values; a rigid
   bottom has **no** half-space record. In a direct `CaseDefinition`, rigid bottom
@@ -170,7 +178,7 @@ Acceptance requires differential coverage for modal wavenumbers and
 attenuation, normalized/aligned mode shapes, and complex pressure-field samples.
 Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
-the pinned reference workflow numerically compares all sixteen supported
+the pinned reference workflow numerically compares all seventeen supported
 fixtures and unmodified official MunkK. Unmodified sduct remains a reference-only
 smoke test; its leaky modes are not yet supported.
 

@@ -4,9 +4,10 @@ The numerical reference is Acoustics Toolbox `v2023.5`, commit
 `475108519289c6fb488b58980c644ea14eccc604`, using the pinned Linux x86-64 GNU
 Fortran 12.2 environment described in [`reference.md`](reference.md).
 
-**Status:** `crates/kraken` supports lossless, range-independent, single-fluid-layer
-trapped modes and coherent line-source FIELD. It is not the full matrix below;
-unsupported inputs are rejected.
+**Status:** `crates/kraken` supports range-independent, single-fluid-layer
+trapped modes with optional bottom-half-space `W` attenuation, and coherent
+line- or point-source FIELD. It is not the full matrix below; unsupported
+inputs are rejected.
 
 ## Products
 
@@ -29,27 +30,34 @@ separate product and acceptance contract.
   `N` (N²-linear) or `C` (sound-speed-linear) interpolation; depth-varying
   sound speed is supported, but density gradients and additional layers are not;
 - a smooth pressure-release surface (`V`) and smooth acoustic fluid
-  half-space (`A`) with zero attenuation;
-- a coherent, omnidirectional line source (`X`, `O`, `C`) and one
-  range-independent FIELD profile at 0 km;
+  half-space (`A`) with zero loss (`N`) or non-negative `W` bottom loss
+  (dB/wavelength). Water-column loss, other loss units, volume attenuation,
+  and rough boundaries are not supported;
+- a coherent, omnidirectional line (`X`) or point (`R`) source (`O`, `C`),
+  with one range-independent FIELD profile at 0 km;
 - finite, in-water source/receiver depths, with FIELD depths covered by the
   mode-sampling depths in `.env`.
 
 The solver uses a real acoustic finite-difference mesh with Sturm mode counts,
 inverse iteration for mode shapes and group speeds on the first mesh, and up to
 five Richardson-extrapolated eigenvalue meshes controlled by `RMax`. It includes
-the decaying bottom-half-space contribution to normalization. The former
-closed-form Pekeris solver is retained **only in tests** as an independent
-analytical cross-check. The legacy parser rejects unsupported boundaries,
-loss, source types, and FIELD options rather than silently changing their meaning.
+the decaying bottom-half-space contribution to normalization and the pinned
+reference's first-order perturbation for bottom attenuation. Point-source FIELD
+uses the reference's `sqrt(k)` modal factor and cylindrical spreading. The
+former closed-form Pekeris solver remains **only in tests** as an independent
+analytical cross-check. The parser rejects unsupported boundaries, water loss,
+other loss units, source types, and FIELD options instead of silently changing
+meaning.
 
-Six constructed fixture pairs cover Pekeris (including forced extrapolation),
-lossless `N` Munk and lossless `C` sduct-derived trapped modes. These are **not**
-the unmodified official `MunkK` or `sductK` inputs: the former specifies bottom
-loss (`NVW`, 0.8 dB/wavelength), and the latter specifies `CVW` and a leaky
-phase-speed interval. Unmodified official KRAKEN/KRAKENC examples remain
-reference-only smoke tests. Upstream `tests/PekerisRD` is a BELLHOP, not a
-KRAKEN, case. The same comparator in
+Eight constructed fixture pairs cover Pekeris (including forced extrapolation
+and an alternate lossy bottom), lossless `N` Munk, lossy-bottom `N` Munk with
+point-source FIELD, and lossless `C` sduct-derived trapped modes. **Additionally, the unmodified upstream
+`tests/Munk/MunkK.env` and `.flp` are compared in CI:** 102 modes and 501,501
+complex pressures. The committed `MunkBottomLoss` golden is a *reduced-grid
+derivative*, not the unmodified input. The sduct fixture still removes the
+original leaky phase-speed interval; unmodified `sductK` is not supported.
+Original KRAKENC examples remain reference-only smoke tests. Upstream
+`tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)
 checks committed `.mod/.shd/.prt` goldens and newly generated pinned Fortran
 output in CI; provenance is recorded
@@ -73,7 +81,7 @@ output in CI; provenance is recorded
 - Each input file is capped at 1 MiB; vectors at 100,000 entries; mesh at
   1,000,000 grid intervals; roots at 20,000 modes; mode shapes at 5,000,000
   values; all mesh searches at 300,000,000 counted operations; pressure grids
-  at 1,000,000 samples and 50,000,000 modal contributions.
+  at 1,000,000 samples and 60,000,000 modal contributions (covering full MunkK).
 - `mesh_points` = 0 selects the reference's automatic base mesh (at least ten,
   ~20 points per wavelength); otherwise 10–1,000,000 is allowed if not too
   coarse. `max_range_m` = 0 uses the base mesh only; larger values control
@@ -87,8 +95,8 @@ following the reference's `.mod`/FIELD rounding points. Returned pressure values
 are promoted to `Complex64`; that does not imply double-precision FIELD arithmetic.
 
 This is an implementation slice, not a reduction of the final support target.
-The measured difference from the pinned finite-difference reference is recorded
-in [`deviations.md`](deviations.md).
+Measured differences and fixture provenance are recorded
+[with the goldens](../crates/kraken/tests/fixtures/golden/README.md).
 
 ## Planned environment support
 
@@ -147,9 +155,9 @@ Acceptance requires differential coverage for modal wavenumbers and
 attenuation, normalized/aligned mode shapes, and complex pressure-field samples.
 Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
-the pinned reference workflow numerically compares all six supported fixtures.
-Unmodified official Munk and sduct runs remain reference-only smoke tests;
-they are not evidence of Rust support for their attenuation and leaky modes.
+the pinned reference workflow numerically compares all eight supported
+fixtures and unmodified official MunkK. Unmodified sduct remains a reference-only
+smoke test; its leaky modes are not yet supported.
 
 ## Repository shape
 

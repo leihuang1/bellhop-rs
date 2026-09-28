@@ -34,22 +34,23 @@ tools/reference/run-kraken-case.sh kraken path/to/MunkK.env
 tools/reference/run-kraken-case.sh krakenc path/to/MunkKleaky.env
 ```
 
-Numerically compare a supported Rust lossless single-fluid `.env`/`.flp` pair
+Numerically compare a supported Rust single-fluid `.env`/`.flp` pair
 against fresh KRAKEN/FIELD output (not merely a smoke test):
 
 ```sh
-for case in Pekeris PekerisFiltered PekerisDense PekerisRefined MunkLossless SductTrapped; do
+for case in Pekeris PekerisFiltered PekerisDense PekerisDenseLoss PekerisRefined MunkLossless MunkBottomLoss SductTrapped; do
   tools/reference/compare-kraken.sh "crates/kraken/tests/fixtures/$case.env"
 done
 ```
 
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
-six cases with fixed tolerances. Raw small reference goldens and their
-[hashes/provenance](../crates/kraken/tests/fixtures/golden/README.md) also run in
-ordinary tests without Docker. MunkLossless and SductTrapped are derived cases;
-the original upstream Munk/sduct inputs include loss or leaky modes and are
-not yet supported by the Rust solver.
+eight cases with fixed tolerances, plus the full unmodified upstream MunkK case
+in CI (reusing its pinned reference smoke output). Raw small reference goldens
+and their [hashes/provenance](../crates/kraken/tests/fixtures/golden/README.md)
+also run in ordinary tests without Docker. MunkBottomLoss, MunkLossless and
+SductTrapped are explicitly derived, reduced-grid fixtures. Unmodified MunkK
+is now compared end-to-end; unmodified sduct still needs leaky-mode support.
 
 Compare an `R` run against Rust on the host, or on the authoritative pinned
 Linux x86-64 Rust 1.88 environment:

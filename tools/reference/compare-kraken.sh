@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
-  echo "usage: $0 CASE.env (requires same-stem .flp; supported lossless single-fluid slice only)" >&2
+  echo "usage: $0 CASE.env (requires same-stem .flp; supported single-fluid trapped-mode slice only)" >&2
   exit 2
 fi
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)

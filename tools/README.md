@@ -45,8 +45,10 @@ done
 
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
-seventeen cases with fixed tolerances, plus the full unmodified upstream MunkK case
-in CI (reusing its pinned reference smoke output). Raw small reference goldens
+seventeen cases with fixed tolerances, plus the full unmodified upstream MunkK
+pair and the unmodified upstream MunkAnalytic `.env` with a derived coherent
+FIELD `.flp`. The original MunkAnalytic three-line `.flp` fails in v2023.5
+FIELD itself and is not an accepted upstream pair. Raw small reference goldens
 and their [hashes/provenance](../crates/kraken/tests/fixtures/golden/README.md)
 also run in ordinary tests without Docker. MunkBottomLoss, MunkLossless and
 SductTrapped are explicitly derived, reduced-grid fixtures. Unmodified MunkK

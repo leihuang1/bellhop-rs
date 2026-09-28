@@ -172,11 +172,23 @@ impl<'a> Mesh<'a> {
         bottom_complex_k2: Complex64,
     ) -> Result<Self, DiagnosticReport> {
         let h = case.water_depth_m / n as f64;
+        let analytic = case.interpolation == crate::Interpolation::AnalyticMunk;
+        // munk.f90 computes 5000.0 / N in f32 before assigning it to f64 h.
+        let profile_h = if analytic {
+            f64::from(5000.0_f32 / n as f32)
+        } else {
+            h
+        };
         let mut min_speed = f64::INFINITY;
         let mut invalid_speed = false;
         let b1: Vec<_> = (0..=n)
             .map(|i| {
-                let speed = profile.speed((i as f64 * h).min(case.water_depth_m));
+                let depth = i as f64 * profile_h;
+                let speed = profile.speed(if analytic {
+                    depth
+                } else {
+                    depth.min(case.water_depth_m)
+                });
                 invalid_speed |= !speed.is_finite() || speed <= 0.0;
                 min_speed = min_speed.min(speed);
                 -2.0 + h * h * (omega * omega / (speed * speed))
@@ -515,6 +527,24 @@ mod tests {
         input.mesh_points = 100_000;
         let report = solve(&Case::from_definition(input).unwrap()).unwrap_err();
         assert!(report.diagnostics()[0].message.contains("work limit"));
+    }
+
+    #[test]
+    #[allow(clippy::cast_possible_truncation, clippy::float_cmp)]
+    fn analytic_auto_mesh_matches_pinned_fortran_rounding() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/MunkAnalytic");
+        let mut input = load_case(root.with_extension("env"), root.with_extension("flp"))
+            .unwrap()
+            .into_definition();
+        input.mesh_points = 0;
+        input.max_range_m = 200_000.0;
+        let modes = solve(&Case::from_definition(input).unwrap()).unwrap();
+        assert_eq!(modes.modes.len(), 102);
+        // Unmodified upstream MunkAnalytic.env: ninth .mod wavenumber, after extrapolation.
+        assert_eq!(
+            modes.modes[8].horizontal_wavenumber_rad_per_m.re as f32,
+            f32::from_bits(0x3e55_599f)
+        );
     }
 
     #[test]

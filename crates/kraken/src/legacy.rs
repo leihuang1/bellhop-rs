@@ -454,7 +454,7 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
 
     let options = reader.text("top_options")?;
     let option = |index| options.text.as_bytes().get(index).copied().unwrap_or(b' ');
-    if !matches!(option(0), b'N' | b'C')
+    if !matches!(option(0), b'N' | b'C' | b'P' | b'S')
         || option(1) != b'V'
         || !matches!(option(2), b'N' | b'W')
         || [option(3), option(4), option(5)] != *b"   "
@@ -467,7 +467,7 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
     {
         return Err(one(
             "KR0202",
-            "requires N/C interpolation, vacuum surface, N/W attenuation without water loss, and one frequency",
+            "requires N/C/P/S interpolation, vacuum surface, N/W attenuation without water loss, and one frequency",
             "top_options",
             path,
             options.line,
@@ -475,10 +475,11 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
         ));
     }
 
-    let interpolation = if option(0) == b'N' {
-        Interpolation::N2Linear
-    } else {
-        Interpolation::CLinear
+    let interpolation = match option(0) {
+        b'N' => Interpolation::N2Linear,
+        b'C' => Interpolation::CLinear,
+        b'P' => Interpolation::Pchip,
+        _ => Interpolation::Spline,
     };
     let header = reader.record("water_header")?;
     if header.tokens.len() != 3 {
@@ -904,6 +905,27 @@ mod tests {
     }
 
     #[test]
+    fn spline_with_no_trapped_water_is_rejected_at_legacy_boundary() {
+        let env = include_str!("../tests/fixtures/Pekeris.env")
+            .replace("'NVN'", "'SVN'")
+            .replace(
+                "100.0 1700.0 0.0 1.5 0.0 0.0 /",
+                "100.0 1400.0 0.0 1.5 0.0 0.0 /",
+            )
+            .replace("1400.0 1700.0", "1300.0 1400.0");
+        let report = parse_case(
+            &env,
+            include_str!("../tests/fixtures/Pekeris.flp"),
+            Path::new("Pekeris.env"),
+            Path::new("Pekeris.flp"),
+        )
+        .unwrap_err();
+        assert!(report.diagnostics().iter().any(|d| {
+            d.field == "bottom_sound_speed_mps" && d.path == Path::new("Pekeris.env")
+        }));
+    }
+
+    #[test]
     fn unsupported_solver_and_field_options_are_rejected() {
         let env = include_str!("../tests/fixtures/Pekeris.env").replace("'NVN'", "'NVM'");
         let error = parse_environment(&env, Path::new("Pekeris.env"))
@@ -911,6 +933,15 @@ mod tests {
             .expect("unsupported attenuation unit should be rejected");
         assert_eq!(error.diagnostics()[0].field, "top_options");
         assert_eq!(error.diagnostics()[0].line, 4);
+        let analytic = include_str!("../tests/fixtures/Pekeris.env").replace("'NVN'", "'AVN'");
+        assert_eq!(
+            parse_environment(&analytic, Path::new("Pekeris.env"))
+                .err()
+                .unwrap()
+                .diagnostics()[0]
+                .field,
+            "top_options"
+        );
 
         let lossy_water = include_str!("../tests/fixtures/MunkBottomLoss.env")
             .replace("200.0 1530.29 /", "200.0 1530.29 0.0 1.0 0.1 /");

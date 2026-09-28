@@ -5,10 +5,9 @@
 //! Real, single-fluid finite-difference path from KRAKEN v2023.5.
 //! Sturm counts isolate modes; inverse iteration samples the first mesh;
 //! Richardson extrapolation refines eigenvalues only, as in the reference.
+use crate::profile::Profile;
 use crate::solver::error;
-use crate::{
-    Case, DiagnosticReport, Interpolation, MAX_MESH_POINTS, MAX_MODE_LIMIT, ModeSet, NormalMode,
-};
+use crate::{Case, DiagnosticReport, MAX_MESH_POINTS, MAX_MODE_LIMIT, ModeSet, NormalMode};
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
@@ -62,6 +61,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             "mesh_points",
         ));
     }
+    let profile = Profile::new(case)?;
     let mut table: Vec<Vec<f64>> = Vec::new();
     let mut modes = Vec::new();
     let mut work = 0_usize;
@@ -77,7 +77,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
                     "mesh_points",
                 )
             })?;
-        let mesh = Mesh::new(case, n, omega, bottom_k2, bottom_complex_k2)?;
+        let mesh = Mesh::new(case, &profile, n, omega, bottom_k2, bottom_complex_k2)?;
         let roots = mesh.roots(&mut work)?;
         if set == 0 {
             modes = roots
@@ -152,6 +152,7 @@ impl<'a> Mesh<'a> {
     #[allow(clippy::cast_precision_loss)]
     fn new(
         case: &'a Case,
+        profile: &Profile<'_>,
         n: usize,
         omega: f64,
         bottom_k2: f64,
@@ -159,13 +160,22 @@ impl<'a> Mesh<'a> {
     ) -> Result<Self, DiagnosticReport> {
         let h = case.water_depth_m / n as f64;
         let mut min_speed = f64::INFINITY;
+        let mut invalid_speed = false;
         let b1: Vec<_> = (0..=n)
             .map(|i| {
-                let speed = sound_speed(case, (i as f64 * h).min(case.water_depth_m));
+                let speed = profile.speed((i as f64 * h).min(case.water_depth_m));
+                invalid_speed |= !speed.is_finite() || speed <= 0.0;
                 min_speed = min_speed.min(speed);
                 -2.0 + h * h * (omega * omega / (speed * speed))
             })
             .collect();
+        if invalid_speed {
+            return Err(error(
+                "KR0302",
+                "interpolated sound speed is non-finite or non-positive",
+                "sound_speed_profile",
+            ));
+        }
         if h <= 0.0 || !h.is_finite() || b1.iter().any(|x| !x.is_finite()) {
             return Err(error(
                 "KR0302",
@@ -360,23 +370,6 @@ impl<'a> Mesh<'a> {
     }
 }
 
-fn sound_speed(case: &Case, depth: f64) -> f64 {
-    let points = &case.sound_speed_profile;
-    let upper = points
-        .partition_point(|p| p.depth_m < depth)
-        .clamp(1, points.len() - 1);
-    let a = points[upper - 1];
-    let b = points[upper];
-    let weight = (depth - a.depth_m) / (b.depth_m - a.depth_m);
-    match case.interpolation {
-        Interpolation::N2Linear => ((1.0 - weight) / a.sound_speed_mps.powi(2)
-            + weight / b.sound_speed_mps.powi(2))
-        .sqrt()
-        .recip(),
-        Interpolation::CLinear => (1.0 - weight) * a.sound_speed_mps + weight * b.sound_speed_mps,
-    }
-}
-
 // Specialized real tridiagonal inverse iteration, with row interchanges, from InverseIterationMod.f90.
 #[allow(clippy::cast_precision_loss, clippy::many_single_char_names)]
 fn inverse_iteration(d: &[f64], e: &[f64]) -> Result<Vec<f64>, DiagnosticReport> {
@@ -448,8 +441,8 @@ fn inverse_iteration(d: &[f64], e: &[f64]) -> Result<Vec<f64>, DiagnosticReport>
 
 #[cfg(test)]
 mod tests {
-    use super::{solve, sound_speed};
-    use crate::{Case, Interpolation, legacy::load_case, pekeris};
+    use super::solve;
+    use crate::{Case, Interpolation, legacy::load_case, pekeris, profile::Profile};
     use std::path::Path;
 
     #[test]
@@ -463,10 +456,10 @@ mod tests {
         let expected = (0.5 / 1500.0_f64.powi(2) + 0.5 / 1600.0_f64.powi(2))
             .sqrt()
             .recip();
-        assert!((sound_speed(&n2, 50.0) - expected).abs() < 1e-12);
+        assert!((Profile::new(&n2).unwrap().speed(50.0) - expected).abs() < 1e-12);
         input.interpolation = Interpolation::CLinear;
         let linear = Case::from_definition(input.clone()).unwrap();
-        assert!((sound_speed(&linear, 50.0) - 1550.0).abs() < 1e-12);
+        assert!((Profile::new(&linear).unwrap().speed(50.0) - 1550.0).abs() < 1e-12);
         input.frequency_hz = 1000.0;
         input.mesh_points = 100_000;
         let report = solve(&Case::from_definition(input).unwrap()).unwrap_err();

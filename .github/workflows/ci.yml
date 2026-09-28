@@ -51,7 +51,7 @@ jobs:
         run: tools/reference/run-kraken-case.sh krakenc target/reference/cases/MunkKleaky.env
       - name: Fluid modes and FIELD numerical differential
         run: |
-          for case in Pekeris PekerisFiltered PekerisDense PekerisDenseLoss PekerisRefined MunkLossless MunkBottomLoss SductTrapped; do
+          for case in Pekeris PekerisFiltered PekerisDense PekerisDenseLoss PekerisRefined PekerisSpline3 MunkLossless MunkBottomLoss SductTrapped SductPchip SductSpline; do
             tools/reference/compare-kraken.sh "crates/kraken/tests/fixtures/$case.env"
           done
           KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/MunkK.env" \

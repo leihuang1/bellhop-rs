@@ -57,6 +57,33 @@ fn complex_case_accepts_slow_bottom_and_default_restart_setting() {
 }
 
 #[test]
+fn complex_graded_case_keeps_unsupported_profiles_and_loss_out() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let base = load_complex_case(
+        root.join("PekerisComplexGradient.env"),
+        root.join("Pekeris.flp"),
+    )
+    .unwrap()
+    .into_definition();
+    let mut three_points = base.clone();
+    three_points.sound_speed_profile.insert(
+        1,
+        kraken::SoundSpeedPoint {
+            depth_m: 50.0,
+            sound_speed_mps: 1510.0,
+        },
+    );
+    let mut lossy = base.clone();
+    lossy.bottom_attenuation_db_per_wavelength = 0.8;
+    let mut linear_c = base;
+    linear_c.interpolation = kraken::Interpolation::CLinear;
+    for input in [three_points, lossy, linear_c] {
+        let report = solve_complex_modes(&Case::from_definition(input).unwrap()).unwrap_err();
+        assert_eq!(report.diagnostics()[0].field, "mode_solver");
+    }
+}
+
+#[test]
 fn complex_case_rejects_nonpositive_fluid_bottom_speed() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let mut input = load_complex_case(

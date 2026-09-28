@@ -51,6 +51,11 @@ fn complex_fluid_modes_match_pinned_fortran() {
         ("PekerisComplexBlank", "PekerisComplex"),
         ("PekerisComplexSlow", "PekerisComplexSlow"),
         ("PekerisComplexCLow", "PekerisComplexCLow"),
+        ("PekerisComplexGradient", "PekerisComplexGradient"),
+        (
+            "PekerisComplexReverseGradient",
+            "PekerisComplexReverseGradient",
+        ),
     ] {
         compare_complex(
             &fixtures().join(format!("{name}.env")),

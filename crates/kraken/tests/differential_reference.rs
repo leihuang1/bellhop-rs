@@ -50,6 +50,7 @@ fn complex_fluid_modes_match_pinned_fortran() {
         ("PekerisComplex", "PekerisComplex"),
         ("PekerisComplexBlank", "PekerisComplex"),
         ("PekerisComplexSlow", "PekerisComplexSlow"),
+        ("PekerisComplexCLow", "PekerisComplexCLow"),
     ] {
         compare_complex(
             &fixtures().join(format!("{name}.env")),

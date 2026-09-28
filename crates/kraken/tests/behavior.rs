@@ -57,6 +57,59 @@ fn complex_case_accepts_slow_bottom_and_default_restart_setting() {
 }
 
 #[test]
+fn complex_case_rejects_nonpositive_fluid_bottom_speed() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut input = load_complex_case(
+        root.join("PekerisComplexSlow.env"),
+        root.join("Pekeris.flp"),
+    )
+    .unwrap()
+    .into_definition();
+    for speed in [0.0, -1400.0] {
+        input.bottom_sound_speed_mps = speed;
+        assert!(
+            Case::from_definition(input.clone())
+                .unwrap_err()
+                .diagnostics()
+                .iter()
+                .any(|d| d.field == "bottom_sound_speed_mps")
+        );
+    }
+}
+
+#[test]
+fn complex_modes_preserve_mode_spacing_under_physical_rescaling() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let base =
+        load_complex_case(root.join("PekerisComplex.env"), root.join("Pekeris.flp")).unwrap();
+    let expected = solve_complex_modes(&base).unwrap();
+    let mut scaled = base.into_definition();
+    let factor = 10_000.0;
+    scaled.frequency_hz /= factor;
+    scaled.water_depth_m *= factor;
+    for point in &mut scaled.sound_speed_profile {
+        point.depth_m *= factor;
+    }
+    for depths in [
+        &mut scaled.mode_sample_depths_m,
+        &mut scaled.source_depths_m,
+        &mut scaled.receiver_depths_m,
+        &mut scaled.receiver_ranges_m,
+        &mut scaled.receiver_offsets_m,
+    ] {
+        for depth in depths {
+            *depth *= factor;
+        }
+    }
+    let actual = solve_complex_modes(&Case::from_definition(scaled).unwrap()).unwrap();
+    assert_eq!(actual.modes.len(), expected.modes.len());
+    for (actual, expected) in actual.modes.iter().zip(expected.modes.iter()) {
+        let restored = actual.horizontal_wavenumber_rad_per_m * factor;
+        assert!((restored - expected.horizontal_wavenumber_rad_per_m).norm() < 1e-9);
+    }
+}
+
+#[test]
 fn validation_collects_errors_and_bounds_allocations() {
     let mut input = definition();
     input.frequency_hz = f64::NAN;

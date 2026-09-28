@@ -52,7 +52,7 @@ jobs:
         run: tools/reference/run-kraken-case.sh krakenc target/reference/cases/MunkKleaky.env
       - name: Fluid KRAKENC modes numerical differential
         run: |
-          for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow; do
+          for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow; do
             tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
             KRAKEN_COMPLEX_CASE="$case" \
             KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \

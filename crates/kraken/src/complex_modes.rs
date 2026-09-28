@@ -12,6 +12,7 @@ use num_complex::Complex64;
 use std::f64::consts::PI;
 
 const MAX_ROOT_WORK: usize = 30_000_000;
+const SECANT_RELATIVE_TOLERANCE: f64 = 1e-14;
 
 #[allow(
     clippy::cast_precision_loss,
@@ -62,6 +63,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         .collect();
     let bottom_k2 = (omega / case.bottom_sound_speed_mps).powi(2);
     let low_k2 = (omega / case.c_high_mps).powi(2);
+    let high_k2 = (omega / case.c_low_mps).powi(2);
     let water_k2 = (omega / speed.unwrap()).powi(2);
     if !low_k2.is_finite() || !water_k2.is_finite() || b.iter().any(|x| !x.is_finite()) {
         return Err(error(
@@ -107,17 +109,11 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             reached_lower_limit = true;
             break;
         }
-        if root.re > (omega / case.c_low_mps).powi(2) {
-            return Err(error(
-                "KR0301",
-                "root outside the upper spectral limit",
-                "phase_speed_limits",
-            ));
-        }
-        if roots
-            .iter()
-            .any(|&previous: &Complex64| (root - previous).norm() < 1e-10)
-        {
+        // Even excluded roots must be deflated so the next secant finds a new mode.
+        if roots.iter().any(|&previous: &Complex64| {
+            (root - previous).norm()
+                < root.norm().max(previous.norm()) * b.len() as f64 * SECANT_RELATIVE_TOLERANCE
+        }) {
             return Err(error(
                 "KR0303",
                 "complex root search repeated a mode",
@@ -133,14 +129,15 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             "phase_speed_limits",
         ));
     }
-    if roots.is_empty() {
+    let selected: Vec<_> = roots.into_iter().filter(|x| x.re <= high_k2).collect();
+    if selected.is_empty() {
         return Err(error(
             "KR0301",
             "no complex modes inside spectral limits",
             "phase_speed_limits",
         ));
     }
-    if roots
+    if selected
         .len()
         .checked_mul(case.mode_sample_depths_m.len())
         .is_none_or(|w| w > 5_000_000)
@@ -151,7 +148,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             "mode_sample_depths_m",
         ));
     }
-    let modes = roots
+    let modes = selected
         .iter()
         .map(|&root| mode(case, &b, h, omega, bottom_k2, root))
         .collect::<Result<Vec<_>, _>>()?;
@@ -216,7 +213,7 @@ fn secant(
     bottom_rho: f64,
     bottom_k2: f64,
 ) -> Result<Complex64, DiagnosticReport> {
-    let tolerance = x.norm() * b.len() as f64 * 1e-14;
+    let tolerance = x.norm() * b.len() as f64 * SECANT_RELATIVE_TOLERANCE;
     let mut previous = x + 100.0 * tolerance;
     let mut f_previous = dispersion(previous, roots, b, h, water_rho, bottom_rho, bottom_k2);
     for _ in 0..1000 {

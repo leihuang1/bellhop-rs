@@ -268,6 +268,7 @@ impl Case {
                 Ok(profile) => {
                     if definition.mode_solver == ModeSolver::Kraken
                         && definition.bottom_boundary == BottomBoundary::FluidHalfSpace
+                        && definition.bottom_sound_speed_mps > 0.0
                         && definition.bottom_sound_speed_mps <= profile.minimum_speed()
                     {
                         diagnostics.push(error(
@@ -316,10 +317,16 @@ impl Case {
         if definition.water_density_g_cm3 <= 0.0 {
             diagnostics.push(error("water_density_g_cm3", "density must be positive"));
         }
-        if definition.bottom_boundary == BottomBoundary::FluidHalfSpace
-            && definition.bottom_density_g_cm3 <= 0.0
-        {
-            diagnostics.push(error("bottom_density_g_cm3", "density must be positive"));
+        if definition.bottom_boundary == BottomBoundary::FluidHalfSpace {
+            if definition.bottom_sound_speed_mps <= 0.0 {
+                diagnostics.push(error(
+                    "bottom_sound_speed_mps",
+                    "fluid bottom sound speed must be positive",
+                ));
+            }
+            if definition.bottom_density_g_cm3 <= 0.0 {
+                diagnostics.push(error("bottom_density_g_cm3", "density must be positive"));
+            }
         }
         if definition.mesh_points != 0 && !(10..=MAX_MESH_POINTS).contains(&definition.mesh_points)
         {

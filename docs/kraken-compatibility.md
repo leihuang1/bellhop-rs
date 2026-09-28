@@ -90,9 +90,13 @@ restart options. It uses the `.flp` only to select mode-sampling depths; `solve`
 rejects this case because KRAKENC FIELD is not yet implemented. The derived
 `PekerisComplex.env` extends Pekeris to `cHigh=2000 m/s` and enables Fortran
 restarts; `PekerisComplexBlank` uses the default restart setting and
-`PekerisComplexSlow` lowers the bottom speed to 1400 m/s. All four modes in
-each case, including leaky modes, are compared against committed and fresh
-v2023.5 `.mod/.prt`.
+`PekerisComplexSlow` lowers the bottom speed to 1400 m/s.
+`PekerisComplexCLow` uses a 1550 m/s lower phase-speed bound and blank
+restarts, returning only the three in-band modes (the excluded first root is
+still used for deflation). All modes in these cases are compared against
+committed and fresh v2023.5 `.mod/.prt`; scaled depth/frequency regression
+checks that duplicate-root detection retains distinct modes. Fluid-bottom
+sound speed must be positive for both KRAKEN and KRAKENC.
 Original KRAKENC examples remain reference-only smoke tests. Upstream
 `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)

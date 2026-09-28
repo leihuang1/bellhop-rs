@@ -44,7 +44,9 @@ layer inputs needed to produce a table.
 The workspace also contains a separate KRAKEN rewrite: `kraken` currently covers
 validated single-fluid-layer `N/C/P/S` and fixed analytic Munk `A` sound-speed profiles, vacuum or rigid
 surface, modes with a fluid (`A`) or rigid (`R`) bottom and optional fluid-bottom
-`W` attenuation, and coherent line- or point-source FIELD. Its full 2D acceptance
+`W` attenuation, and coherent line- or point-source FIELD. A separate, narrow
+KRAKENC path supports modes only for a constant lossless fluid waveguide with a
+leaky interval; complex FIELD is not supported yet. Its full 2D acceptance
 target and explicit exclusions are in
 [the KRAKEN compatibility matrix](docs/kraken-compatibility.md).
 
@@ -54,7 +56,7 @@ target and explicit exclusions are in
 - `bellhop-hdf5`: shared HDF5 schema writer
 - `bellhop-cli`: local validation, conversion, and simulation
 - `bellhop-server`: synchronous JSON/HDF5 HTTP service
-- `kraken`: single-fluid-layer 2D KRAKEN modes and FIELD slice
+- `kraken`: single-fluid-layer 2D KRAKEN modes/FIELD and narrow KRAKENC modes slice
 
 ## License
 

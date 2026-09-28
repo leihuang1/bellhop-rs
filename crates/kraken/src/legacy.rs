@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     BottomBoundary, Case, CaseDefinition, Diagnostic, DiagnosticReport, Interpolation,
-    MAX_VECTOR_LENGTH, SoundSpeedPoint, SourceGeometry, SurfaceBoundary,
+    MAX_VECTOR_LENGTH, ModeSolver, SoundSpeedPoint, SourceGeometry, SurfaceBoundary,
 };
 
 const MAX_PROFILE_POINTS: usize = MAX_VECTOR_LENGTH;
@@ -29,14 +29,51 @@ pub fn load_case(
     )
 }
 
-#[allow(clippy::float_cmp)]
+/// Load a KRAKENC environment and FIELD depth selections for modes-only calculation.
+/// FIELD propagation is not available for KRAKENC yet.
+///
+/// # Errors
+///
+/// Returns structured input diagnostics for unsupported configurations.
+pub fn load_complex_case(
+    env_path: impl AsRef<Path>,
+    flp_path: impl AsRef<Path>,
+) -> Result<Case, DiagnosticReport> {
+    let env_path = env_path.as_ref();
+    let flp_path = flp_path.as_ref();
+    parse_case_with_solver(
+        &read_file(env_path)?,
+        &read_file(flp_path)?,
+        env_path,
+        flp_path,
+        ModeSolver::Krakenc,
+    )
+}
+
 fn parse_case(
     env_source: &str,
     flp_source: &str,
     env_path: &Path,
     flp_path: &Path,
 ) -> Result<Case, DiagnosticReport> {
-    let mut environment = parse_environment(env_source, env_path)?;
+    parse_case_with_solver(
+        env_source,
+        flp_source,
+        env_path,
+        flp_path,
+        ModeSolver::Kraken,
+    )
+}
+
+#[allow(clippy::float_cmp)]
+fn parse_case_with_solver(
+    env_source: &str,
+    flp_source: &str,
+    env_path: &Path,
+    flp_path: &Path,
+    mode_solver: ModeSolver,
+) -> Result<Case, DiagnosticReport> {
+    let mut environment = parse_environment_with_solver(env_source, env_path, mode_solver)?;
     let mut field = parse_field(flp_source, flp_path)?;
     // ReadSzRz stores depths in single precision. Keep an interface sample on
     // the exact validated f64 boundary even when the f32 spelling rounds upward.
@@ -69,6 +106,7 @@ fn parse_case(
     let field_locations = field.locations;
     Case::from_definition(CaseDefinition {
         title: environment.title,
+        mode_solver,
         frequency_hz: environment.frequency_hz,
         water_depth_m: environment.water_depth_m,
         interpolation: environment.interpolation,
@@ -447,8 +485,17 @@ struct Environment {
     locations: HashMap<String, (usize, usize)>,
 }
 
-#[allow(clippy::float_cmp, clippy::too_many_lines)]
+#[cfg(test)]
 fn parse_environment(source: &str, path: &Path) -> Result<Environment, DiagnosticReport> {
+    parse_environment_with_solver(source, path, ModeSolver::Kraken)
+}
+
+#[allow(clippy::float_cmp, clippy::too_many_lines)]
+fn parse_environment_with_solver(
+    source: &str,
+    path: &Path,
+    mode_solver: ModeSolver,
+) -> Result<Environment, DiagnosticReport> {
     let mut reader = Reader::new(source, path)?;
     let title = reader.text("title")?.text;
     let frequency_hz = reader.scalar("frequency_hz")?;
@@ -466,7 +513,9 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
     if !matches!(option(0), b'N' | b'C' | b'P' | b'S' | b'A')
         || !matches!(option(1), b'V' | b'R')
         || !matches!(option(2), b'N' | b'W')
-        || [option(3), option(4), option(5)] != *b"   "
+        || (mode_solver == ModeSolver::Kraken && [option(3), option(4), option(5)] != *b"   ")
+        || (mode_solver == ModeSolver::Krakenc
+            && !matches!([option(3), option(4), option(5)], [b' ', b'.', b' ']))
         || options
             .text
             .as_bytes()

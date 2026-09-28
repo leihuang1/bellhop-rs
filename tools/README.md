@@ -43,6 +43,16 @@ for case in Pekeris PekerisFiltered PekerisDense PekerisDenseLoss PekerisRefined
 done
 ```
 
+For the modes-only, derived KRAKENC Pekeris case (four modes including one
+leaky mode), run the same pinned Fortran calculation and comparator used by CI:
+
+```sh
+tools/reference/run-kraken-case.sh krakenc crates/kraken/tests/fixtures/PekerisComplex.env
+KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/PekerisComplex-krakenc/PekerisComplex" \
+  cargo test --release -p kraken --test differential_reference \
+  complex_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+```
+
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
 seventeen cases with fixed tolerances, plus the full unmodified upstream MunkK

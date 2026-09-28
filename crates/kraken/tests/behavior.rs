@@ -1,7 +1,11 @@
 use std::f64::consts::PI;
 use std::path::Path;
 
-use kraken::{BottomBoundary, Case, CaseDefinition, SurfaceBoundary, legacy::load_case, solve};
+use kraken::{
+    BottomBoundary, Case, CaseDefinition, SurfaceBoundary,
+    legacy::{load_case, load_complex_case},
+    solve, solve_complex_modes,
+};
 use num_complex::Complex64;
 
 fn definition() -> CaseDefinition {
@@ -9,6 +13,28 @@ fn definition() -> CaseDefinition {
     load_case(root.with_extension("env"), root.with_extension("flp"))
         .unwrap()
         .into_definition()
+}
+
+#[test]
+fn complex_modes_have_an_explicit_modes_only_boundary() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let env = root.join("PekerisComplex.env");
+    let flp = root.join("Pekeris.flp");
+    assert!(load_case(&env, &flp).is_err());
+    let case = load_complex_case(env, flp).unwrap();
+    assert_eq!(
+        solve(&case).unwrap_err().diagnostics()[0].field,
+        "mode_solver"
+    );
+    let mut input = case.into_definition();
+    input.mode_limit = 1; // FIELD limit does not truncate the KRAKENC mode file.
+    assert_eq!(
+        solve_complex_modes(&Case::from_definition(input).unwrap())
+            .unwrap()
+            .modes
+            .len(),
+        4
+    );
 }
 
 #[test]

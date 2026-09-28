@@ -114,6 +114,12 @@ pub enum SourceGeometry {
     Point,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SurfaceBoundary {
+    Vacuum,
+    Rigid,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SoundSpeedPoint {
     pub depth_m: f64,
@@ -127,6 +133,7 @@ pub struct CaseDefinition {
     pub frequency_hz: f64,
     pub water_depth_m: f64,
     pub interpolation: Interpolation,
+    pub surface_boundary: SurfaceBoundary,
     pub sound_speed_profile: Vec<SoundSpeedPoint>,
     pub water_density_g_cm3: f64,
     pub bottom_sound_speed_mps: f64,

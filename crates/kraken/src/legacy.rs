@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     Case, CaseDefinition, Diagnostic, DiagnosticReport, Interpolation, MAX_VECTOR_LENGTH,
-    SoundSpeedPoint, SourceGeometry,
+    SoundSpeedPoint, SourceGeometry, SurfaceBoundary,
 };
 
 const MAX_PROFILE_POINTS: usize = MAX_VECTOR_LENGTH;
@@ -67,6 +67,7 @@ fn parse_case(
         frequency_hz: environment.frequency_hz,
         water_depth_m: environment.water_depth_m,
         interpolation: environment.interpolation,
+        surface_boundary: environment.surface_boundary,
         sound_speed_profile: environment.profile,
         water_density_g_cm3: environment.water_density,
         bottom_sound_speed_mps: environment.bottom_speed,
@@ -424,6 +425,7 @@ struct Environment {
     frequency_hz: f64,
     water_depth_m: f64,
     interpolation: Interpolation,
+    surface_boundary: SurfaceBoundary,
     profile: Vec<SoundSpeedPoint>,
     water_density: f64,
     bottom_speed: f64,
@@ -455,7 +457,7 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
     let options = reader.text("top_options")?;
     let option = |index| options.text.as_bytes().get(index).copied().unwrap_or(b' ');
     if !matches!(option(0), b'N' | b'C' | b'P' | b'S')
-        || option(1) != b'V'
+        || !matches!(option(1), b'V' | b'R')
         || !matches!(option(2), b'N' | b'W')
         || [option(3), option(4), option(5)] != *b"   "
         || options
@@ -467,7 +469,7 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
     {
         return Err(one(
             "KR0202",
-            "requires N/C/P/S interpolation, vacuum surface, N/W attenuation without water loss, and one frequency",
+            "requires N/C/P/S interpolation, vacuum or rigid surface, N/W attenuation without water loss, and one frequency",
             "top_options",
             path,
             options.line,
@@ -609,6 +611,11 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
         frequency_hz,
         water_depth_m,
         interpolation,
+        surface_boundary: if option(1) == b'V' {
+            SurfaceBoundary::Vacuum
+        } else {
+            SurfaceBoundary::Rigid
+        },
         profile: points
             .into_iter()
             .map(|point| SoundSpeedPoint {
@@ -933,6 +940,17 @@ mod tests {
             .expect("unsupported attenuation unit should be rejected");
         assert_eq!(error.diagnostics()[0].field, "top_options");
         assert_eq!(error.diagnostics()[0].line, 4);
+        for option in ["'NAN'", "'NFN'", "'NPN'"] {
+            let env = include_str!("../tests/fixtures/Pekeris.env").replace("'NVN'", option);
+            assert_eq!(
+                parse_environment(&env, Path::new("Pekeris.env"))
+                    .err()
+                    .unwrap()
+                    .diagnostics()[0]
+                    .field,
+                "top_options"
+            );
+        }
         let analytic = include_str!("../tests/fixtures/Pekeris.env").replace("'NVN'", "'AVN'");
         assert_eq!(
             parse_environment(&analytic, Path::new("Pekeris.env"))
@@ -952,6 +970,16 @@ mod tests {
                 .diagnostics()[0]
                 .field,
             "sound_speed_profile"
+        );
+        let rigid_bottom =
+            include_str!("../tests/fixtures/Pekeris.env").replace("'A' 0.0", "'R' 0.0");
+        assert_eq!(
+            parse_environment(&rigid_bottom, Path::new("Pekeris.env"))
+                .err()
+                .unwrap()
+                .diagnostics()[0]
+                .field,
+            "bottom_options"
         );
         let wrong_units =
             include_str!("../tests/fixtures/MunkBottomLoss.env").replace("'NVW'", "'NVN'");

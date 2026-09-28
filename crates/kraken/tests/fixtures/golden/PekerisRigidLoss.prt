@@ -1,0 +1,61 @@
+ _________________________________________________
+
+ KRAKEN- Pekeris rigid surface alternate frequency, density, and 3 dB/wavelength
+ Nominal Frequency =   75.00    Hz
+ NMedia    =   1
+
+
+     N2-Linear approximation to SSP
+     Attenuation units: dB/wavelength
+     Perfectly RIGID
+
+       ( # mesh points =  4000  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1480.00      0.00     1.03       0.0000    0.0000
+     60.00      1480.00      0.00     1.03       0.0000    0.0000
+    120.00      1480.00      0.00     1.03       0.0000    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     ACOUSTO-ELASTIC half-space
+    120.00      1800.00      0.00     1.80       3.0000    0.0000
+
+ cLow =   1400.0     m/s      cHigh =   1800.0     m/s
+ RMax =   2.0000     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            2
+    Source   z-coordinates, Sz (m)
+                 30.0000       90.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            5
+    Receiver z-coordinates, Rz (m)
+                 0.00000       30.0000       60.0000       90.0000
+   120.000
+
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            7
+        1            0.475E-02s
+                --- Number of modes =            7
+        2            0.282E-02s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.3181734406     -0.37E-05   1481.075533       1479.07
+    2  0.3163122911     -0.32E-04   1489.790031       1471.50
+    3  0.3125315274     -0.84E-04   1507.812354       1455.79
+    4  0.3067222045     -0.15E-03   1536.370342       1431.03
+    5  0.2987318488     -0.24E-03   1577.464539       1396.19
+    6  0.2883634099     -0.36E-03   1634.184095       1349.83
+    7  0.2753646876     -0.57E-03   1711.326540       1286.68
+ _________________________________________________
+
+ End of environmental file

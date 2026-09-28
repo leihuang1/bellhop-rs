@@ -96,7 +96,8 @@ impl<'a> Profile<'a> {
         if self.case.interpolation == Interpolation::AnalyticMunk {
             // Acoustics Toolbox v2023.5 misc/munk.f90, medium 1.
             let x = 2.0 * (depth - 1300.0) / 1300.0;
-            return 1500.0 * (1.0 + 0.00737 * (x - 1.0 + (-x).exp()));
+            // munk.f90 declares eps as f64 but initializes it from an f32 literal.
+            return 1500.0 * (1.0 + f64::from(0.00737_f32) * (x - 1.0 + (-x).exp()));
         }
         let points = &self.case.sound_speed_profile;
         let upper = points

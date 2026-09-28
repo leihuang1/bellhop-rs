@@ -18,7 +18,10 @@ compares mode counts, coordinates, wavenumbers, attenuation, phase/group speeds,
 phase-aligned shapes, and every complex pressure sample. The same comparator
 runs without Docker on committed goldens; CI also compares fresh outputs for
 all seventeen cases and the unmodified upstream `MunkK.env`/`.flp` (102 modes,
-501,501 complex pressures). The unmodified official sduct case still includes
+501,501 complex pressures). CI also compares the unmodified upstream
+`MunkAnalytic.env` with a separately derived coherent FIELD `.flp` (102 modes,
+25 pressures); its original three-line `.flp` fails in pinned v2023.5 FIELD.
+The unmodified official sduct case still includes
 leaky modes and is **not** covered by the derived trapped-mode comparison.
 Measured errors and input provenance are recorded alongside the goldens.
 

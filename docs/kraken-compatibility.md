@@ -52,7 +52,9 @@ profile between two rigid boundaries, the zero-order plane mode lies at the
 upper spectral endpoint; the search includes the rounded finite-difference
 endpoint. A fluid bottom includes the decaying half-space contribution to
 normalization and the pinned
-reference's first-order perturbation for bottom attenuation. Point-source FIELD
+reference's first-order perturbation for bottom attenuation. Analytic Munk
+sampling preserves upstream's f32 intermediate `eps` and grid step even though
+its sound speed is stored as f64. Point-source FIELD
 uses the reference's `sqrt(k)` modal factor and cylindrical spreading. The
 former closed-form Pekeris solver remains **only in tests** as an independent
 analytical cross-check. Analytic `A` has no SSP point records, uses density 1,
@@ -71,10 +73,13 @@ bottom, and a constant `S` rigid-rigid plane mode at the spectral endpoint), los
 **Additionally, the unmodified upstream `tests/Munk/MunkK.env` and `.flp` are
 compared in CI:** 102 modes and 501,501 complex pressures. The committed
 `MunkBottomLoss` golden is a *reduced-grid derivative*, not the unmodified
-input. The analytic `A` golden is also derived; the unmodified analytic
-input with mesh extrapolation still misses two exact complex32 `.mod` rounding
-comparisons and is **not** claimed as an accepted upstream case. The sduct derivatives still remove the original leaky phase-speed
-interval; unmodified `sductK` is not supported.
+input. The analytic `A` golden is also derived. CI additionally compares the **unmodified
+upstream `MunkAnalytic.env`** with its automatic mesh and extrapolation (102 modes)
+and the separately derived coherent `.flp` (25 pressures). The upstream
+three-line `MunkAnalytic.flp` cannot be parsed by v2023.5 FIELD itself, so the
+original `.env/.flp` *pair* is not claimed as accepted. The sduct derivatives
+still remove the original leaky phase-speed interval; unmodified `sductK` is
+not supported.
 Original KRAKENC examples remain reference-only smoke tests. Upstream
 `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)

@@ -43,16 +43,19 @@ mesh count (0 → 2000), and RMax (200 → 0 km); its `.flp` is a new coherent
 point-source FIELD input. The original `.env` SHA-256 is
 `3cc2a2121d9ae3ff395fc138ef31656f907f09d57a195fd9bdda77f42bf37162`.
 It is **derived**, not a comparison of the unmodified official pair. The
-original auto-mesh/extrapolated case currently differs at two complex32
-wavenumber rounding midpoints, so it is not claimed as accepted under the
-unchanged exact `.mod` check.
+the original auto-mesh/extrapolated **`.env`** is separately compared in CI
+against fresh Fortran `.mod/.prt` with a derived coherent FIELD `.flp`, under
+the same exact complex32 `.mod` check. The original three-line `.flp` cannot
+be parsed by the pinned v2023.5 FIELD; it is not an accepted original pair.
 The sduct-derived inputs restrict cHigh from 100000 m/s to the 1523.9 m/s
 bottom speed and limit the coordinate grids. `SductTrapped` replaces `CVW`
 with `CVN`; `SductPchip` uses `PVW` and explicitly specifies 0.8 dB/wavelength
 bottom loss; `SductSpline` uses lossless `SVN`. These are **not** comparisons
 to the unmodified official examples. **CI separately compares the unmodified upstream MunkK
 `.env/.flp` end to end** (102 modes, 501,501 pressure samples) against the pinned
-Fortran output. Unmodified sduct still needs leaky-mode support.
+Fortran output, plus the unmodified MunkAnalytic `.env` with separately derived
+coherent FIELD input (102 modes, 25 pressure samples). Unmodified sduct still
+needs leaky-mode support.
 `tests/PekerisRD` upstream is a BELLHOP case, not a KRAKEN oracle.
 
 Re-run fresh numerical comparisons from the repository root:
@@ -98,7 +101,8 @@ Measured maximum errors (pinned Linux x86-64 GNU Fortran 12.2, Rust release):
 | PekerisRigidPlane | 4.66e-12 | 0 | 0 | 3.1e-8 |
 | MunkLossless | 4.81e-11 | 0 | 1.9e-9 | 9.4e-9 |
 | MunkBottomLoss | 4.88e-11 | 5.0e-7* | 1.9e-9 | 7.5e-9 |
-| MunkAnalytic | 1.53e-10 | 4.6e-7* | 1.8e-8 | 2.3e-8 |
+| MunkAnalytic | 4.92e-11 | 4.6e-7* | 3.8e-9 | 4.2e-9 |
+| original MunkAnalytic `.env` + derived `.flp` (fresh CI only) | 4.92e-11 | 4.9e-7* | 3.8e-9 | 4.2e-9 |
 | original MunkK (fresh CI only) | 4.88e-11 | 5.0e-7* | 3.8e-9 | 1.9e-9 |
 | SductTrapped | 4.65e-11 | 0 | 3.8e-9 | 1.0e-9 |
 | SductPchip | 4.84e-11 | 4.6e-8* | 1.9e-9 | 9.4e-10 |

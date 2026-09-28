@@ -44,6 +44,7 @@ jobs:
             -c "cp /opt/acoustics-toolbox/tests/Munk/MunkB_Coh.env /out/ && \
                 cp /opt/acoustics-toolbox/tests/SBCX/sbcx_Arr_asc.env /out/ && \
                 cp /opt/acoustics-toolbox/tests/Munk/MunkK.env /opt/acoustics-toolbox/tests/Munk/MunkK.flp /out/ && \
+                cp /opt/acoustics-toolbox/tests/Munk/MunkAnalytic.env /out/ && \
                 cp /opt/acoustics-toolbox/tests/MunkLeaky/MunkKleaky.env /opt/acoustics-toolbox/tests/MunkLeaky/MunkKleaky.flp /out/"
       - name: Prepare pinned original MunkK modes and FIELD
         run: tools/reference/run-kraken-case.sh kraken target/reference/cases/MunkK.env
@@ -54,6 +55,10 @@ jobs:
           for case in Pekeris PekerisFiltered PekerisDense PekerisDenseLoss PekerisRefined PekerisSpline3 PekerisRigid PekerisRigidLoss PekerisHard PekerisHardBoth PekerisRigidPlane MunkLossless MunkBottomLoss MunkAnalytic SductTrapped SductPchip SductSpline; do
             tools/reference/compare-kraken.sh "crates/kraken/tests/fixtures/$case.env"
           done
+          # Upstream MunkAnalytic.flp is a three-line legacy example that v2023.5 FIELD cannot parse.
+          # Keep its .env byte-for-byte original; use a separately labelled coherent FIELD input.
+          cp crates/kraken/tests/fixtures/MunkAnalytic.flp target/reference/cases/MunkAnalytic.flp
+          tools/reference/compare-kraken.sh target/reference/cases/MunkAnalytic.env
           KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/MunkK.env" \
           KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/MunkK-kraken/MunkK" \
           cargo test --release -p kraken --test differential_reference \

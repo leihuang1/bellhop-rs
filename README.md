@@ -42,7 +42,7 @@ reference advertises table generation but contains neither a generator nor the
 layer inputs needed to produce a table.
 
 The workspace also contains a separate KRAKEN rewrite: `kraken` currently covers
-validated single-fluid-layer `N/C/P/S` sound-speed profiles, vacuum or rigid
+validated single-fluid-layer `N/C/P/S` and fixed analytic Munk `A` sound-speed profiles, vacuum or rigid
 surface, modes with a fluid (`A`) or rigid (`R`) bottom and optional fluid-bottom
 `W` attenuation, and coherent line- or point-source FIELD. Its full 2D acceptance
 target and explicit exclusions are in

@@ -86,9 +86,9 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         table.push(roots);
         for j in (0..set).rev() {
             let denominator = (multiplier as f64 / f64::from(1 << j)).powi(2) - 1.0;
-            for mode in 0..modes.len() {
-                table[j][mode] =
-                    table[j + 1][mode] - (table[j][mode] - table[j + 1][mode]) / denominator;
+            let (earlier, later) = table.split_at_mut(j + 1);
+            for (value, &next) in earlier[j].iter_mut().zip(&later[0]) {
+                *value = next - (*value - next) / denominator;
             }
         }
         let delta = previous.map_or(1e10, |x| (table[0][key] - x).abs());

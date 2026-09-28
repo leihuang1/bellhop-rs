@@ -5,12 +5,12 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     Case, CaseDefinition, Diagnostic, DiagnosticReport, Interpolation, MAX_VECTOR_LENGTH,
-    SoundSpeedPoint,
+    SoundSpeedPoint, SourceGeometry,
 };
 
 const MAX_PROFILE_POINTS: usize = MAX_VECTOR_LENGTH;
 
-/// Load the lossless single-fluid subset of a KRAKEN `.env` and FIELD `.flp` pair.
+/// Load the single-fluid trapped-mode subset of a KRAKEN `.env` and FIELD `.flp` pair.
 ///
 /// # Errors
 ///
@@ -71,6 +71,8 @@ fn parse_case(
         water_density_g_cm3: environment.water_density,
         bottom_sound_speed_mps: environment.bottom_speed,
         bottom_density_g_cm3: environment.bottom_density,
+        bottom_attenuation_db_per_wavelength: environment.bottom_attenuation,
+        source_geometry: field.source_geometry,
         mesh_points: environment.mesh_points,
         c_low_mps: environment.c_low,
         c_high_mps: environment.c_high,
@@ -89,7 +91,9 @@ fn parse_case(
                 "sound_speed_profile" | "water_density_g_cm3" => {
                     (&env_locations, env_path, "sound_speed_profile")
                 }
-                "bottom_sound_speed_mps" | "bottom_density_g_cm3" => {
+                "bottom_sound_speed_mps"
+                | "bottom_density_g_cm3"
+                | "bottom_attenuation_db_per_wavelength" => {
                     (&env_locations, env_path, "bottom_half_space")
                 }
                 "max_range_m" => (&env_locations, env_path, "max_range_km"),
@@ -424,6 +428,7 @@ struct Environment {
     water_density: f64,
     bottom_speed: f64,
     bottom_density: f64,
+    bottom_attenuation: f64,
     mesh_points: usize,
     c_low: f64,
     c_high: f64,
@@ -450,7 +455,9 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
     let options = reader.text("top_options")?;
     let option = |index| options.text.as_bytes().get(index).copied().unwrap_or(b' ');
     if !matches!(option(0), b'N' | b'C')
-        || [option(1), option(2), option(3), option(4), option(5)] != *b"VN   "
+        || option(1) != b'V'
+        || !matches!(option(2), b'N' | b'W')
+        || [option(3), option(4), option(5)] != *b"   "
         || options
             .text
             .as_bytes()
@@ -460,7 +467,7 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
     {
         return Err(one(
             "KR0202",
-            "requires N/C interpolation, a vacuum surface, neper units with zero loss, and one frequency",
+            "requires N/C interpolation, vacuum surface, N/W attenuation without water loss, and one frequency",
             "top_options",
             path,
             options.line,
@@ -578,11 +585,15 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
     for (index, token) in bottom_record.tokens.iter().enumerate() {
         bottom[index] = number(token, path, "bottom_half_space")?;
     }
-    if bottom[0] != water_depth_m || bottom[2] != 0.0 || bottom[4] != 0.0 || bottom[5] != 0.0 {
+    if bottom[0] != water_depth_m
+        || bottom[2] != 0.0
+        || bottom[5] != 0.0
+        || (option(2) != b'W' && bottom[4] != 0.0)
+    {
         return Err(reader_error(
             &reader,
             "KR0202",
-            "bottom half-space must be fluid, lossless, and begin at the interface",
+            "bottom half-space must be fluid, start at the interface, and use supported loss units",
             "bottom_half_space",
         ));
     }
@@ -607,6 +618,7 @@ fn parse_environment(source: &str, path: &Path) -> Result<Environment, Diagnosti
         water_density,
         bottom_speed: bottom[1],
         bottom_density: bottom[3],
+        bottom_attenuation: bottom[4],
         mesh_points,
         c_low: limits[0],
         c_high: limits[1],
@@ -666,6 +678,7 @@ fn read_vector(
 
 struct Field {
     mode_limit: usize,
+    source_geometry: SourceGeometry,
     source_depths: Vec<f64>,
     receiver_depths: Vec<f64>,
     receiver_ranges_m: Vec<f64>,
@@ -680,7 +693,7 @@ fn parse_field(source: &str, path: &Path) -> Result<Field, DiagnosticReport> {
     let options = reader.text("field_options")?;
     let chars: Vec<char> = options.text.chars().collect();
     let option = |index| chars.get(index).copied().unwrap_or(' ');
-    if option(0) != 'X'
+    if !matches!(option(0), 'X' | 'R')
         || !matches!(option(1), ' ' | 'A')
         || !matches!(option(2), ' ' | 'O')
         || !matches!(option(3), ' ' | 'C')
@@ -688,7 +701,7 @@ fn parse_field(source: &str, path: &Path) -> Result<Field, DiagnosticReport> {
     {
         return Err(one(
             "KR0202",
-            "requires a coherent, omnidirectional line source",
+            "requires a coherent, omnidirectional line or point source",
             "field_options",
             path,
             options.line,
@@ -714,6 +727,11 @@ fn parse_field(source: &str, path: &Path) -> Result<Field, DiagnosticReport> {
 
     Ok(Field {
         mode_limit,
+        source_geometry: if option(0) == 'X' {
+            SourceGeometry::Line
+        } else {
+            SourceGeometry::Point
+        },
         source_depths,
         receiver_depths,
         receiver_ranges_m: ranges_km.into_iter().map(|range| range * 1000.0).collect(),
@@ -852,24 +870,21 @@ mod tests {
     }
 
     #[test]
-    fn original_official_options_remain_unsupported() {
-        let env = include_str!("../tests/fixtures/MunkLossless.env")
-            .replace("'NVN'", "'NVW'")
-            .replace("5000.0 1600.0 0.0 1.8 0.0 /", "5000.0 1600.0 0.0 1.8 0.8 /");
-        let error = parse_environment(&env, Path::new("MunkK.env"))
-            .err()
-            .unwrap();
-        assert_eq!(error.diagnostics()[0].field, "top_options");
+    fn original_sduct_leaky_options_remain_unsupported() {
         let env = include_str!("../tests/fixtures/SductTrapped.env")
             .replace("'CVN'", "'CVW'")
             .replace("1450.0 1523.9", "1450.0 100000");
         assert_eq!(
-            parse_environment(&env, Path::new("sductK.env"))
-                .err()
-                .unwrap()
-                .diagnostics()[0]
+            parse_case(
+                &env,
+                include_str!("../tests/fixtures/SductTrapped.flp"),
+                Path::new("sductK.env"),
+                Path::new("sductK.flp"),
+            )
+            .unwrap_err()
+            .diagnostics()[0]
                 .field,
-            "top_options"
+            "phase_speed_limits"
         );
         let env = include_str!("../tests/fixtures/SductTrapped.env")
             .replace("1450.0 1523.9", "1450.0 100000");
@@ -890,17 +905,38 @@ mod tests {
 
     #[test]
     fn unsupported_solver_and_field_options_are_rejected() {
-        let env = include_str!("../tests/fixtures/Pekeris.env").replace("'NVN'", "'NVW'");
+        let env = include_str!("../tests/fixtures/Pekeris.env").replace("'NVN'", "'NVM'");
         let error = parse_environment(&env, Path::new("Pekeris.env"))
             .err()
-            .expect("attenuation option should be rejected");
+            .expect("unsupported attenuation unit should be rejected");
         assert_eq!(error.diagnostics()[0].field, "top_options");
         assert_eq!(error.diagnostics()[0].line, 4);
 
-        let flp = include_str!("../tests/fixtures/Pekeris.flp").replace("'X OC'", "'R OC'");
+        let lossy_water = include_str!("../tests/fixtures/MunkBottomLoss.env")
+            .replace("200.0 1530.29 /", "200.0 1530.29 0.0 1.0 0.1 /");
+        assert_eq!(
+            parse_environment(&lossy_water, Path::new("MunkBottomLoss.env"))
+                .err()
+                .unwrap()
+                .diagnostics()[0]
+                .field,
+            "sound_speed_profile"
+        );
+        let wrong_units =
+            include_str!("../tests/fixtures/MunkBottomLoss.env").replace("'NVW'", "'NVN'");
+        assert_eq!(
+            parse_environment(&wrong_units, Path::new("MunkBottomLoss.env"))
+                .err()
+                .unwrap()
+                .diagnostics()[0]
+                .field,
+            "bottom_half_space"
+        );
+
+        let flp = include_str!("../tests/fixtures/Pekeris.flp").replace("'X OC'", "'S OC'");
         let error = parse_field(&flp, Path::new("Pekeris.flp"))
             .err()
-            .expect("point source should be rejected in this slice");
+            .expect("scaled source should be rejected in this slice");
         assert_eq!(error.diagnostics()[0].field, "field_options");
         assert_eq!(error.diagnostics()[0].line, 2);
     }

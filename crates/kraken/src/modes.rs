@@ -20,11 +20,19 @@ const ROOT_STEPS: usize = 64;
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    clippy::cast_precision_loss
+    clippy::cast_precision_loss,
+    clippy::too_many_lines
 )]
 pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let omega = 2.0 * PI * case.frequency_hz;
     let bottom_k2 = (omega / case.bottom_sound_speed_mps).powi(2);
+    // AttenMod::CRCI converts dB/wavelength to a positive imaginary sound speed.
+    let bottom_c = Complex64::new(
+        case.bottom_sound_speed_mps,
+        case.bottom_attenuation_db_per_wavelength * case.bottom_sound_speed_mps
+            / (8.685_889_6 * 2.0 * PI),
+    );
+    let bottom_complex_k2 = (Complex64::new(omega, 0.0) / bottom_c).powi(2);
     let last_speed = case.sound_speed_profile.last().unwrap().sound_speed_mps;
     let needed = (case.water_depth_m / (last_speed / case.frequency_hz / 20.0))
         .floor()
@@ -32,6 +40,8 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     if !needed.is_finite()
         || !omega.is_finite()
         || !bottom_k2.is_finite()
+        || !bottom_complex_k2.re.is_finite()
+        || !bottom_complex_k2.im.is_finite()
         || needed > 2.0 * MAX_MESH_POINTS as f64
     {
         return Err(error(
@@ -67,7 +77,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
                     "mesh_points",
                 )
             })?;
-        let mesh = Mesh::new(case, n, omega, bottom_k2)?;
+        let mesh = Mesh::new(case, n, omega, bottom_k2, bottom_complex_k2)?;
         let roots = mesh.roots(&mut work)?;
         if set == 0 {
             modes = roots
@@ -94,13 +104,23 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         let delta = previous.map_or(1e10, |x| (table[0][key] - x).abs());
         if delta * case.max_range_m < 1.0 {
             for (mode, &x) in modes.iter_mut().zip(&table[0]) {
-                mode.horizontal_wavenumber_rad_per_m = Complex64::new(x.sqrt(), 0.0);
-                mode.phase_speed_mps = omega / x.sqrt();
+                // KRAKEN combines extrapolated real k² with the first-mesh loss perturbation.
+                let loss_k2 = mode.horizontal_wavenumber_rad_per_m.powi(2).im;
+                let k = Complex64::new(x, loss_k2).sqrt();
+                mode.horizontal_wavenumber_rad_per_m = k;
+                mode.phase_speed_mps = omega / k.re;
+                mode.attenuation_nepers_per_m = -k.im;
             }
             if modes.iter().any(|mode| {
                 !mode.phase_speed_mps.is_finite()
                     || !mode.group_speed_mps.is_finite()
-                    || mode.eigenfunction.iter().any(|v| !v.re.is_finite())
+                    || !mode.attenuation_nepers_per_m.is_finite()
+                    || !mode.horizontal_wavenumber_rad_per_m.re.is_finite()
+                    || !mode.horizontal_wavenumber_rad_per_m.im.is_finite()
+                    || mode
+                        .eigenfunction
+                        .iter()
+                        .any(|v| !v.re.is_finite() || !v.im.is_finite())
             }) {
                 return Err(error("KR0302", "non-finite mode result", "modes"));
             }
@@ -123,13 +143,20 @@ struct Mesh<'a> {
     h: f64,
     omega: f64,
     bottom_k2: f64,
+    bottom_complex_k2: Complex64,
     b1: Vec<f64>,
     min_speed: f64,
 }
 
 impl<'a> Mesh<'a> {
     #[allow(clippy::cast_precision_loss)]
-    fn new(case: &'a Case, n: usize, omega: f64, bottom_k2: f64) -> Result<Self, DiagnosticReport> {
+    fn new(
+        case: &'a Case,
+        n: usize,
+        omega: f64,
+        bottom_k2: f64,
+        bottom_complex_k2: Complex64,
+    ) -> Result<Self, DiagnosticReport> {
         let h = case.water_depth_m / n as f64;
         let mut min_speed = f64::INFINITY;
         let b1: Vec<_> = (0..=n)
@@ -151,15 +178,20 @@ impl<'a> Mesh<'a> {
             h,
             omega,
             bottom_k2,
+            bottom_complex_k2,
             b1,
             min_speed,
         })
     }
 
+    fn bottom_gamma(&self, x: f64) -> Complex64 {
+        (Complex64::new(x, 0.0) - self.bottom_complex_k2).sqrt()
+    }
+
     fn bottom_diagonal(&self, x: f64) -> f64 {
         (self.b1.last().unwrap() - self.h * self.h * x) * 0.5
             - self.h * self.case.water_density_g_cm3 / self.case.bottom_density_g_cm3
-                * (x - self.bottom_k2).sqrt()
+                * self.bottom_gamma(x).re
     }
 
     // Inertia of the symmetric tridiagonal acoustic operator A(x): number of roots above x.
@@ -248,7 +280,11 @@ impl<'a> Mesh<'a> {
         Ok(roots)
     }
 
-    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        clippy::many_single_char_names
+    )]
     fn mode(&self, x: f64) -> Result<NormalMode, DiagnosticReport> {
         let n = self.b1.len();
         let h_rho = self.h * self.case.water_density_g_cm3;
@@ -267,10 +303,10 @@ impl<'a> Mesh<'a> {
             norm += mass;
             slow += mass * (self.b1[i] + 2.0) / (self.omega * self.omega * self.h * self.h);
         }
-        let gamma = (x - self.bottom_k2).sqrt();
+        let gamma = (x - self.bottom_complex_k2.re).sqrt();
         let x1 = 0.999_999_9 * x;
         let x2 = 1.000_000_1 * x;
-        let derivative = ((x2 - self.bottom_k2).sqrt() - (x1 - self.bottom_k2).sqrt())
+        let derivative = (self.bottom_gamma(x2).re - self.bottom_gamma(x1).re)
             / (self.case.bottom_density_g_cm3 * (x2 - x1));
         norm += derivative * phi[n - 1].powi(2);
         slow += phi[n - 1].powi(2)
@@ -309,11 +345,16 @@ impl<'a> Mesh<'a> {
                 Complex64::new(f64::from(value), 0.0)
             })
             .collect();
+        // BCImpedance returns the real admittance for mode finding and the
+        // complex admittance for first-order attenuation (Normalize in kraken.f90).
+        let loss_k2 =
+            -self.bottom_gamma(x).im * phi[n - 1].powi(2) / self.case.bottom_density_g_cm3;
+        let k = Complex64::new(x, loss_k2).sqrt();
         Ok(NormalMode {
-            horizontal_wavenumber_rad_per_m: Complex64::new(x.sqrt(), 0.0),
-            phase_speed_mps: self.omega / x.sqrt(),
+            horizontal_wavenumber_rad_per_m: k,
+            phase_speed_mps: self.omega / k.re,
             group_speed_mps: x.sqrt() * norm / (self.omega * slow),
-            attenuation_nepers_per_m: 0.0,
+            attenuation_nepers_per_m: -k.im,
             eigenfunction,
         })
     }

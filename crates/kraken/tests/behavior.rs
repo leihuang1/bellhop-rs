@@ -51,6 +51,17 @@ fn validation_collects_errors_and_bounds_allocations() {
     let mut input = definition();
     input.receiver_ranges_m = vec![500.0, 500.0];
     assert!(Case::from_definition(input).is_err());
+
+    for invalid in [f64::NAN, -1.0, 55.0] {
+        let mut input = definition();
+        input.bottom_attenuation_db_per_wavelength = invalid;
+        assert!(Case::from_definition(input).is_err());
+    }
+    let mut input = definition();
+    input.source_geometry = kraken::SourceGeometry::Point;
+    input.receiver_ranges_m = vec![0.0];
+    input.receiver_offsets_m = vec![-1.0; input.receiver_depths_m.len()];
+    assert!(Case::from_definition(input).is_err());
 }
 
 #[test]
@@ -221,7 +232,10 @@ fn solver_limits_and_numeric_overflow_are_errors() {
 
     let mut input = definition();
     input.frequency_hz = 1000.0; // Many modes, but a small mode-sample grid.
-    input.source_depths_m = vec![75.0; 100_000]; // 900,000 pressure samples: allowed by Case.
+    input.source_depths_m = vec![75.0; 100_000];
+    input.receiver_depths_m = vec![75.0; 5];
+    input.receiver_offsets_m = vec![0.0; 5];
+    input.receiver_ranges_m = vec![500.0, 1000.0]; // 1,000,000 samples: allowed by Case.
     assert_eq!(
         solve(&Case::from_definition(input).unwrap())
             .unwrap_err()

@@ -10,8 +10,10 @@ const CASES: &[&str] = &[
     "Pekeris",
     "PekerisFiltered",
     "PekerisDense",
+    "PekerisDenseLoss",
     "PekerisRefined",
     "MunkLossless",
+    "MunkBottomLoss",
     "SductTrapped",
 ];
 
@@ -45,10 +47,11 @@ fn compare(env: &Path, reference: &Path) {
     let modes = Records::read(&reference.with_extension("mod"));
     let field = Records::read(&reference.with_extension("shd"));
     let printed = fs::read_to_string(reference.with_extension("prt")).unwrap();
-    let (k_error, shape_error) = compare_modes(&case, &actual.modes, &modes, &printed);
+    let (k_error, loss_error, binary_loss_error, shape_error) =
+        compare_modes(&case, &actual.modes, &modes, &printed);
     let pressure_error = compare_field(&case, &actual.field, &field);
     eprintln!(
-        "{}: {} modes, {} pressure samples; max |dk|={k_error:e}, |dphi|={shape_error:e}, |dp|={pressure_error:e}",
+        "{}: {} modes, {} pressure samples; max |dk|={k_error:e}, |dalpha(.prt)|={loss_error:e}, |dalpha(.mod)|={binary_loss_error:e}, |dphi|={shape_error:e}, |dp|={pressure_error:e}",
         env.display(),
         actual.modes.modes.len(),
         actual.field.pressure.len()
@@ -69,7 +72,12 @@ fn complex_close(actual: Complex64, expected: Complex64, tolerance: f64, field: 
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
-fn compare_modes(case: &Case, actual: &ModeSet, file: &Records, printed: &str) -> (f64, f64) {
+fn compare_modes(
+    case: &Case,
+    actual: &ModeSet,
+    file: &Records,
+    printed: &str,
+) -> (f64, f64, f64, f64) {
     let header = file.record(0);
     assert_eq!(count(header, 84), 1, "mode frequency count");
     assert_eq!(count(header, 88), 1, "medium count");
@@ -127,6 +135,8 @@ fn compare_modes(case: &Case, actual: &ModeSet, file: &Records, printed: &str) -
         "printed mode count"
     );
     let mut max_k = 0.0_f64;
+    let mut max_loss = 0.0_f64;
+    let mut max_binary_loss = 0.0_f64;
     let mut max_shape = 0.0_f64;
     for (row_index, row) in rows.into_iter().enumerate() {
         let index = row_index * print_stride;
@@ -144,26 +154,45 @@ fn compare_modes(case: &Case, actual: &ModeSet, file: &Records, printed: &str) -
             5e-10,
             "wavenumber (.prt)",
         ));
-        close(
-            mode.attenuation_nepers_per_m,
+        // Fortran prints signed Im(k) at G10.2; the public attenuation is -Im(k).
+        // Check to half of the last printed decimal place, not an arbitrary loose tolerance.
+        let attenuation_tolerance = if mode.attenuation_nepers_per_m == 0.0 {
+            1e-12
+        } else {
+            let (mantissa, exponent) = columns[2].split_once(['E', 'e']).unwrap();
+            let digits = mantissa.split_once('.').unwrap().1.len();
+            0.5 * 10_f64.powi(exponent.parse::<i32>().unwrap() - i32::try_from(digits).unwrap())
+        };
+        max_loss = max_loss.max(close(
+            -mode.attenuation_nepers_per_m,
             values[1],
-            1e-12,
-            "attenuation",
-        );
+            attenuation_tolerance.max(1e-12),
+            "attenuation (.prt)",
+        ));
         close(mode.phase_speed_mps, values[2], 5e-6, "phase speed");
         close(mode.group_speed_mps, values[3], 0.005, "group speed");
     }
     for (index, mode) in actual.modes.iter().enumerate() {
         let k_record = file.record(7 + mode_count + index / modes_per_record);
-        complex_close(
-            Complex64::new(
-                f64::from(mode.horizontal_wavenumber_rad_per_m.re as f32),
-                f64::from(mode.horizontal_wavenumber_rad_per_m.im as f32),
-            ),
-            complex(k_record, 8 * (index % modes_per_record)),
+        let stored = complex(k_record, 8 * (index % modes_per_record));
+        close(
+            f64::from(mode.horizontal_wavenumber_rad_per_m.re as f32),
+            stored.re,
             0.0,
-            "wavenumber (.mod)",
+            "real wavenumber (.mod)",
         );
+        // Loss depends on the first-mesh root; a different root rounding can
+        // shift small imaginary parts even when the extrapolated real k agrees.
+        max_binary_loss = max_binary_loss.max(close(
+            f64::from(mode.horizontal_wavenumber_rad_per_m.im as f32),
+            stored.im,
+            if case.bottom_attenuation_db_per_wavelength > 0.0 {
+                1e-10
+            } else {
+                0.0
+            },
+            "imaginary wavenumber (.mod)",
+        ));
         let shape = file.record(7 + index);
         assert_eq!(mode.eigenfunction.len(), actual.sampled_depths_m.len());
         let reference: Vec<_> = (0..mode.eigenfunction.len())
@@ -184,7 +213,7 @@ fn compare_modes(case: &Case, actual: &ModeSet, file: &Records, printed: &str) -
             max_shape = max_shape.max(complex_close(value, expected * phase, 1e-6, "mode shape"));
         }
     }
-    (max_k, max_shape)
+    (max_k, max_loss, max_binary_loss, max_shape)
 }
 
 #[allow(clippy::cast_possible_truncation)]
@@ -308,6 +337,24 @@ fn comparator_detects_corruption_but_accepts_eigenvector_sign_changes() {
         flipped.bytes[offset..offset + 4].copy_from_slice(&(-value).to_le_bytes());
     }
     compare_modes(&case, &result.modes, &flipped, &printed);
+    let lossy = fixtures().join("MunkBottomLoss");
+    let lossy_case = load_case(lossy.with_extension("env"), lossy.with_extension("flp")).unwrap();
+    let lossy_modes = Records::read(&fixtures().join("golden/MunkBottomLoss.mod"));
+    let lossy_printed = fs::read_to_string(fixtures().join("golden/MunkBottomLoss.prt")).unwrap();
+    let lossy_result = solve(&lossy_case).unwrap();
+    let mut corrupted_loss = lossy_modes.clone();
+    let imag = (7 + lossy_result.modes.modes.len()) * corrupted_loss.record_bytes + 4;
+    corrupted_loss.bytes[imag..imag + 4].copy_from_slice(&1e-7_f32.to_le_bytes());
+    assert!(
+        std::panic::catch_unwind(|| compare_modes(
+            &lossy_case,
+            &lossy_result.modes,
+            &corrupted_loss,
+            &lossy_printed
+        ))
+        .is_err()
+    );
+
     for value in [1.0_f32, f32::NAN] {
         for record in [4, 7, 7 + result.modes.modes.len()] {
             let mut corrupted = modes.clone();

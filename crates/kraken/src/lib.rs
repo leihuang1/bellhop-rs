@@ -105,13 +105,19 @@ pub enum Interpolation {
     CLinear,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceGeometry {
+    Line,
+    Point,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SoundSpeedPoint {
     pub depth_m: f64,
     pub sound_speed_mps: f64,
 }
 
-/// Unvalidated input for a single lossless fluid layer with a vacuum surface.
+/// Unvalidated input for a single fluid layer with a vacuum surface.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CaseDefinition {
     pub title: String,
@@ -122,6 +128,9 @@ pub struct CaseDefinition {
     pub water_density_g_cm3: f64,
     pub bottom_sound_speed_mps: f64,
     pub bottom_density_g_cm3: f64,
+    /// Bottom half-space attenuation in dB per wavelength (0 for lossless).
+    pub bottom_attenuation_db_per_wavelength: f64,
+    pub source_geometry: SourceGeometry,
     /// Base finite-difference mesh size, or 0 for 20 points per bottom wavelength.
     pub mesh_points: usize,
     pub c_low_mps: f64,
@@ -163,6 +172,10 @@ impl Case {
             ("water_density_g_cm3", definition.water_density_g_cm3),
             ("bottom_sound_speed_mps", definition.bottom_sound_speed_mps),
             ("bottom_density_g_cm3", definition.bottom_density_g_cm3),
+            (
+                "bottom_attenuation_db_per_wavelength",
+                definition.bottom_attenuation_db_per_wavelength,
+            ),
             ("c_low_mps", definition.c_low_mps),
             ("c_high_mps", definition.c_high_mps),
             ("max_range_m", definition.max_range_m),
@@ -205,6 +218,15 @@ impl Case {
             diagnostics.push(error(
                 "bottom_sound_speed_mps",
                 "trapped modes require a bottom faster than the minimum water sound speed",
+            ));
+        }
+        if definition.bottom_attenuation_db_per_wavelength < 0.0
+            || definition.bottom_attenuation_db_per_wavelength
+                > 8.685_889_6 * 2.0 * std::f64::consts::PI
+        {
+            diagnostics.push(error(
+                "bottom_attenuation_db_per_wavelength",
+                "bottom attenuation must yield a complex speed with imaginary part no larger than real part",
             ));
         }
         if definition.c_high_mps > definition.bottom_sound_speed_mps {
@@ -297,6 +319,19 @@ impl Case {
             diagnostics.push(error(
                 "receiver_offsets_m",
                 "receiver offsets must be finite and match receiver-depth count",
+            ));
+        }
+        if definition.source_geometry == SourceGeometry::Point
+            && definition.receiver_ranges_m.first().is_some_and(|&range| {
+                definition
+                    .receiver_offsets_m
+                    .iter()
+                    .any(|&offset| !(range + offset).is_finite() || range + offset < 0.0)
+            })
+        {
+            diagnostics.push(error(
+                "receiver_offsets_m",
+                "point-source effective ranges must be finite and non-negative",
             ));
         }
         if let (Some(first), Some(last)) = (

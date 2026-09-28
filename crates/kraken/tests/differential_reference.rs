@@ -12,9 +12,12 @@ const CASES: &[&str] = &[
     "PekerisDense",
     "PekerisDenseLoss",
     "PekerisRefined",
+    "PekerisSpline3",
     "MunkLossless",
     "MunkBottomLoss",
     "SductTrapped",
+    "SductPchip",
+    "SductSpline",
 ];
 
 fn fixtures() -> PathBuf {

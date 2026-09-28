@@ -11,6 +11,7 @@ pub mod legacy;
 mod modes;
 #[cfg(test)]
 mod pekeris;
+mod profile;
 mod solver;
 
 const MAX_FIELD_SAMPLES: usize = 1_000_000;
@@ -103,6 +104,8 @@ impl Error for DiagnosticReport {}
 pub enum Interpolation {
     N2Linear,
     CLinear,
+    Pchip,
+    Spline,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -214,7 +217,10 @@ impl Case {
             .iter()
             .map(|point| point.sound_speed_mps)
             .fold(f64::INFINITY, f64::min);
-        if definition.bottom_sound_speed_mps <= minimum_speed {
+        // A spline may have a slower interior extremum than any tabulated knot.
+        if definition.interpolation != Interpolation::Spline
+            && definition.bottom_sound_speed_mps <= minimum_speed
+        {
             diagnostics.push(error(
                 "bottom_sound_speed_mps",
                 "trapped modes require a bottom faster than the minimum water sound speed",

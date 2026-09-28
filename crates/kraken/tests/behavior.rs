@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 use std::path::Path;
 
-use kraken::{Case, CaseDefinition, legacy::load_case, solve};
+use kraken::{Case, CaseDefinition, SurfaceBoundary, legacy::load_case, solve};
 use num_complex::Complex64;
 
 fn definition() -> CaseDefinition {
@@ -62,6 +62,39 @@ fn validation_collects_errors_and_bounds_allocations() {
     input.receiver_ranges_m = vec![0.0];
     input.receiver_offsets_m = vec![-1.0; input.receiver_depths_m.len()];
     assert!(Case::from_definition(input).is_err());
+}
+
+#[test]
+fn rigid_surface_changes_surface_pressure_and_retains_vacuum_default() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let vacuum = load_case(
+        root.join("PekerisDenseLoss.env"),
+        root.join("PekerisDenseLoss.flp"),
+    )
+    .unwrap();
+    let rigid = load_case(
+        root.join("PekerisRigidLoss.env"),
+        root.join("PekerisRigidLoss.flp"),
+    )
+    .unwrap();
+    assert_eq!(vacuum.surface_boundary, SurfaceBoundary::Vacuum);
+    assert_eq!(rigid.surface_boundary, SurfaceBoundary::Rigid);
+    let vacuum = solve(&vacuum).unwrap();
+    let rigid = solve(&rigid).unwrap();
+    assert!(
+        vacuum
+            .modes
+            .modes
+            .iter()
+            .all(|mode| mode.eigenfunction[0].norm() < 1e-9)
+    );
+    assert!(
+        rigid
+            .modes
+            .modes
+            .iter()
+            .all(|mode| mode.eigenfunction[0].norm() > 1e-3)
+    );
 }
 
 #[test]

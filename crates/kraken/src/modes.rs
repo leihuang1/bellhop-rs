@@ -7,7 +7,9 @@
 //! Richardson extrapolation refines eigenvalues only, as in the reference.
 use crate::profile::Profile;
 use crate::solver::error;
-use crate::{Case, DiagnosticReport, MAX_MESH_POINTS, MAX_MODE_LIMIT, ModeSet, NormalMode};
+use crate::{
+    Case, DiagnosticReport, MAX_MESH_POINTS, MAX_MODE_LIMIT, ModeSet, NormalMode, SurfaceBoundary,
+};
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
@@ -207,15 +209,22 @@ impl<'a> Mesh<'a> {
     // Inertia of the symmetric tridiagonal acoustic operator A(x): number of roots above x.
     fn count(&self, x: f64) -> usize {
         let shift = self.h * self.h * x;
+        let rigid = self.case.surface_boundary == SurfaceBoundary::Rigid;
         let mut pivot = 0.0;
         let mut count = 0;
-        for i in 1..self.b1.len() {
-            let d = if i + 1 == self.b1.len() {
+        for i in usize::from(!rigid)..self.b1.len() {
+            let d = if i == 0 {
+                (self.b1[0] - shift) * 0.5
+            } else if i + 1 == self.b1.len() {
                 self.bottom_diagonal(x)
             } else {
                 self.b1[i] - shift
             };
-            pivot = if i == 1 { d } else { d - 1.0 / pivot };
+            pivot = if i == usize::from(!rigid) {
+                d
+            } else {
+                d - 1.0 / pivot
+            };
             if pivot.abs() < 1e-30 {
                 pivot = -1e-30;
             }
@@ -301,8 +310,12 @@ impl<'a> Mesh<'a> {
         let shift = self.h * self.h * x;
         let mut d: Vec<_> = self.b1.iter().map(|b| (b - shift) / h_rho).collect();
         let mut e = vec![1.0 / h_rho; n + 1];
-        d[0] = 1.0;
-        e[1] = 0.0; // vacuum surface
+        if self.case.surface_boundary == SurfaceBoundary::Vacuum {
+            d[0] = 1.0;
+            e[1] = 0.0;
+        } else {
+            d[0] *= 0.5; // rigid surface: pressure derivative vanishes
+        }
         d[n - 1] = self.bottom_diagonal(x) / h_rho;
         let mut phi = inverse_iteration(&d, &e)?;
         let mut norm = 0.0;

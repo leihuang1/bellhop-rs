@@ -1,0 +1,56 @@
+ _________________________________________________
+
+ KRAKEN- Pekeris rigid surface (derived from Pekeris)
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   1
+
+
+     N2-Linear approximation to SSP
+     Attenuation units: nepers/m
+     Perfectly RIGID
+
+       ( # mesh points =  1000  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1500.00      0.00     1.00       0.0000    0.0000
+    100.00      1500.00      0.00     1.00       0.0000    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     ACOUSTO-ELASTIC half-space
+    100.00      1700.00      0.00     1.50       0.0000    0.0000
+
+ cLow =   1400.0     m/s      cHigh =   1700.0     m/s
+ RMax =   2.0000     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            1
+    Source   z-coordinates, Sz (m)
+                 75.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            3
+    Receiver z-coordinates, Rz (m)
+                 25.0000       75.0000       99.0000
+
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            4
+        1            0.328E-02s
+                --- Number of modes =            4
+        2            0.970E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2089947750       0.0       1503.191960       1497.64
+    2  0.2053678870       0.0       1529.738997       1477.72
+    3  0.1978075680       0.0       1588.206500       1434.77
+    4  0.1862270540       0.0       1686.968991       1401.24
+ _________________________________________________
+
+ End of environmental file

@@ -7,9 +7,9 @@ Fortran 12.2 environment described in [`reference.md`](reference.md).
 **Status:** `crates/kraken` supports range-independent, single-fluid-layer
 trapped or rigid-bottom confined modes with optional bottom-half-space `W`
 attenuation, and coherent line- or point-source FIELD. A separate **modes-only**
-KRAKENC slice computes leaky modes for a constant or at most seven-point
-lossless `N` water column, vacuum surface and lossless fluid bottom, with a
-base mesh and no extrapolation.
+KRAKENC slice computes leaky modes for lossless `N` water, vacuum surface and
+fluid bottom with optional `W` loss, with a base mesh and no extrapolation.
+Unmodified `MunkKleaky.env/.flp` is accepted **for modes only**.
 It is not the full matrix below; unsupported inputs are rejected.
 
 ## Products
@@ -84,12 +84,12 @@ original `.env/.flp` *pair* is not claimed as accepted. The sduct derivatives
 still remove the original leaky phase-speed interval; unmodified `sductK` is
 not supported.
 The separate KRAKENC `load_complex_case`/`solve_complex_modes` path currently
-supports only a constant or at most seven-point, lossless `N`-profile, vacuum
-surface, lossless fluid half-space (including a bottom slower than the water),
-a leaky phase-speed
-interval, and `RMax=0`. The KRAKENC legacy reader accepts both blank and dotted
-restart options. It uses the `.flp` only to select mode-sampling depths; `solve`
-rejects this case because KRAKENC FIELD is not yet implemented. The derived
+supports lossless `N`-profile water, vacuum surface, fluid half-space with zero
+or `W` attenuation (including a bottom slower than the water), a leaky
+phase-speed interval, and `RMax=0`. The KRAKENC legacy reader accepts both blank and dotted
+restart options. The `.env` supplies modal sample depths; `.flp` supplies
+validated FIELD geometry but is not used for mode solving. `solve` rejects
+this case because KRAKENC FIELD is not yet implemented. The derived
 `PekerisComplex.env` extends Pekeris to `cHigh=2000 m/s` and enables Fortran
 restarts; `PekerisComplexBlank` uses the default restart setting and
 `PekerisComplexSlow` lowers the bottom speed to 1400 m/s.
@@ -106,14 +106,17 @@ against the same committed and fresh modal comparator. The **derived**
 `MunkLeakyPartial` retains the first seven water SSP knots from the original
 `MunkKleaky`, truncated at 1000 m: with a lossless bottom, narrower leaky
 interval, 800-point mesh and six modal sampling depths, all 30 modes (nine
-leaky) match committed and fresh `.mod/.prt`. Complex secant now carries the
-shooting/deflation scaling exponent into adjacent function comparisons; without
-it the multi-knot case produces spurious roots after mode 16. More than seven
-nonconstant SSP knots, water loss, bottom loss and complex FIELD remain
-unsupported; the original `MunkKleaky` (22 knots, `W` bottom loss and a much
-wider spectral interval) and `sductK` (`C` interpolation) remain reference-only
-smoke tests. Upstream
-`tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
+leaky) match committed and fresh `.mod/.prt`. `MunkLeakyPartialLoss` adds the
+original 0.8 dB/wavelength `W` bottom loss; its 30 modes also pass committed
+and fresh differential. Complex secant carries the shooting/deflation scaling
+exponent into adjacent function comparisons. Counted root work and complex
+inverse iteration then cover the **unmodified** `MunkKleaky.env` with its
+original `.flp` parsed for FIELD geometry: all 329 modes (including
+leaky modes) pass fresh pinned `.mod/.prt` comparisons. The pinned Fortran
+FIELD smoke also runs, but Rust still does **not** synthesize its complex
+pressure: neither `.shd` nor FIELD output is accepted. Water loss, `C`
+interpolation (`sductK`), complex FIELD and refined KRAKENC meshes remain
+unsupported. Upstream `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)
 checks committed `.mod/.shd/.prt` goldens and newly generated pinned Fortran
 output in CI; provenance is recorded

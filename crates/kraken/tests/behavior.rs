@@ -57,7 +57,7 @@ fn complex_case_accepts_slow_bottom_and_default_restart_setting() {
 }
 
 #[test]
-fn complex_multiknot_case_keeps_unsupported_profiles_and_loss_out() {
+fn complex_case_keeps_unsupported_interpolation_and_extrapolation_out() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let base = load_complex_case(
         root.join("PekerisComplexGradient.env"),
@@ -65,22 +65,11 @@ fn complex_multiknot_case_keeps_unsupported_profiles_and_loss_out() {
     )
     .unwrap()
     .into_definition();
-    let mut eight_points =
-        load_complex_case(root.join("MunkLeakyPartial.env"), root.join("Pekeris.flp"))
-            .unwrap()
-            .into_definition();
-    eight_points.sound_speed_profile.insert(
-        1,
-        kraken::SoundSpeedPoint {
-            depth_m: 100.0,
-            sound_speed_mps: 1539.0,
-        },
-    );
-    let mut lossy = base.clone();
-    lossy.bottom_attenuation_db_per_wavelength = 0.8;
+    let mut extrapolated = base.clone();
+    extrapolated.max_range_m = 1000.0;
     let mut linear_c = base;
     linear_c.interpolation = kraken::Interpolation::CLinear;
-    for input in [eight_points, lossy, linear_c] {
+    for input in [extrapolated, linear_c] {
         let report = solve_complex_modes(&Case::from_definition(input).unwrap()).unwrap_err();
         assert_eq!(report.diagnostics()[0].field, "mode_solver");
     }

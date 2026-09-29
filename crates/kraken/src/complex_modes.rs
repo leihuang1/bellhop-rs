@@ -1,7 +1,7 @@
 // Adapted from Acoustics Toolbox v2023.5 Kraken/krakenc.f90,
 // Kraken/InverseIterationMod.f90 and misc/RootFinderSecantMod.f90.
 // Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
-//! Lossless N-profile fluid water column over a lossless fluid half-space,
+//! Lossless N-profile fluid water column over a fluid half-space,
 //! vacuum surface, base mesh only, modes only.
 use crate::profile::Profile;
 use crate::solver::error;
@@ -11,7 +11,7 @@ use crate::{
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
-const MAX_ROOT_WORK: usize = 30_000_000;
+const MAX_ROOT_WORK: usize = 300_000_000;
 const SECANT_RELATIVE_TOLERANCE: f64 = 1e-14;
 
 #[allow(
@@ -25,18 +25,12 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     if case.interpolation != Interpolation::N2Linear
         || case.surface_boundary != SurfaceBoundary::Vacuum
         || case.bottom_boundary != BottomBoundary::FluidHalfSpace
-        || case.bottom_attenuation_db_per_wavelength != 0.0
         || case.max_range_m != 0.0
         || case.c_high_mps <= case.bottom_sound_speed_mps
-        || (case.sound_speed_profile.len() > 7
-            && case
-                .sound_speed_profile
-                .iter()
-                .any(|p| p.sound_speed_mps != case.sound_speed_profile[0].sound_speed_mps))
     {
         return Err(error(
             "KR0302",
-            "KRAKENC currently requires a constant or at most seven-point lossless N-profile with a vacuum surface and lossless fluid bottom, leaky spectral interval, and no mesh extrapolation",
+            "KRAKENC currently requires lossless N-profile water with a vacuum surface, fluid bottom with optional W attenuation, leaky spectral interval, and no mesh extrapolation",
             "mode_solver",
         ));
     }
@@ -63,11 +57,21 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             -2.0 + h * h * (omega / c).powi(2)
         })
         .collect();
-    let bottom_k2 = (omega / case.bottom_sound_speed_mps).powi(2);
+    let bottom_c = Complex64::new(
+        case.bottom_sound_speed_mps,
+        case.bottom_attenuation_db_per_wavelength * case.bottom_sound_speed_mps
+            / (8.685_889_6 * 2.0 * PI),
+    );
+    let bottom_k2 = (Complex64::new(omega, 0.0) / bottom_c).powi(2);
     let low_k2 = (omega / case.c_high_mps).powi(2);
     let high_k2 = (omega / case.c_low_mps).powi(2);
     let water_k2 = (omega / min_speed).powi(2);
-    if !low_k2.is_finite() || !water_k2.is_finite() || b.iter().any(|x| !x.is_finite()) {
+    if !low_k2.is_finite()
+        || !water_k2.is_finite()
+        || !bottom_k2.re.is_finite()
+        || !bottom_k2.im.is_finite()
+        || b.iter().any(|x| !x.is_finite())
+    {
         return Err(error(
             "KR0302",
             "mesh coefficients exceed numeric range",
@@ -78,15 +82,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     // subsequent secants distinct.
     let guesses =
         (case.water_depth_m * (water_k2 - low_k2).max(0.0).sqrt() / PI).ceil() as usize + 1;
-    // ponytail: worst-case 1000 secant steps per guess; a counted budget can
-    // replace this ceiling when broader KRAKENC cases need it.
-    if guesses > crate::MAX_MODE_LIMIT
-        || guesses == 0
-        || guesses
-            .checked_mul(n)
-            .and_then(|w| w.checked_mul(1000))
-            .is_none_or(|w| w > MAX_ROOT_WORK)
-    {
+    if guesses > crate::MAX_MODE_LIMIT || guesses == 0 {
         return Err(error(
             "KR0302",
             "complex root work limit exceeded",
@@ -94,6 +90,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         ));
     }
     let mut roots = Vec::new();
+    let mut work = 0;
     let mut reached_lower_limit = false;
     for index in 1..=guesses {
         let vertical = (index as f64 - 0.5) * PI / case.water_depth_m;
@@ -106,6 +103,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             case.water_density_g_cm3,
             case.bottom_density_g_cm3,
             bottom_k2,
+            &mut work,
         )?;
         if root.re <= low_k2 {
             reached_lower_limit = true;
@@ -152,7 +150,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     }
     let modes = selected
         .iter()
-        .map(|&root| mode(case, &b, h, omega, bottom_k2, root))
+        .map(|&root| mode(case, &b, h, omega, bottom_c, bottom_k2, root))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(ModeSet {
         frequency_hz: case.frequency_hz,
@@ -177,7 +175,7 @@ fn dispersion(
     h: f64,
     water_rho: f64,
     bottom_rho: f64,
-    bottom_k2: f64,
+    bottom_k2: Complex64,
 ) -> (Complex64, i32) {
     let gamma = pekeris_root(x - bottom_k2);
     let mut prev = Complex64::new(-2.0 * bottom_rho, 0.0);
@@ -211,7 +209,7 @@ fn dispersion(
     (value, power)
 }
 
-#[allow(clippy::cast_precision_loss)]
+#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 fn secant(
     mut x: Complex64,
     roots: &[Complex64],
@@ -219,14 +217,25 @@ fn secant(
     h: f64,
     water_rho: f64,
     bottom_rho: f64,
-    bottom_k2: f64,
+    bottom_k2: Complex64,
+    work: &mut usize,
 ) -> Result<Complex64, DiagnosticReport> {
+    let mut evaluate = |x| {
+        *work += b.len() + roots.len();
+        if *work > MAX_ROOT_WORK {
+            return Err(error(
+                "KR0302",
+                "complex root work limit exceeded",
+                "mesh_points",
+            ));
+        }
+        Ok(dispersion(x, roots, b, h, water_rho, bottom_rho, bottom_k2))
+    };
     let tolerance = x.norm() * b.len() as f64 * SECANT_RELATIVE_TOLERANCE;
     let mut previous = x + 100.0 * tolerance;
-    let (mut f_previous, mut previous_power) =
-        dispersion(previous, roots, b, h, water_rho, bottom_rho, bottom_k2);
+    let (mut f_previous, mut previous_power) = evaluate(previous)?;
     for _ in 0..1000 {
-        let (f, power) = dispersion(x, roots, b, h, water_rho, bottom_rho, bottom_k2);
+        let (f, power) = evaluate(x)?;
         let numerator = f * (x - previous);
         let denominator = f - f_previous * 10_f64.powi(previous_power - power);
         let shift = if numerator.norm() >= (denominator * x).norm() {
@@ -253,6 +262,81 @@ fn secant(
     ))
 }
 
+// Complex tridiagonal inverse iteration from upstream InverseIterationMod.f90.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::float_cmp,
+    clippy::many_single_char_names
+)]
+fn inverse_iteration(d: &[Complex64], e: &[f64]) -> Result<Vec<Complex64>, DiagnosticReport> {
+    let n = d.len();
+    let eps3 = 100.0
+        * f64::EPSILON
+        * (d.iter().map(|v| v.re.abs() + v.im.abs()).sum::<f64>()
+            + e[1..n].iter().map(|v| v.abs()).sum::<f64>());
+    let eps4 = n as f64 * eps3;
+    let mut a = vec![Complex64::new(0.0, 0.0); n];
+    let mut b = a.clone();
+    let mut c = a.clone();
+    let mut multipliers = a.clone();
+    let mut swapped = vec![false; n];
+    let mut u = d[0];
+    let mut v = Complex64::new(e[1], 0.0);
+    for i in 1..n {
+        if e[i].abs() >= u.norm() {
+            let ratio = u / e[i];
+            multipliers[i] = ratio;
+            swapped[i] = true;
+            a[i - 1] = e[i].into();
+            b[i - 1] = d[i];
+            c[i - 1] = e[i + 1].into();
+            u = v - ratio * d[i];
+            v = -ratio * e[i + 1];
+        } else {
+            let ratio = e[i] / u;
+            multipliers[i] = ratio;
+            a[i - 1] = u;
+            b[i - 1] = v;
+            u = d[i] - ratio * v;
+            v = e[i + 1].into();
+        }
+    }
+    a[n - 1] = if u == Complex64::new(0.0, 0.0) {
+        Complex64::new(eps3, 0.0)
+    } else {
+        u
+    };
+    c[n - 2] = Complex64::new(0.0, 0.0);
+    let mut phi = vec![Complex64::new(eps4 / (n as f64).sqrt(), 0.0); n];
+    for _ in 0..3 {
+        let mut next = Complex64::new(0.0, 0.0);
+        let mut next2 = next;
+        for i in (0..n).rev() {
+            phi[i] = (phi[i] - b[i] * next - c[i] * next2) / a[i];
+            next2 = next;
+            next = phi[i];
+        }
+        let norm: f64 = phi.iter().map(|v| v.re.abs() + v.im.abs()).sum();
+        if !norm.is_finite() || norm == 0.0 {
+            break;
+        }
+        if norm >= 1.0 {
+            return Ok(phi);
+        }
+        for value in &mut phi {
+            *value *= eps4 / norm;
+        }
+        for i in 1..n {
+            if swapped[i] {
+                phi.swap(i, i - 1);
+            }
+            let before = phi[i - 1];
+            phi[i] -= multipliers[i] * before;
+        }
+    }
+    Err(error("KR0303", "complex inverse iteration failed", "modes"))
+}
+
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
@@ -263,25 +347,20 @@ fn mode(
     b: &[f64],
     h: f64,
     omega: f64,
-    bottom_k2: f64,
+    bottom_c: Complex64,
+    bottom_k2: Complex64,
     x: Complex64,
 ) -> Result<NormalMode, DiagnosticReport> {
     let n = b.len();
     let shift = h * h * x;
-    // ponytail: shooting suffices for the 1 km water column; deeper
-    // evanescent columns need scaled shooting or inverse iteration.
-    let mut phi = vec![Complex64::new(0.0, 0.0); n];
-    phi[1] = Complex64::new(1.0, 0.0);
-    for i in 2..n {
-        phi[i] = (shift - b[i - 1]) * phi[i - 1] - phi[i - 2];
-        if !phi[i].re.is_finite() || !phi[i].im.is_finite() {
-            return Err(error(
-                "KR0303",
-                "complex eigenfunction shooting overflow",
-                "modes",
-            ));
-        }
-    }
+    let h_rho = h * case.water_density_g_cm3;
+    let mut d: Vec<_> = b.iter().map(|&v| (v - shift) / h_rho).collect();
+    let mut e = vec![1.0 / h_rho; n + 1];
+    d[0] = Complex64::new(1.0, 0.0);
+    e[1] = 0.0;
+    d[n - 1] = (b[n - 1] - shift) / (2.0 * h_rho)
+        - pekeris_root(x - bottom_k2) / case.bottom_density_g_cm3;
+    let mut phi = inverse_iteration(&d, &e)?;
     let mut sq_norm = Complex64::new(0.0, 0.0);
     let mut slow = Complex64::new(0.0, 0.0);
     for (i, &value) in phi.iter().enumerate() {
@@ -291,8 +370,7 @@ fn mode(
         slow += mass * (b[i] + 2.0) / (omega * omega * h * h);
     }
     let gamma = (x - bottom_k2).sqrt();
-    slow += phi[n - 1].powi(2)
-        / (2.0 * gamma * case.bottom_density_g_cm3 * case.bottom_sound_speed_mps.powi(2));
+    slow += phi[n - 1].powi(2) / (2.0 * gamma * case.bottom_density_g_cm3 * bottom_c.powi(2));
     let x1 = x * 0.999_999_9;
     let x2 = x * 1.000_000_1;
     let derivative = (pekeris_root(x2 - bottom_k2) - pekeris_root(x1 - bottom_k2))
@@ -328,7 +406,8 @@ fn mode(
     let k = x.sqrt();
     if !k.re.is_finite()
         || !k.im.is_finite()
-        || k.im > 0.0
+        // Pinned Fortran roots can carry positive imaginary roundoff near 1e-18.
+        || k.im > k.re * 1e-12
         || !group_speed.is_finite()
         || !norm.re.is_finite()
         || !norm.im.is_finite()

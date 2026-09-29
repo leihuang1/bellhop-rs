@@ -28,11 +28,15 @@ Separate modes-only KRAKENC regressions compare the **derived**
 `PekerisComplex.env`, its blank-restart and slower-fluid-bottom variants
 (four modes each), and a `cLow=1550 m/s` blank-restart variant (three in-band
 modes), two-point graded `N`-profiles in both directions (four modes each),
-and a **derived**, truncated seven-knot MunkLeaky water column (30 modes, nine
-leaky) against pinned `.mod/.prt` goldens and fresh CI output. A metamorphic
-frequency/depth-scaling test checks that small distinct squared-wavenumbers
-remain separate; it does not claim a fresh Fortran acceptance for scaled
-inputs. None validate complex FIELD or the original MunkLeaky examples.
+and a **derived**, truncated seven-knot MunkLeaky water column with and without
+0.8 dB/wavelength bottom loss (30 modes, nine leaky each) against pinned
+`.mod/.prt` goldens and fresh CI output. The **unmodified upstream**
+`MunkKleaky.env` and `.flp` are now loaded for a separate fresh CI modes-only
+comparison of 329 complex modes. The original `.flp` contributes validated
+FIELD geometry but not Rust mode samples, which come from `.env`; only Fortran
+runs FIELD. A metamorphic frequency/depth-scaling test checks that small
+distinct squared-wavenumbers remain separate; it does not claim a fresh
+Fortran acceptance for scaled inputs. No complex Rust pressure is validated.
 
 BELLHOP ray trajectories
 cover all `N/C/P/S/Q/A` sound-speed models. Eigenray and arrival goldens cover

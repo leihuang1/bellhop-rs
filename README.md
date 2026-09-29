@@ -45,8 +45,9 @@ The workspace also contains a separate KRAKEN rewrite: `kraken` currently covers
 validated single-fluid-layer `N/C/P/S` and fixed analytic Munk `A` sound-speed profiles, vacuum or rigid
 surface, modes with a fluid (`A`) or rigid (`R`) bottom and optional fluid-bottom
 `W` attenuation, and coherent line- or point-source FIELD. A separate, narrow
-KRAKENC path supports modes only for a lossless, constant or at most seven-point
-`N` fluid waveguide with a leaky interval; complex FIELD is not supported yet. Its full 2D acceptance
+KRAKENC path supports modes only for lossless `N` water over a fluid bottom with
+optional `W` loss and a leaky interval, including the unmodified MunkKleaky
+`.env` modal differential; complex FIELD is not supported yet. Its full 2D acceptance
 target and explicit exclusions are in
 [the KRAKEN compatibility matrix](docs/kraken-compatibility.md).
 

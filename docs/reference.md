@@ -21,22 +21,24 @@ all seventeen cases and the unmodified upstream `MunkK.env`/`.flp` (102 modes,
 501,501 complex pressures). CI also compares the unmodified upstream
 `MunkAnalytic.env` with a separately derived coherent FIELD `.flp` (102 modes,
 25 pressures); its original three-line `.flp` fails in pinned v2023.5 FIELD.
-The unmodified official sduct case still includes
-leaky modes and is **not** covered by the derived trapped-mode comparison.
-Measured errors and input provenance are recorded alongside the goldens.
+The unmodified official sduct has leaky modes and is **not** covered by the
+derived KRAKEN trapped-mode comparison; its separate KRAKENC original-pair
+comparison is described below. Measured errors and provenance accompany the goldens.
 Separate KRAKENC regressions compare the **derived**
 `PekerisComplex.env`, its blank-restart and slower-fluid-bottom variants
 (four modes each), and a `cLow=1550 m/s` blank-restart variant (three in-band
 modes), two-point graded `N`-profiles in both directions (four modes each),
 and a **derived**, truncated seven-knot MunkLeaky water column with and without
 0.8 dB/wavelength bottom loss (30 modes, nine leaky each) against pinned
-`.mod/.prt` goldens and fresh CI output. Separately derived coherent `.flp`
+`.mod/.prt` goldens and fresh CI output. A third seven-knot derivative changes
+only `N` to `C` interpolation (30 modes). Separately derived coherent `.flp`
 inputs compare nine complex line-source pressures for `PekerisComplexBlank`
-and 36 point-source pressures for the lossy seven-knot case with committed
-`.shd` goldens and fresh CI output. The **unmodified upstream**
-`MunkKleaky.env/.flp` pair is compared in fresh CI end to end: all 329 complex
-modes and all 150,801 complex pressures against `.mod/.prt/.shd`. The `.env`
-determines modal samples; the `.flp` determines FIELD geometry. A metamorphic
+and 36 point-source pressures for each of the two lossy seven-knot cases with
+committed `.shd` goldens and fresh CI output. Fresh CI compares unmodified
+upstream `MunkKleaky` (329 modes, 150,801 pressures), `MunkKwb` (63, 150,801),
+`MunkKbb` (102, 150,801) and `sductK` (1,077, 201,201) `.env/.flp` pairs
+end to end against `.mod/.prt/.shd`. The `.env` determines modal samples; the
+`.flp` determines FIELD geometry. A metamorphic
 frequency/depth-scaling test checks that small distinct squared-wavenumbers
 remain separate; it does not claim a fresh Fortran acceptance for scaled
 inputs.

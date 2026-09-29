@@ -5,8 +5,8 @@ use crate::{
 use num_complex::{Complex32, Complex64};
 use std::path::Path;
 
-// ponytail: 60m contributions cover full original MunkK and MunkKleaky; revisit with measured throughput.
-const MAX_FIELD_WORK: usize = 60_000_000;
+// ponytail: 250m contributions cover original sductK's 217m; revisit with measured throughput.
+const MAX_FIELD_WORK: usize = 250_000_000;
 
 pub(super) fn solve(case: &Case) -> Result<SimulationResult, DiagnosticReport> {
     let modes = match case.mode_solver {
@@ -151,4 +151,35 @@ pub(super) fn error(
         1,
         1,
     ))
+}
+
+#[cfg(test)]
+#[test]
+fn field_work_is_bounded_before_modal_products() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/Pekeris");
+    let mut input =
+        crate::legacy::load_case(root.with_extension("env"), root.with_extension("flp"))
+            .unwrap()
+            .into_definition();
+    input.source_depths_m = vec![75.0; 100_000];
+    input.receiver_depths_m = vec![75.0; 5];
+    input.receiver_offsets_m = vec![0.0; 5];
+    input.receiver_ranges_m = vec![500.0, 1000.0];
+    let case = Case::from_definition(input).unwrap();
+    let mode = crate::NormalMode {
+        horizontal_wavenumber_rad_per_m: Complex64::new(1.0, 0.0),
+        phase_speed_mps: 1.0,
+        group_speed_mps: 1.0,
+        attenuation_nepers_per_m: 0.0,
+        eigenfunction: vec![],
+    };
+    let modes = ModeSet {
+        frequency_hz: case.frequency_hz,
+        sampled_depths_m: case.mode_sample_depths_m.clone(),
+        modes: vec![mode; 251],
+    };
+    assert_eq!(
+        synthesize_field(&case, &modes).unwrap_err().diagnostics()[0].field,
+        "field_grid"
+    );
 }

@@ -7,10 +7,10 @@ Fortran 12.2 environment described in [`reference.md`](reference.md).
 **Status:** `crates/kraken` supports range-independent, single-fluid-layer
 trapped or rigid-bottom confined modes with optional bottom-half-space `W`
 attenuation, and coherent line- or point-source FIELD. A separate
-KRAKENC slice computes leaky modes and coherent line-/point-source FIELD for
-lossless `N` water, vacuum surface and fluid bottom with optional `W` loss,
-with a base mesh and no extrapolation. Unmodified `MunkKleaky.env/.flp` is
-accepted end to end: 329 modes and 150,801 complex pressures.
+KRAKENC slice computes trapped and leaky modes and coherent line-/point-source
+FIELD for lossless `N/C` water, vacuum surface and fluid bottom with optional
+`W` loss, on the base mesh without extrapolation. Unmodified `MunkKleaky`,
+`MunkKwb`, `MunkKbb` and `sductK` `.env/.flp` pairs pass end-to-end differential.
 It is not the full matrix below; unsupported inputs are rejected.
 
 ## Products
@@ -81,13 +81,13 @@ input. The analytic `A` golden is also derived. CI additionally compares the **u
 upstream `MunkAnalytic.env`** with its automatic mesh and extrapolation (102 modes)
 and the separately derived coherent `.flp` (25 pressures). The upstream
 three-line `MunkAnalytic.flp` cannot be parsed by v2023.5 FIELD itself, so the
-original `.env/.flp` *pair* is not claimed as accepted. The sduct derivatives
-still remove the original leaky phase-speed interval; unmodified `sductK` is
-not supported.
+original `.env/.flp` *pair* is not claimed as accepted. The KRAKEN sduct
+derivatives still remove the original leaky phase-speed interval; **unmodified**
+`sductK` is instead compared through KRAKENC below.
 The separate KRAKENC `load_complex_case`/`solve_complex_modes` path currently
-supports lossless `N`-profile water, vacuum surface, fluid half-space with zero
-or `W` attenuation (including a bottom slower than the water), a leaky
-phase-speed interval, and `RMax=0`. The KRAKENC legacy reader accepts both blank
+supports lossless `N/C`-profile water, vacuum surface, fluid half-space with
+zero or `W` attenuation (including a bottom slower than the water), trapped
+or leaky phase-speed intervals, and `RMax=0`. The KRAKENC legacy reader accepts both blank
 and dotted restart options. The `.env` supplies modal sample depths; `.flp`
 supplies FIELD geometry, used by `solve` for coherent line-/point-source
 pressure or ignored by `solve_complex_modes`. The derived
@@ -118,8 +118,24 @@ all 329 modes (including leaky modes) and all 150,801 complex FIELD pressure
 samples pass fresh pinned `.mod/.prt/.shd` comparisons. A separate coherent
 point-source `.flp` for the **derived** `MunkLeakyPartialLoss` exercises source/
 receiver interpolation, positive range offsets and zero range (36 pressures)
-against a committed `.shd` golden and fresh CI output. Water loss, `C`
-interpolation (`sductK`) and refined KRAKENC meshes remain unsupported. Upstream `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
+against a committed `.shd` golden and fresh CI output. Another **derived**
+`MunkLeakyPartialC.env/.flp` changes only that input's water interpolation
+from `N` to `C`: all 30 modes and 36 complex pressures match committed and
+fresh reference. For wide spectral intervals, complex secant seeds subsequent
+roots from the previous root, as in pinned Fortran; the 300-million counted
+root-work limit is unchanged. Three other **unmodified upstream** pairs also
+pass fresh `.mod/.prt/.shd` comparison in CI:
+
+| Original input | KRAKENC modes | Complex FIELD pressures |
+|---|---:|---:|
+| `MunkKwb.env/.flp` (cHigh=1551.91 < bottom speed 1600 m/s) | 63 | 150,801 |
+| `MunkKbb.env/.flp` (cHigh=bottom speed 1600 m/s) | 102 | 150,801 |
+| `sductK.env/.flp` (`C`, cHigh=100000 m/s) | 1,077 | 201,201 |
+
+Repeated pinned runs produce identical `.mod/.shd` binaries for each original
+pair; the original artifacts stay out of Git. The sduct FIELD has 216,693,477
+modal contributions, below the measured 250-million-work ceiling. Water loss,
+`P/S/A` complex interpolation and refined KRAKENC meshes remain unsupported. Upstream `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)
 checks committed `.mod/.shd/.prt` goldens and newly generated pinned Fortran
 output in CI; provenance is recorded
@@ -147,7 +163,8 @@ output in CI; provenance is recorded
 - Each input file is capped at 1 MiB; vectors at 100,000 entries; mesh at
   1,000,000 grid intervals; roots at 20,000 modes; mode shapes at 5,000,000
   values; all mesh searches at 300,000,000 counted operations; pressure grids
-  at 1,000,000 samples and 60,000,000 modal contributions (covering full MunkK).
+  at 1,000,000 samples and 250,000,000 modal contributions (covering original
+  sductK).
 - `mesh_points` = 0 selects the reference's automatic base mesh (at least ten,
   ~20 points per wavelength); otherwise 10–1,000,000 is allowed if not too
   coarse. `max_range_m` = 0 uses the base mesh only; larger values control
@@ -223,10 +240,9 @@ attenuation, normalized/aligned mode shapes, and complex pressure-field samples.
 Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
 the pinned reference workflow numerically compares all seventeen constructed
-KRAKEN fixtures, eight derived KRAKENC modes, two derived KRAKENC FIELD
-fixtures, and unmodified original MunkK and MunkKleaky modes and FIELD. Unmodified
-sduct remains a reference-only smoke test; its nonconstant leaky modes are not
-yet supported.
+KRAKEN fixtures, nine derived KRAKENC modes, three derived KRAKENC FIELD
+fixtures, and unmodified upstream MunkK, MunkKleaky, MunkKwb, MunkKbb and
+sductK modes and FIELD. Original `.mod/.shd` output is not committed.
 
 ## Repository shape
 

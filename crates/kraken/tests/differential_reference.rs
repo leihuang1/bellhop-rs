@@ -58,6 +58,7 @@ fn complex_fluid_modes_match_pinned_fortran() {
         ),
         ("MunkLeakyPartial", "MunkLeakyPartial"),
         ("MunkLeakyPartialLoss", "MunkLeakyPartialLoss"),
+        ("MunkLeakyPartialC", "MunkLeakyPartialC"),
     ] {
         compare_complex(
             &fixtures().join(format!("{name}.env")),
@@ -77,7 +78,7 @@ fn complex_fluid_matches_fresh_reference() {
     let env = fixtures().join(format!("{name}.env"));
     if matches!(
         name.as_str(),
-        "PekerisComplexBlank" | "MunkLeakyPartialLoss"
+        "PekerisComplexBlank" | "MunkLeakyPartialLoss" | "MunkLeakyPartialC"
     ) {
         compare_complex_field(&env, &env.with_extension("flp"), &reference);
     } else {
@@ -86,15 +87,15 @@ fn complex_fluid_matches_fresh_reference() {
 }
 
 #[test]
-#[ignore = "requires unmodified upstream MunkKleaky.env/.flp and pinned Fortran modes/FIELD"]
-fn complex_original_munkleaky_matches_fresh_reference() {
-    let root = PathBuf::from(
-        std::env::var_os("KRAKEN_ORIGINAL_MUNKLEAKY_ROOT")
-            .expect("KRAKEN_ORIGINAL_MUNKLEAKY_ROOT is required"),
-    );
+#[ignore = "requires unmodified upstream complex .env/.flp and pinned Fortran modes/FIELD"]
+fn complex_original_fluid_matches_fresh_reference() {
     let env = PathBuf::from(
-        std::env::var_os("KRAKEN_ORIGINAL_MUNKLEAKY_ENV")
-            .expect("KRAKEN_ORIGINAL_MUNKLEAKY_ENV is required"),
+        std::env::var_os("KRAKEN_ORIGINAL_COMPLEX_ENV")
+            .expect("KRAKEN_ORIGINAL_COMPLEX_ENV is required"),
+    );
+    let root = PathBuf::from(
+        std::env::var_os("KRAKEN_ORIGINAL_COMPLEX_ROOT")
+            .expect("KRAKEN_ORIGINAL_COMPLEX_ROOT is required"),
     );
     compare_complex_field(&env, &env.with_extension("flp"), &root);
 }
@@ -118,12 +119,14 @@ fn complex_line_field_matches_pinned_fortran() {
 
 #[test]
 fn complex_point_field_matches_pinned_fortran() {
-    let env = fixtures().join("MunkLeakyPartialLoss.env");
-    compare_complex_field(
-        &env,
-        &env.with_extension("flp"),
-        &fixtures().join("golden/MunkLeakyPartialLoss"),
-    );
+    for name in ["MunkLeakyPartialLoss", "MunkLeakyPartialC"] {
+        let env = fixtures().join(format!("{name}.env"));
+        compare_complex_field(
+            &env,
+            &env.with_extension("flp"),
+            &fixtures().join("golden").join(name),
+        );
+    }
 }
 
 fn compare_complex_field(env: &Path, flp: &Path, reference: &Path) {

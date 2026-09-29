@@ -64,9 +64,18 @@ fn complex_case_keeps_unsupported_interpolation_and_extrapolation_out() {
     .into_definition();
     let mut extrapolated = base.clone();
     extrapolated.max_range_m = 1000.0;
-    let mut linear_c = base;
+    let mut linear_c = base.clone();
     linear_c.interpolation = kraken::Interpolation::CLinear;
-    for input in [extrapolated, linear_c] {
+    assert_eq!(
+        solve_complex_modes(&Case::from_definition(linear_c).unwrap())
+            .unwrap()
+            .modes
+            .len(),
+        4
+    );
+    let mut pchip = base;
+    pchip.interpolation = kraken::Interpolation::Pchip;
+    for input in [extrapolated, pchip] {
         let report = solve_complex_modes(&Case::from_definition(input).unwrap()).unwrap_err();
         assert_eq!(report.diagnostics()[0].field, "mode_solver");
     }
@@ -525,20 +534,6 @@ fn solver_limits_and_numeric_overflow_are_errors() {
             .diagnostics()[0]
             .code,
         "KR0302"
-    );
-
-    let mut input = definition();
-    input.frequency_hz = 1000.0; // Many modes, but a small mode-sample grid.
-    input.source_depths_m = vec![75.0; 100_000];
-    input.receiver_depths_m = vec![75.0; 5];
-    input.receiver_offsets_m = vec![0.0; 5];
-    input.receiver_ranges_m = vec![500.0, 1000.0]; // 1,000,000 samples: allowed by Case.
-    assert_eq!(
-        solve(&Case::from_definition(input).unwrap())
-            .unwrap_err()
-            .diagnostics()[0]
-            .field,
-        "field_grid"
     );
 
     let mut input = definition();

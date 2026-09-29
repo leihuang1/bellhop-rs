@@ -44,12 +44,12 @@ done
 ```
 
 For the derived KRAKENC Pekeris and reduced 1 km, seven-knot MunkLeakyPartial
-cases (`PekerisComplexBlank` and `MunkLeakyPartialLoss` also have separately
-derived coherent FIELD `.flp` files), run the same pinned Fortran calculation
+cases (`PekerisComplexBlank`, `MunkLeakyPartialLoss` and
+`MunkLeakyPartialC` also have separately derived coherent FIELD `.flp` files), run the same pinned Fortran calculation
 and comparator used by CI:
 
 ```sh
-for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss; do
+for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC; do
   tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
   KRAKEN_COMPLEX_CASE="$case" \
   KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -57,13 +57,22 @@ for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplex
       complex_fluid_matches_fresh_reference -- --ignored --exact --nocapture
 done
 
-# Unlike the derived cases, this pair is byte-for-byte original. The Rust
-# comparison below validates all modes and all FIELD complex pressure samples.
-tools/reference/run-kraken-case.sh krakenc target/reference/cases/MunkKleaky.env
-KRAKEN_ORIGINAL_MUNKLEAKY_ENV="$PWD/target/reference/cases/MunkKleaky.env" \
-KRAKEN_ORIGINAL_MUNKLEAKY_ROOT="$PWD/target/reference/MunkKleaky-krakenc/MunkKleaky" \
-  cargo test --release -p kraken --test differential_reference \
-    complex_original_munkleaky_matches_fresh_reference -- --ignored --exact --nocapture
+# Extract the unmodified upstream inputs from the pinned image, not the
+# derived fixtures. The Rust comparison validates modes and all FIELD samples.
+mkdir -p target/reference/cases
+docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/cases:/out" \
+  --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 -c '
+    for case in MunkKleaky MunkKwb MunkKbb; do
+      cp /opt/acoustics-toolbox/tests/MunkLeaky/$case.env /opt/acoustics-toolbox/tests/MunkLeaky/$case.flp /out/
+    done
+    cp /opt/acoustics-toolbox/tests/sduct/sductK.env /opt/acoustics-toolbox/tests/sduct/sductK.flp /out/'
+for case in MunkKleaky MunkKwb MunkKbb sductK; do
+  tools/reference/run-kraken-case.sh krakenc "target/reference/cases/$case.env"
+  KRAKEN_ORIGINAL_COMPLEX_ENV="$PWD/target/reference/cases/$case.env" \
+  KRAKEN_ORIGINAL_COMPLEX_ROOT="$PWD/target/reference/$case-krakenc/$case" \
+    cargo test --release -p kraken --test differential_reference \
+      complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+done
 ```
 
 This compares every mode and pressure sample, including modal print precision,
@@ -75,8 +84,8 @@ FIELD itself and is not an accepted upstream pair. Raw small reference goldens
 and their [hashes/provenance](../crates/kraken/tests/fixtures/golden/README.md)
 also run in ordinary tests without Docker. MunkBottomLoss, MunkLossless and
 SductTrapped are explicitly derived, reduced-grid fixtures. Unmodified MunkK
-and MunkKleaky are compared end-to-end; unmodified sduct still needs leaky-mode
-support.
+and all four original KRAKENC pairs (MunkKleaky, MunkKwb, MunkKbb, sductK)
+are compared end-to-end; the derived trapped sduct is not the original sduct.
 
 Compare an `R` run against Rust on the host, or on the authoritative pinned
 Linux x86-64 Rust 1.88 environment:

@@ -9,8 +9,9 @@ trapped or rigid-bottom confined modes with optional bottom-half-space `W`
 attenuation, and coherent line- or point-source FIELD. A separate
 KRAKENC slice computes trapped and leaky modes and coherent line-/point-source
 FIELD for lossless `N/C` water, vacuum surface and fluid bottom with optional
-`W` loss, on the base mesh without extrapolation. Unmodified `MunkKleaky`,
-`MunkKwb`, `MunkKbb` and `sductK` `.env/.flp` pairs pass end-to-end differential.
+`W` loss and up to five Richardson-extrapolated meshes. Unmodified
+`MunkKleaky`, `MunkKwb`, `MunkKbb`, `sductK` and `calibK` `.env/.flp` pairs
+pass end-to-end differential.
 It is not the full matrix below; unsupported inputs are rejected.
 
 ## Products
@@ -87,13 +88,17 @@ derivatives still remove the original leaky phase-speed interval; **unmodified**
 The separate KRAKENC `load_complex_case`/`solve_complex_modes` path currently
 supports lossless `N/C`-profile water, vacuum surface, fluid half-space with
 zero or `W` attenuation (including a bottom slower than the water), trapped
-or leaky phase-speed intervals, and `RMax=0`. The KRAKENC legacy reader accepts both blank
-and dotted restart options. The `.env` supplies modal sample depths; `.flp`
+or leaky phase-speed intervals, and non-negative `RMax`. The KRAKENC legacy
+reader accepts both blank and dotted restart options. The `.env` supplies modal sample depths; `.flp`
 supplies FIELD geometry, used by `solve` for coherent line-/point-source
 pressure or ignored by `solve_complex_modes`. The derived
 `PekerisComplex.env` extends Pekeris to `cHigh=2000 m/s` and enables Fortran
-restarts; `PekerisComplexBlank` uses the default restart setting and
-`PekerisComplexSlow` lowers the bottom speed to 1400 m/s.
+restarts; `PekerisComplexBlank` uses the default restart setting. A derived
+`PekerisComplexRefined.env/.flp` lowers NG to 100 and sets `RMax=1000 km`;
+the pinned solver uses mesh multipliers 1/2/4, and all four modes and nine
+pressures match committed and fresh reference. As in Fortran, shapes and group
+speeds come from the first mesh while complex squared wavenumbers are Richardson
+extrapolated. `PekerisComplexSlow` lowers the bottom speed to 1400 m/s.
 `PekerisComplexCLow` uses a 1550 m/s lower phase-speed bound and blank
 restarts, returning only the three in-band modes (the excluded first root is
 still used for deflation). A separate **derived** `PekerisComplexBlank.flp`
@@ -123,7 +128,7 @@ against a committed `.shd` golden and fresh CI output. Another **derived**
 from `N` to `C`: all 30 modes and 36 complex pressures match committed and
 fresh reference. For wide spectral intervals, complex secant seeds subsequent
 roots from the previous root, as in pinned Fortran; the 300-million counted
-root-work limit is unchanged. Three other **unmodified upstream** pairs also
+root-work limit is unchanged. Four other **unmodified upstream** pairs also
 pass fresh `.mod/.prt/.shd` comparison in CI:
 
 | Original input | KRAKENC modes | Complex FIELD pressures |
@@ -131,11 +136,13 @@ pass fresh `.mod/.prt/.shd` comparison in CI:
 | `MunkKwb.env/.flp` (cHigh=1551.91 < bottom speed 1600 m/s) | 63 | 150,801 |
 | `MunkKbb.env/.flp` (cHigh=bottom speed 1600 m/s) | 102 | 150,801 |
 | `sductK.env/.flp` (`C`, cHigh=100000 m/s) | 1,077 | 201,201 |
+| `calibK.env/.flp` (`C`, RMax=1000 km; meshes 1/2/4) | 33 | 101,101 |
 
 Repeated pinned runs produce identical `.mod/.shd` binaries for each original
 pair; the original artifacts stay out of Git. The sduct FIELD has 216,693,477
-modal contributions, below the measured 250-million-work ceiling. Water loss,
-`P/S/A` complex interpolation and refined KRAKENC meshes remain unsupported. Upstream `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
+modal contributions, below the measured 250-million-work ceiling. Water loss
+and `P/S/A` complex interpolation remain unsupported. Upstream
+`tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)
 checks committed `.mod/.shd/.prt` goldens and newly generated pinned Fortran
 output in CI; provenance is recorded
@@ -231,6 +238,7 @@ feature coverage:
 |---|---|
 | Classic modes and FIELD | `tests/Munk/MunkK.env` + `.flp`, `tests/sduct/sductK.env` + `.flp` |
 | Complex/leaky modes | `tests/MunkLeaky/MunkKwb`, `MunkKbb`, `MunkKleaky` |
+| Complex mesh extrapolation | `tests/calib/calibK.env` + `.flp` |
 | Multi-frequency | `tests/BroadBand/MunkK` |
 | Adiabatic and coupled FIELD | `tests/Gulf/gulf_ad.flp`, `gulf_cm.flp` |
 | Reflection inputs | `tests/TabRefCoef/neggradK_*` |
@@ -240,9 +248,9 @@ attenuation, normalized/aligned mode shapes, and complex pressure-field samples.
 Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
 the pinned reference workflow numerically compares all seventeen constructed
-KRAKEN fixtures, nine derived KRAKENC modes, three derived KRAKENC FIELD
-fixtures, and unmodified upstream MunkK, MunkKleaky, MunkKwb, MunkKbb and
-sductK modes and FIELD. Original `.mod/.shd` output is not committed.
+KRAKEN fixtures, ten derived KRAKENC mode fixtures, four derived KRAKENC FIELD
+fixtures, and unmodified upstream MunkK, MunkKleaky, MunkKwb, MunkKbb, sductK
+and calibK modes and FIELD. Original `.mod/.shd` output is not committed.
 
 ## Repository shape
 

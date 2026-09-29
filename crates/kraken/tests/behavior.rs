@@ -54,7 +54,7 @@ fn complex_case_accepts_slow_bottom_and_default_restart_setting() {
 }
 
 #[test]
-fn complex_case_keeps_unsupported_interpolation_and_extrapolation_out() {
+fn complex_case_accepts_extrapolation_but_rejects_unsupported_interpolation() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let base = load_complex_case(
         root.join("PekerisComplexGradient.env"),
@@ -73,12 +73,24 @@ fn complex_case_keeps_unsupported_interpolation_and_extrapolation_out() {
             .len(),
         4
     );
+    assert_eq!(
+        solve_complex_modes(&Case::from_definition(extrapolated).unwrap())
+            .unwrap()
+            .modes
+            .len(),
+        4
+    );
+    let mut unconverged = base.clone();
+    // Exercise the bounded five-mesh failure without constructing a large case.
+    unconverged.mesh_points = 100;
+    unconverged.max_range_m = 1e300;
+    let report = solve_complex_modes(&Case::from_definition(unconverged).unwrap()).unwrap_err();
+    assert_eq!(report.diagnostics()[0].field, "max_range_m");
+
     let mut pchip = base;
     pchip.interpolation = kraken::Interpolation::Pchip;
-    for input in [extrapolated, pchip] {
-        let report = solve_complex_modes(&Case::from_definition(input).unwrap()).unwrap_err();
-        assert_eq!(report.diagnostics()[0].field, "mode_solver");
-    }
+    let report = solve_complex_modes(&Case::from_definition(pchip).unwrap()).unwrap_err();
+    assert_eq!(report.diagnostics()[0].field, "mode_solver");
 }
 
 #[test]

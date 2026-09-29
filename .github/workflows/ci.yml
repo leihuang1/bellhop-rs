@@ -48,12 +48,13 @@ jobs:
                 cp /opt/acoustics-toolbox/tests/MunkLeaky/MunkKleaky.env /opt/acoustics-toolbox/tests/MunkLeaky/MunkKleaky.flp /out/ && \
                 cp /opt/acoustics-toolbox/tests/MunkLeaky/MunkKwb.env /opt/acoustics-toolbox/tests/MunkLeaky/MunkKwb.flp /out/ && \
                 cp /opt/acoustics-toolbox/tests/MunkLeaky/MunkKbb.env /opt/acoustics-toolbox/tests/MunkLeaky/MunkKbb.flp /out/ && \
-                cp /opt/acoustics-toolbox/tests/sduct/sductK.env /opt/acoustics-toolbox/tests/sduct/sductK.flp /out/"
+                cp /opt/acoustics-toolbox/tests/sduct/sductK.env /opt/acoustics-toolbox/tests/sduct/sductK.flp /out/ && \
+                cp /opt/acoustics-toolbox/tests/calib/calibK.env /opt/acoustics-toolbox/tests/calib/calibK.flp /out/"
       - name: Prepare pinned original MunkK modes and FIELD
         run: tools/reference/run-kraken-case.sh kraken target/reference/cases/MunkK.env
       - name: Fluid KRAKENC modes and FIELD numerical differential
         run: |
-          for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC; do
+          for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexRefined PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC; do
             tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
             KRAKEN_COMPLEX_CASE="$case" \
             KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -61,7 +62,7 @@ jobs:
               complex_fluid_matches_fresh_reference -- --ignored --exact --nocapture
           done
           # Compare unmodified original .env/.flp pairs to fresh .mod/.prt/.shd.
-          for case in MunkKleaky MunkKwb MunkKbb sductK; do
+          for case in MunkKleaky MunkKwb MunkKbb sductK calibK; do
             tools/reference/run-kraken-case.sh krakenc "target/reference/cases/$case.env"
             KRAKEN_ORIGINAL_COMPLEX_ENV="$PWD/target/reference/cases/$case.env" \
             KRAKEN_ORIGINAL_COMPLEX_ROOT="$PWD/target/reference/$case-krakenc/$case" \

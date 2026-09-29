@@ -26,8 +26,9 @@ derived KRAKEN trapped-mode comparison; its separate KRAKENC original-pair
 comparison is described below. Measured errors and provenance accompany the goldens.
 Separate KRAKENC regressions compare the **derived**
 `PekerisComplex.env`, its blank-restart and slower-fluid-bottom variants
-(four modes each), and a `cLow=1550 m/s` blank-restart variant (three in-band
-modes), two-point graded `N`-profiles in both directions (four modes each),
+(four modes each), a `cLow=1550 m/s` blank-restart variant (three in-band
+modes), a three-mesh Richardson derivative (four modes and nine pressures),
+two-point graded `N`-profiles in both directions (four modes each),
 and a **derived**, truncated seven-knot MunkLeaky water column with and without
 0.8 dB/wavelength bottom loss (30 modes, nine leaky each) against pinned
 `.mod/.prt` goldens and fresh CI output. A third seven-knot derivative changes
@@ -36,8 +37,9 @@ inputs compare nine complex line-source pressures for `PekerisComplexBlank`
 and 36 point-source pressures for each of the two lossy seven-knot cases with
 committed `.shd` goldens and fresh CI output. Fresh CI compares unmodified
 upstream `MunkKleaky` (329 modes, 150,801 pressures), `MunkKwb` (63, 150,801),
-`MunkKbb` (102, 150,801) and `sductK` (1,077, 201,201) `.env/.flp` pairs
-end to end against `.mod/.prt/.shd`. The `.env` determines modal samples; the
+`MunkKbb` (102, 150,801), `sductK` (1,077, 201,201) and Richardson-refined
+`calibK` (33, 101,101) `.env/.flp` pairs end to end against `.mod/.prt/.shd`.
+The `.env` determines modal samples; the
 `.flp` determines FIELD geometry. A metamorphic
 frequency/depth-scaling test checks that small distinct squared-wavenumbers
 remain separate; it does not claim a fresh Fortran acceptance for scaled

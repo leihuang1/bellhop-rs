@@ -44,17 +44,25 @@ done
 ```
 
 For the modes-only, derived KRAKENC Pekeris cases and the reduced 1 km,
-seven-knot MunkLeakyPartial (not the original MunkKleaky), run the same pinned
-Fortran calculation and comparator used by CI:
+seven-knot MunkLeakyPartial pair (not the original MunkKleaky), run the same
+pinned Fortran calculation and comparator used by CI:
 
 ```sh
-for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial; do
+for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss; do
   tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
   KRAKEN_COMPLEX_CASE="$case" \
   KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
     cargo test --release -p kraken --test differential_reference \
       complex_fluid_matches_fresh_reference -- --ignored --exact --nocapture
 done
+
+# Unlike the derived cases, this pair is byte-for-byte original. The run also
+# smokes Fortran FIELD; the Rust comparison below validates modes only.
+tools/reference/run-kraken-case.sh krakenc target/reference/cases/MunkKleaky.env
+KRAKEN_ORIGINAL_MUNKLEAKY_ENV="$PWD/target/reference/cases/MunkKleaky.env" \
+KRAKEN_ORIGINAL_MUNKLEAKY_ROOT="$PWD/target/reference/MunkKleaky-krakenc/MunkKleaky" \
+  cargo test --release -p kraken --test differential_reference \
+    complex_original_munkleaky_matches_fresh_reference -- --ignored --exact --nocapture
 ```
 
 This compares every mode and pressure sample, including modal print precision,

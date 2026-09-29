@@ -57,6 +57,7 @@ fn complex_fluid_modes_match_pinned_fortran() {
             "PekerisComplexReverseGradient",
         ),
         ("MunkLeakyPartial", "MunkLeakyPartial"),
+        ("MunkLeakyPartialLoss", "MunkLeakyPartialLoss"),
     ] {
         compare_complex(
             &fixtures().join(format!("{name}.env")),
@@ -76,8 +77,26 @@ fn complex_fluid_matches_fresh_reference() {
     compare_complex(&fixtures().join(format!("{name}.env")), &reference);
 }
 
+#[test]
+#[ignore = "requires unmodified upstream MunkKleaky.env/.flp and pinned Fortran modes"]
+fn complex_original_munkleaky_matches_fresh_reference() {
+    let root = PathBuf::from(
+        std::env::var_os("KRAKEN_ORIGINAL_MUNKLEAKY_ROOT")
+            .expect("KRAKEN_ORIGINAL_MUNKLEAKY_ROOT is required"),
+    );
+    let env = PathBuf::from(
+        std::env::var_os("KRAKEN_ORIGINAL_MUNKLEAKY_ENV")
+            .expect("KRAKEN_ORIGINAL_MUNKLEAKY_ENV is required"),
+    );
+    compare_complex_with_flp(&env, &env.with_extension("flp"), &root);
+}
+
 fn compare_complex(env: &Path, reference: &Path) {
-    let case = load_complex_case(env, fixtures().join("Pekeris.flp")).unwrap();
+    compare_complex_with_flp(env, &fixtures().join("Pekeris.flp"), reference);
+}
+
+fn compare_complex_with_flp(env: &Path, flp: &Path, reference: &Path) {
+    let case = load_complex_case(env, flp).unwrap();
     let actual = solve_complex_modes(&case).unwrap();
     let errors = compare_modes(
         &case,

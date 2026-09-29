@@ -28,7 +28,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         || case.bottom_attenuation_db_per_wavelength != 0.0
         || case.max_range_m != 0.0
         || case.c_high_mps <= case.bottom_sound_speed_mps
-        || (case.sound_speed_profile.len() > 2
+        || (case.sound_speed_profile.len() > 7
             && case
                 .sound_speed_profile
                 .iter()
@@ -36,7 +36,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     {
         return Err(error(
             "KR0302",
-            "KRAKENC currently requires a constant or two-point lossless N-profile with a vacuum surface and lossless fluid bottom, leaky spectral interval, and no mesh extrapolation",
+            "KRAKENC currently requires a constant or at most seven-point lossless N-profile with a vacuum surface and lossless fluid bottom, leaky spectral interval, and no mesh extrapolation",
             "mode_solver",
         ));
     }
@@ -178,10 +178,13 @@ fn dispersion(
     water_rho: f64,
     bottom_rho: f64,
     bottom_k2: f64,
-) -> Complex64 {
+) -> (Complex64, i32) {
     let gamma = pekeris_root(x - bottom_k2);
     let mut prev = Complex64::new(-2.0 * bottom_rho, 0.0);
     let mut current = (b[b.len() - 1] - h * h * x) * bottom_rho - 2.0 * h * gamma * water_rho;
+    // Keep the decimal scaling exponent: secant compares evaluations at
+    // different scales after shooting and deflation (as in RootFinderSecant).
+    let mut power = 0;
     for &coefficient in b[..b.len() - 1].iter().rev() {
         let next = (h * h * x - coefficient) * current - prev;
         prev = current;
@@ -189,6 +192,7 @@ fn dispersion(
         if current.re.abs() > 1e50 {
             prev *= 1e-50;
             current *= 1e-50;
+            power += 50;
         }
     }
     // Vacuum top: Delta = -g = p1 (previous), not the next recurrence value.
@@ -197,12 +201,14 @@ fn dispersion(
         value /= x - root;
         if value.re.abs() > 1e50 {
             value *= 1e-50;
+            power += 50;
         }
         if value.re.abs() < 1e-50 && value.norm() > 0.0 {
             value *= 1e50;
+            power -= 50;
         }
     }
-    value
+    (value, power)
 }
 
 #[allow(clippy::cast_precision_loss)]
@@ -217,11 +223,12 @@ fn secant(
 ) -> Result<Complex64, DiagnosticReport> {
     let tolerance = x.norm() * b.len() as f64 * SECANT_RELATIVE_TOLERANCE;
     let mut previous = x + 100.0 * tolerance;
-    let mut f_previous = dispersion(previous, roots, b, h, water_rho, bottom_rho, bottom_k2);
+    let (mut f_previous, mut previous_power) =
+        dispersion(previous, roots, b, h, water_rho, bottom_rho, bottom_k2);
     for _ in 0..1000 {
-        let f = dispersion(x, roots, b, h, water_rho, bottom_rho, bottom_k2);
+        let (f, power) = dispersion(x, roots, b, h, water_rho, bottom_rho, bottom_k2);
         let numerator = f * (x - previous);
-        let denominator = f - f_previous;
+        let denominator = f - f_previous * 10_f64.powi(previous_power - power);
         let shift = if numerator.norm() >= (denominator * x).norm() {
             Complex64::new(0.1 * tolerance, 0.0)
         } else {
@@ -236,6 +243,7 @@ fn secant(
         }
         previous = x;
         f_previous = f;
+        previous_power = power;
         x = next;
     }
     Err(error(
@@ -260,7 +268,7 @@ fn mode(
 ) -> Result<NormalMode, DiagnosticReport> {
     let n = b.len();
     let shift = h * h * x;
-    // ponytail: shooting suffices for this short, gentle gradient; long
+    // ponytail: shooting suffices for the 1 km water column; deeper
     // evanescent columns need scaled shooting or inverse iteration.
     let mut phi = vec![Complex64::new(0.0, 0.0); n];
     phi[1] = Complex64::new(1.0, 0.0);

@@ -56,6 +56,7 @@ fn complex_fluid_modes_match_pinned_fortran() {
             "PekerisComplexReverseGradient",
             "PekerisComplexReverseGradient",
         ),
+        ("MunkLeakyPartial", "MunkLeakyPartial"),
     ] {
         compare_complex(
             &fixtures().join(format!("{name}.env")),

@@ -29,8 +29,7 @@ pub fn load_case(
     )
 }
 
-/// Load a KRAKENC environment and FIELD depth selections for modes-only calculation.
-/// FIELD propagation is not available for KRAKENC yet.
+/// Load a KRAKENC environment and coherent, range-independent FIELD geometry.
 ///
 /// # Errors
 ///

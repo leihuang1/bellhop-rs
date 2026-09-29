@@ -43,9 +43,10 @@ for case in Pekeris PekerisFiltered PekerisDense PekerisDenseLoss PekerisRefined
 done
 ```
 
-For the modes-only, derived KRAKENC Pekeris cases and the reduced 1 km,
-seven-knot MunkLeakyPartial pair (not the original MunkKleaky), run the same
-pinned Fortran calculation and comparator used by CI:
+For the derived KRAKENC Pekeris and reduced 1 km, seven-knot MunkLeakyPartial
+cases (`PekerisComplexBlank` and `MunkLeakyPartialLoss` also have separately
+derived coherent FIELD `.flp` files), run the same pinned Fortran calculation
+and comparator used by CI:
 
 ```sh
 for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss; do
@@ -56,8 +57,8 @@ for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplex
       complex_fluid_matches_fresh_reference -- --ignored --exact --nocapture
 done
 
-# Unlike the derived cases, this pair is byte-for-byte original. The run also
-# smokes Fortran FIELD; the Rust comparison below validates modes only.
+# Unlike the derived cases, this pair is byte-for-byte original. The Rust
+# comparison below validates all modes and all FIELD complex pressure samples.
 tools/reference/run-kraken-case.sh krakenc target/reference/cases/MunkKleaky.env
 KRAKEN_ORIGINAL_MUNKLEAKY_ENV="$PWD/target/reference/cases/MunkKleaky.env" \
 KRAKEN_ORIGINAL_MUNKLEAKY_ROOT="$PWD/target/reference/MunkKleaky-krakenc/MunkKleaky" \
@@ -74,7 +75,8 @@ FIELD itself and is not an accepted upstream pair. Raw small reference goldens
 and their [hashes/provenance](../crates/kraken/tests/fixtures/golden/README.md)
 also run in ordinary tests without Docker. MunkBottomLoss, MunkLossless and
 SductTrapped are explicitly derived, reduced-grid fixtures. Unmodified MunkK
-is now compared end-to-end; unmodified sduct still needs leaky-mode support.
+and MunkKleaky are compared end-to-end; unmodified sduct still needs leaky-mode
+support.
 
 Compare an `R` run against Rust on the host, or on the authoritative pinned
 Linux x86-64 Rust 1.88 environment:

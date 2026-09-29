@@ -505,19 +505,13 @@ pub struct SimulationResult {
     pub field: PressureField,
 }
 
-/// Compute normal modes and the coherent range-independent line-source field.
+/// Compute normal modes and the coherent range-independent line- or point-source field.
 ///
 /// # Errors
 ///
 /// Returns a diagnostic if the phase-speed range contains no supported modes or
 /// the field exceeds the bounded modal-work limit.
 pub fn solve(case: &Case) -> Result<SimulationResult, DiagnosticReport> {
-    if case.mode_solver == ModeSolver::Krakenc {
-        return Err(DiagnosticReport::one(error(
-            "mode_solver",
-            "KRAKENC FIELD is not supported; call solve_complex_modes for modes only",
-        )));
-    }
     solver::solve(case)
 }
 

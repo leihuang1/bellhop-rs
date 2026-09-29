@@ -5,11 +5,14 @@ use crate::{
 use num_complex::{Complex32, Complex64};
 use std::path::Path;
 
-// ponytail: 60m contributions cover full original MunkK; revisit ceiling with measured throughput.
+// ponytail: 60m contributions cover full original MunkK and MunkKleaky; revisit with measured throughput.
 const MAX_FIELD_WORK: usize = 60_000_000;
 
 pub(super) fn solve(case: &Case) -> Result<SimulationResult, DiagnosticReport> {
-    let modes = crate::modes::solve(case)?;
+    let modes = match case.mode_solver {
+        crate::ModeSolver::Kraken => crate::modes::solve(case)?,
+        crate::ModeSolver::Krakenc => crate::complex_modes::solve(case)?,
+    };
     let field = synthesize_field(case, &modes)?;
     Ok(SimulationResult { modes, field })
 }

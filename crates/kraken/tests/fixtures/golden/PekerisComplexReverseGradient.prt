@@ -1,0 +1,54 @@
+ _________________________________________________
+
+ KRAKENC-Pekeris reverse n2-graded water
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   1
+
+
+     N2-Linear approximation to SSP
+     Attenuation units: nepers/m
+     VACUUM
+
+       ( # mesh points =  1000  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1520.00      0.00     1.00       0.0000    0.0000
+    100.00      1500.00      0.00     1.00       0.0000    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     ACOUSTO-ELASTIC half-space
+    100.00      1700.00      0.00     1.50       0.0000    0.0000
+
+ cLow =   1400.0     m/s      cHigh =   2000.0     m/s
+ RMax =   0.0000     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            1
+    Source   z-coordinates, Sz (m)
+                 75.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            3
+    Receiver z-coordinates, Rz (m)
+                 25.0000       75.0000       99.0000
+
+
+ Mesh multiplier   CPU seconds
+ Max. number of restarts in root finder, MaxTries =            1
+        1            0.378E-02s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2065225978       0.0       1521.185907       1498.94
+    2  0.2008499299       0.0       1564.149241       1468.48
+    3  0.1911585563       0.0       1643.448619       1416.39
+    4  0.1769046673     -0.21E-02   1775.867591       1210.22
+ _________________________________________________
+
+ End of environmental file

@@ -7,8 +7,9 @@ Fortran 12.2 environment described in [`reference.md`](reference.md).
 **Status:** `crates/kraken` supports range-independent, single-fluid-layer
 trapped or rigid-bottom confined modes with optional bottom-half-space `W`
 attenuation, and coherent line- or point-source FIELD. A separate **modes-only**
-KRAKENC slice computes leaky modes for a constant, lossless `N` water column,
-vacuum surface and lossless fluid bottom, with a base mesh and no extrapolation.
+KRAKENC slice computes leaky modes for a constant or two-point graded,
+lossless `N` water column, vacuum surface and lossless fluid bottom, with a
+base mesh and no extrapolation.
 It is not the full matrix below; unsupported inputs are rejected.
 
 ## Products
@@ -83,8 +84,9 @@ original `.env/.flp` *pair* is not claimed as accepted. The sduct derivatives
 still remove the original leaky phase-speed interval; unmodified `sductK` is
 not supported.
 The separate KRAKENC `load_complex_case`/`solve_complex_modes` path currently
-supports only a constant, lossless `N`-profile, vacuum surface, lossless fluid
-half-space (including a bottom slower than the water), a leaky phase-speed
+supports only a constant or two-point graded, lossless `N`-profile, vacuum
+surface, lossless fluid half-space (including a bottom slower than the water),
+a leaky phase-speed
 interval, and `RMax=0`. The KRAKENC legacy reader accepts both blank and dotted
 restart options. It uses the `.flp` only to select mode-sampling depths; `solve`
 rejects this case because KRAKENC FIELD is not yet implemented. The derived
@@ -96,8 +98,15 @@ restarts, returning only the three in-band modes (the excluded first root is
 still used for deflation). All modes in these cases are compared against
 committed and fresh v2023.5 `.mod/.prt`; scaled depth/frequency regression
 checks that duplicate-root detection retains distinct modes. Fluid-bottom
-sound speed must be positive for both KRAKEN and KRAKENC.
-Original KRAKENC examples remain reference-only smoke tests. Upstream
+sound speed must be positive for both KRAKEN and KRAKENC. The derived
+`PekerisComplexGradient` and `PekerisComplexReverseGradient` change the
+water SSP endpoints to 1500→1520 and 1520→1500 m/s respectively, exercising
+nonconstant N²-linear water with four modes each, including one leaky mode,
+against the same committed and fresh modal comparator. More
+than two nonconstant SSP knots, water loss, bottom loss and complex FIELD
+remain unsupported; the original `MunkKleaky` (22 knots, `W` bottom loss and
+a much wider spectral interval) and `sductK` (`C` interpolation) remain
+reference-only smoke tests. Upstream
 `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)
 checks committed `.mod/.shd/.prt` goldens and newly generated pinned Fortran

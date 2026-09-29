@@ -44,11 +44,12 @@ done
 ```
 
 For the modes-only, derived KRAKENC Pekeris cases (faster or slower fluid
-bottom, default or explicit restart option, and filtered phase-speed interval),
+bottom, default or explicit restart option, filtered phase-speed interval, and
+two-point graded water columns in both directions),
 run the same pinned Fortran calculation and comparator used by CI:
 
 ```sh
-for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow; do
+for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexGradient PekerisComplexReverseGradient; do
   tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
   KRAKEN_COMPLEX_CASE="$case" \
   KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \

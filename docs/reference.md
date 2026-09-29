@@ -27,7 +27,9 @@ Measured errors and input provenance are recorded alongside the goldens.
 Separate modes-only KRAKENC regressions compare the **derived**
 `PekerisComplex.env`, its blank-restart and slower-fluid-bottom variants
 (four modes each), and a `cLow=1550 m/s` blank-restart variant (three in-band
-modes) against pinned `.mod/.prt` goldens and fresh CI output. A metamorphic
+modes), plus two-point graded `N`-profiles in both directions (four modes
+each) against pinned
+`.mod/.prt` goldens and fresh CI output. A metamorphic
 frequency/depth-scaling test checks that small distinct squared-wavenumbers
 remain separate; it does not claim a fresh Fortran acceptance for scaled
 inputs. None validate complex FIELD or the original MunkLeaky examples.

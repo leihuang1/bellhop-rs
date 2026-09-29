@@ -1,8 +1,8 @@
 // Adapted from Acoustics Toolbox v2023.5 Kraken/krakenc.f90,
 // Kraken/InverseIterationMod.f90 and misc/RootFinderSecantMod.f90.
 // Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
-//! First KRAKENC slice: a lossless, constant-speed fluid water column over a
-//! lossless fluid half-space, vacuum surface, base mesh only, modes only.
+//! Lossless N-profile fluid water column over a lossless fluid half-space,
+//! vacuum surface, base mesh only, modes only.
 use crate::profile::Profile;
 use crate::solver::error;
 use crate::{
@@ -22,27 +22,27 @@ const SECANT_RELATIVE_TOLERANCE: f64 = 1e-14;
     clippy::too_many_lines
 )]
 pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
-    let speed = case.sound_speed_profile.first().map(|p| p.sound_speed_mps);
     if case.interpolation != Interpolation::N2Linear
         || case.surface_boundary != SurfaceBoundary::Vacuum
         || case.bottom_boundary != BottomBoundary::FluidHalfSpace
         || case.bottom_attenuation_db_per_wavelength != 0.0
         || case.max_range_m != 0.0
         || case.c_high_mps <= case.bottom_sound_speed_mps
-        || speed.is_none_or(|c| {
-            case.sound_speed_profile
+        || (case.sound_speed_profile.len() > 2
+            && case
+                .sound_speed_profile
                 .iter()
-                .any(|p| p.sound_speed_mps != c)
-        })
+                .any(|p| p.sound_speed_mps != case.sound_speed_profile[0].sound_speed_mps))
     {
         return Err(error(
             "KR0302",
-            "KRAKENC currently requires a constant, lossless N-profile with a vacuum surface and lossless fluid bottom, leaky spectral interval, and no mesh extrapolation",
+            "KRAKENC currently requires a constant or two-point lossless N-profile with a vacuum surface and lossless fluid bottom, leaky spectral interval, and no mesh extrapolation",
             "mode_solver",
         ));
     }
     let omega = 2.0 * PI * case.frequency_hz;
-    let needed = (case.water_depth_m * case.frequency_hz * 20.0 / speed.unwrap())
+    let needed = (case.water_depth_m * case.frequency_hz * 20.0
+        / case.sound_speed_profile.last().unwrap().sound_speed_mps)
         .floor()
         .max(10.0);
     let n = if case.mesh_points == 0 {
@@ -55,16 +55,18 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     }
     let h = case.water_depth_m / n as f64;
     let profile = Profile::new(case)?;
+    let mut min_speed = f64::INFINITY;
     let b: Vec<_> = (0..=n)
         .map(|i| {
             let c = profile.speed((i as f64 * h).min(case.water_depth_m));
+            min_speed = min_speed.min(c);
             -2.0 + h * h * (omega / c).powi(2)
         })
         .collect();
     let bottom_k2 = (omega / case.bottom_sound_speed_mps).powi(2);
     let low_k2 = (omega / case.c_high_mps).powi(2);
     let high_k2 = (omega / case.c_low_mps).powi(2);
-    let water_k2 = (omega / speed.unwrap()).powi(2);
+    let water_k2 = (omega / min_speed).powi(2);
     if !low_k2.is_finite() || !water_k2.is_finite() || b.iter().any(|x| !x.is_finite()) {
         return Err(error(
             "KR0302",
@@ -72,8 +74,8 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             "mesh_points",
         ));
     }
-    // A constant water column gives an ordered, physically bounded sequence
-    // of vertical half-wave guesses; deflation keeps subsequent secants distinct.
+    // The minimum water speed bounds the first root; deflation keeps
+    // subsequent secants distinct.
     let guesses =
         (case.water_depth_m * (water_k2 - low_k2).max(0.0).sqrt() / PI).ceil() as usize + 1;
     // ponytail: worst-case 1000 secant steps per guess; a counted budget can
@@ -258,8 +260,8 @@ fn mode(
 ) -> Result<NormalMode, DiagnosticReport> {
     let n = b.len();
     let shift = h * h * x;
-    // ponytail: shooting is stable for this constant-water slice; stratified
-    // or long evanescent columns need scaled shooting or inverse iteration.
+    // ponytail: shooting suffices for this short, gentle gradient; long
+    // evanescent columns need scaled shooting or inverse iteration.
     let mut phi = vec![Complex64::new(0.0, 0.0); n];
     phi[1] = Complex64::new(1.0, 0.0);
     for i in 2..n {

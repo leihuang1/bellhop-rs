@@ -1,8 +1,8 @@
 // Adapted from Acoustics Toolbox v2023.5 Kraken/krakenc.f90,
 // Kraken/InverseIterationMod.f90 and misc/RootFinderSecantMod.f90.
 // Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
-//! Lossless N-profile fluid water column over a fluid half-space,
-//! vacuum surface, base mesh only, modes only.
+//! Lossless N/C-profile fluid water column over a fluid half-space,
+//! vacuum surface and base mesh only.
 use crate::profile::Profile;
 use crate::solver::error;
 use crate::{
@@ -22,15 +22,16 @@ const SECANT_RELATIVE_TOLERANCE: f64 = 1e-14;
     clippy::too_many_lines
 )]
 pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
-    if case.interpolation != Interpolation::N2Linear
-        || case.surface_boundary != SurfaceBoundary::Vacuum
+    if !matches!(
+        case.interpolation,
+        Interpolation::N2Linear | Interpolation::CLinear
+    ) || case.surface_boundary != SurfaceBoundary::Vacuum
         || case.bottom_boundary != BottomBoundary::FluidHalfSpace
         || case.max_range_m != 0.0
-        || case.c_high_mps <= case.bottom_sound_speed_mps
     {
         return Err(error(
             "KR0302",
-            "KRAKENC currently requires lossless N-profile water with a vacuum surface, fluid bottom with optional W attenuation, leaky spectral interval, and no mesh extrapolation",
+            "KRAKENC currently requires lossless N/C-profile water with a vacuum surface, fluid bottom with optional W attenuation, and no mesh extrapolation",
             "mode_solver",
         ));
     }
@@ -94,7 +95,16 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let mut reached_lower_limit = false;
     for index in 1..=guesses {
         let vertical = (index as f64 - 0.5) * PI / case.water_depth_m;
-        let guess = Complex64::new(water_k2 - vertical * vertical, 0.0);
+        // ponytail: wide spectral intervals use the previous-root seed from
+        // Fortran; revisit the 10x cutoff if a medium-width spectrum fails.
+        let guess = if case.c_high_mps > 10.0 * case.c_low_mps {
+            roots.last().map_or_else(
+                || Complex64::new(water_k2 - vertical * vertical, 0.0),
+                |&previous| previous * 1.000_01,
+            )
+        } else {
+            Complex64::new(water_k2 - vertical * vertical, 0.0)
+        };
         let root = secant(
             guess,
             &roots,

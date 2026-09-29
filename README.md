@@ -46,11 +46,11 @@ validated single-fluid-layer `N/C/P/S` and fixed analytic Munk `A` sound-speed p
 surface, modes with a fluid (`A`) or rigid (`R`) bottom and optional fluid-bottom
 `W` attenuation, and coherent line- or point-source FIELD. A separate, narrow
 KRAKENC path supports complex modes and coherent line-/point-source FIELD for
-lossless `N/C` water over a fluid bottom with optional `W` loss, covering
-trapped and leaky spectral intervals. Unmodified MunkKleaky, MunkKwb, MunkKbb
-and sductK `.env/.flp` pairs are accepted end to end (1,077 modes and 201,201
-complex pressures for sductK). Its full 2D acceptance
-target and explicit exclusions are in
+lossless `N/C` water over a fluid bottom with optional `W` loss and Richardson
+mesh extrapolation, covering trapped and leaky spectral intervals. Unmodified
+MunkKleaky, MunkKwb, MunkKbb, sductK and refined calibK `.env/.flp` pairs are
+accepted end to end (1,077 modes and 201,201 complex pressures for sductK). Its
+full 2D acceptance target and explicit exclusions are in
 [the KRAKEN compatibility matrix](docs/kraken-compatibility.md).
 
 ## Workspace

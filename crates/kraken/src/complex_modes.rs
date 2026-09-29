@@ -2,7 +2,7 @@
 // Kraken/InverseIterationMod.f90 and misc/RootFinderSecantMod.f90.
 // Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
 //! Lossless N/C-profile fluid water column over a fluid half-space,
-//! vacuum surface and base mesh only.
+//! vacuum surface and optional Richardson mesh extrapolation.
 use crate::profile::Profile;
 use crate::solver::error;
 use crate::{
@@ -27,11 +27,10 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         Interpolation::N2Linear | Interpolation::CLinear
     ) || case.surface_boundary != SurfaceBoundary::Vacuum
         || case.bottom_boundary != BottomBoundary::FluidHalfSpace
-        || case.max_range_m != 0.0
     {
         return Err(error(
             "KR0302",
-            "KRAKENC currently requires lossless N/C-profile water with a vacuum surface, fluid bottom with optional W attenuation, and no mesh extrapolation",
+            "KRAKENC currently requires lossless N/C-profile water with a vacuum surface and fluid bottom with optional W attenuation",
             "mode_solver",
         ));
     }
@@ -40,24 +39,15 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         / case.sound_speed_profile.last().unwrap().sound_speed_mps)
         .floor()
         .max(10.0);
-    let n = if case.mesh_points == 0 {
+    let base = if case.mesh_points == 0 {
         needed as usize
     } else {
         case.mesh_points
     };
-    if !needed.is_finite() || n < needed as usize / 2 || n > crate::MAX_MESH_POINTS {
+    if !needed.is_finite() || base < needed as usize / 2 || base > crate::MAX_MESH_POINTS {
         return Err(error("KR0302", "unsupported KRAKENC mesh", "mesh_points"));
     }
-    let h = case.water_depth_m / n as f64;
     let profile = Profile::new(case)?;
-    let mut min_speed = f64::INFINITY;
-    let b: Vec<_> = (0..=n)
-        .map(|i| {
-            let c = profile.speed((i as f64 * h).min(case.water_depth_m));
-            min_speed = min_speed.min(c);
-            -2.0 + h * h * (omega / c).powi(2)
-        })
-        .collect();
     let bottom_c = Complex64::new(
         case.bottom_sound_speed_mps,
         case.bottom_attenuation_db_per_wavelength * case.bottom_sound_speed_mps
@@ -66,107 +56,182 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let bottom_k2 = (Complex64::new(omega, 0.0) / bottom_c).powi(2);
     let low_k2 = (omega / case.c_high_mps).powi(2);
     let high_k2 = (omega / case.c_low_mps).powi(2);
-    let water_k2 = (omega / min_speed).powi(2);
-    if !low_k2.is_finite()
-        || !water_k2.is_finite()
-        || !bottom_k2.re.is_finite()
-        || !bottom_k2.im.is_finite()
-        || b.iter().any(|x| !x.is_finite())
-    {
+    if !low_k2.is_finite() || !bottom_k2.re.is_finite() || !bottom_k2.im.is_finite() {
         return Err(error(
             "KR0302",
             "mesh coefficients exceed numeric range",
             "mesh_points",
         ));
     }
-    // The minimum water speed bounds the first root; deflation keeps
-    // subsequent secants distinct.
-    let guesses =
-        (case.water_depth_m * (water_k2 - low_k2).max(0.0).sqrt() / PI).ceil() as usize + 1;
-    if guesses > crate::MAX_MODE_LIMIT || guesses == 0 {
-        return Err(error(
-            "KR0302",
-            "complex root work limit exceeded",
-            "mesh_points",
-        ));
-    }
-    let mut roots = Vec::new();
+
+    let mut table: Vec<Vec<Complex64>> = Vec::new();
+    let mut modes = Vec::new();
     let mut work = 0;
-    let mut reached_lower_limit = false;
-    for index in 1..=guesses {
-        let vertical = (index as f64 - 0.5) * PI / case.water_depth_m;
-        // ponytail: wide spectral intervals use the previous-root seed from
-        // Fortran; revisit the 10x cutoff if a medium-width spectrum fails.
-        let guess = if case.c_high_mps > 10.0 * case.c_low_mps {
-            roots.last().map_or_else(
-                || Complex64::new(water_k2 - vertical * vertical, 0.0),
-                |&previous| previous * 1.000_01,
-            )
-        } else {
-            Complex64::new(water_k2 - vertical * vertical, 0.0)
-        };
-        let root = secant(
-            guess,
-            &roots,
-            &b,
-            h,
-            case.water_density_g_cm3,
-            case.bottom_density_g_cm3,
-            bottom_k2,
-            &mut work,
-        )?;
-        if root.re <= low_k2 {
-            reached_lower_limit = true;
-            break;
+    for set in 0..5 {
+        let multiplier = 1_usize << set;
+        let n = base
+            .checked_mul(multiplier)
+            .filter(|&n| n <= crate::MAX_MESH_POINTS)
+            .ok_or_else(|| {
+                error(
+                    "KR0302",
+                    "refined KRAKENC mesh exceeds the mesh limit",
+                    "mesh_points",
+                )
+            })?;
+        let h = case.water_depth_m / n as f64;
+        let mut min_speed = f64::INFINITY;
+        let b: Vec<_> = (0..=n)
+            .map(|i| {
+                let c = profile.speed((i as f64 * h).min(case.water_depth_m));
+                min_speed = min_speed.min(c);
+                -2.0 + h * h * (omega / c).powi(2)
+            })
+            .collect();
+        let water_k2 = (omega / min_speed).powi(2);
+        if !water_k2.is_finite() || b.iter().any(|x| !x.is_finite()) {
+            return Err(error(
+                "KR0302",
+                "mesh coefficients exceed numeric range",
+                "mesh_points",
+            ));
         }
-        // Even excluded roots must be deflated so the next secant finds a new mode.
-        if roots.iter().any(|&previous: &Complex64| {
-            (root - previous).norm()
-                < root.norm().max(previous.norm()) * b.len() as f64 * SECANT_RELATIVE_TOLERANCE
-        }) {
+        // The minimum water speed bounds the first root; deflation keeps
+        // subsequent secants distinct.
+        let guesses =
+            (case.water_depth_m * (water_k2 - low_k2).max(0.0).sqrt() / PI).ceil() as usize + 1;
+        if guesses > crate::MAX_MODE_LIMIT || guesses == 0 {
+            return Err(error(
+                "KR0302",
+                "complex root work limit exceeded",
+                "mesh_points",
+            ));
+        }
+        let mut roots = Vec::new();
+        let mut reached_lower_limit = false;
+        for index in 1..=guesses {
+            let vertical = (index as f64 - 0.5) * PI / case.water_depth_m;
+            // ponytail: wide spectral intervals use the previous-root seed from
+            // Fortran; revisit the 10x cutoff if a medium-width spectrum fails.
+            let guess = if case.c_high_mps > 10.0 * case.c_low_mps {
+                roots.last().map_or_else(
+                    || Complex64::new(water_k2 - vertical * vertical, 0.0),
+                    |&previous| previous * 1.000_01,
+                )
+            } else {
+                Complex64::new(water_k2 - vertical * vertical, 0.0)
+            };
+            let root = secant(
+                guess,
+                &roots,
+                &b,
+                h,
+                case.water_density_g_cm3,
+                case.bottom_density_g_cm3,
+                bottom_k2,
+                &mut work,
+            )?;
+            if root.re <= low_k2 {
+                reached_lower_limit = true;
+                break;
+            }
+            // Even excluded roots must be deflated so the next secant finds a new mode.
+            if roots.iter().any(|&previous: &Complex64| {
+                (root - previous).norm()
+                    < root.norm().max(previous.norm()) * b.len() as f64 * SECANT_RELATIVE_TOLERANCE
+            }) {
+                return Err(error(
+                    "KR0303",
+                    "complex root search repeated a mode",
+                    "phase_speed_limits",
+                ));
+            }
+            roots.push(root);
+        }
+        if !reached_lower_limit {
             return Err(error(
                 "KR0303",
-                "complex root search repeated a mode",
+                "complex root search cannot prove the full spectral interval",
                 "phase_speed_limits",
             ));
         }
-        roots.push(root);
+        let selected: Vec<_> = roots.into_iter().filter(|x| x.re <= high_k2).collect();
+        if selected.is_empty() {
+            return Err(error(
+                "KR0301",
+                "no complex modes inside spectral limits",
+                "phase_speed_limits",
+            ));
+        }
+        // Upstream computes shapes/group speeds only on the first mesh.
+        if set == 0 {
+            if selected
+                .len()
+                .checked_mul(case.mode_sample_depths_m.len())
+                .is_none_or(|w| w > 5_000_000)
+            {
+                return Err(error(
+                    "KR0302",
+                    "mode shape sample limit exceeded",
+                    "mode_sample_depths_m",
+                ));
+            }
+            modes = selected
+                .iter()
+                .map(|&root| mode(case, &b, h, omega, bottom_c, bottom_k2, root))
+                .collect::<Result<Vec<_>, _>>()?;
+        } else if selected.len() != modes.len() {
+            return Err(error(
+                "KR0303",
+                "mode count changed during KRAKENC mesh refinement; move spectral limits away from roots",
+                "phase_speed_limits",
+            ));
+        }
+
+        let key = 2 * modes.len() / 3;
+        let previous = table.first().map(|row| row[key]);
+        table.push(selected);
+        // Richardson-extrapolate complex k² with mesh ratios 1, 2, 4, 8, 16.
+        for j in (0..set).rev() {
+            let denominator = (multiplier as f64 / (1_usize << j) as f64).powi(2) - 1.0;
+            let (earlier, later) = table.split_at_mut(j + 1);
+            for (value, &next) in earlier[j].iter_mut().zip(&later[0]) {
+                *value = next - (*value - next) / denominator;
+            }
+        }
+        let delta = previous.map_or(1e10, |x| (table[0][key] - x).norm());
+        if delta * case.max_range_m < 1.0 {
+            for (mode, &x) in modes.iter_mut().zip(&table[0]) {
+                let k = x.sqrt();
+                mode.horizontal_wavenumber_rad_per_m = k;
+                mode.phase_speed_mps = omega / k.re;
+                mode.attenuation_nepers_per_m = -k.im;
+            }
+            if modes.iter().any(|mode| {
+                !mode.phase_speed_mps.is_finite()
+                    || !mode.group_speed_mps.is_finite()
+                    || !mode.attenuation_nepers_per_m.is_finite()
+                    || !mode.horizontal_wavenumber_rad_per_m.re.is_finite()
+                    || !mode.horizontal_wavenumber_rad_per_m.im.is_finite()
+                    || mode
+                        .eigenfunction
+                        .iter()
+                        .any(|v| !v.re.is_finite() || !v.im.is_finite())
+            }) {
+                return Err(error("KR0303", "invalid complex mode result", "modes"));
+            }
+            return Ok(ModeSet {
+                frequency_hz: case.frequency_hz,
+                sampled_depths_m: case.mode_sample_depths_m.clone(),
+                modes,
+            });
+        }
     }
-    if !reached_lower_limit {
-        return Err(error(
-            "KR0303",
-            "complex root search cannot prove the full spectral interval",
-            "phase_speed_limits",
-        ));
-    }
-    let selected: Vec<_> = roots.into_iter().filter(|x| x.re <= high_k2).collect();
-    if selected.is_empty() {
-        return Err(error(
-            "KR0301",
-            "no complex modes inside spectral limits",
-            "phase_speed_limits",
-        ));
-    }
-    if selected
-        .len()
-        .checked_mul(case.mode_sample_depths_m.len())
-        .is_none_or(|w| w > 5_000_000)
-    {
-        return Err(error(
-            "KR0302",
-            "mode shape sample limit exceeded",
-            "mode_sample_depths_m",
-        ));
-    }
-    let modes = selected
-        .iter()
-        .map(|&root| mode(case, &b, h, omega, bottom_c, bottom_k2, root))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(ModeSet {
-        frequency_hz: case.frequency_hz,
-        sampled_depths_m: case.mode_sample_depths_m.clone(),
-        modes,
-    })
+    Err(error(
+        "KR0303",
+        "KRAKENC eigenvalue extrapolation did not converge within five meshes",
+        "max_range_m",
+    ))
 }
 
 // The upstream PekerisRoot branch is not the principal complex square root.

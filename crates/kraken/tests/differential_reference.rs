@@ -51,6 +51,7 @@ fn complex_fluid_modes_match_pinned_fortran() {
         ("PekerisComplexBlank", "PekerisComplex"),
         ("PekerisComplexSlow", "PekerisComplexSlow"),
         ("PekerisComplexCLow", "PekerisComplexCLow"),
+        ("PekerisComplexRefined", "PekerisComplexRefined"),
         ("PekerisComplexGradient", "PekerisComplexGradient"),
         (
             "PekerisComplexReverseGradient",
@@ -78,7 +79,10 @@ fn complex_fluid_matches_fresh_reference() {
     let env = fixtures().join(format!("{name}.env"));
     if matches!(
         name.as_str(),
-        "PekerisComplexBlank" | "MunkLeakyPartialLoss" | "MunkLeakyPartialC"
+        "PekerisComplexBlank"
+            | "PekerisComplexRefined"
+            | "MunkLeakyPartialLoss"
+            | "MunkLeakyPartialC"
     ) {
         compare_complex_field(&env, &env.with_extension("flp"), &reference);
     } else {
@@ -102,19 +106,21 @@ fn complex_original_fluid_matches_fresh_reference() {
 
 #[test]
 fn complex_line_field_matches_pinned_fortran() {
-    let env = fixtures().join("PekerisComplexBlank.env");
-    let case = load_complex_case(&env, env.with_extension("flp")).unwrap();
-    let actual = solve(&case).unwrap();
-    let error = compare_field(
-        &case,
-        &actual.field,
-        &Records::read(&fixtures().join("golden/PekerisComplexBlank.shd")),
-    );
-    eprintln!(
-        "{}: {} KRAKENC line-source pressures, |dp|={error:e}",
-        env.display(),
-        actual.field.pressure.len()
-    );
+    for name in ["PekerisComplexBlank", "PekerisComplexRefined"] {
+        let env = fixtures().join(format!("{name}.env"));
+        let case = load_complex_case(&env, env.with_extension("flp")).unwrap();
+        let actual = solve(&case).unwrap();
+        let error = compare_field(
+            &case,
+            &actual.field,
+            &Records::read(&fixtures().join("golden").join(name).with_extension("shd")),
+        );
+        eprintln!(
+            "{}: {} KRAKENC line-source pressures, |dp|={error:e}",
+            env.display(),
+            actual.field.pressure.len()
+        );
+    }
 }
 
 #[test]

@@ -44,12 +44,13 @@ done
 ```
 
 For the derived KRAKENC Pekeris and reduced 1 km, seven-knot MunkLeakyPartial
-cases (`PekerisComplexBlank`, `MunkLeakyPartialLoss` and
-`MunkLeakyPartialC` also have separately derived coherent FIELD `.flp` files), run the same pinned Fortran calculation
+cases (`PekerisComplexBlank`, `PekerisComplexRefined`,
+`MunkLeakyPartialLoss` and `MunkLeakyPartialC` also have separately derived
+coherent FIELD `.flp` files), run the same pinned Fortran calculation
 and comparator used by CI:
 
 ```sh
-for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC; do
+for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexRefined PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC; do
   tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
   KRAKEN_COMPLEX_CASE="$case" \
   KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -65,8 +66,9 @@ docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/cases:/ou
     for case in MunkKleaky MunkKwb MunkKbb; do
       cp /opt/acoustics-toolbox/tests/MunkLeaky/$case.env /opt/acoustics-toolbox/tests/MunkLeaky/$case.flp /out/
     done
-    cp /opt/acoustics-toolbox/tests/sduct/sductK.env /opt/acoustics-toolbox/tests/sduct/sductK.flp /out/'
-for case in MunkKleaky MunkKwb MunkKbb sductK; do
+    cp /opt/acoustics-toolbox/tests/sduct/sductK.env /opt/acoustics-toolbox/tests/sduct/sductK.flp /out/
+    cp /opt/acoustics-toolbox/tests/calib/calibK.env /opt/acoustics-toolbox/tests/calib/calibK.flp /out/'
+for case in MunkKleaky MunkKwb MunkKbb sductK calibK; do
   tools/reference/run-kraken-case.sh krakenc "target/reference/cases/$case.env"
   KRAKEN_ORIGINAL_COMPLEX_ENV="$PWD/target/reference/cases/$case.env" \
   KRAKEN_ORIGINAL_COMPLEX_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -84,8 +86,9 @@ FIELD itself and is not an accepted upstream pair. Raw small reference goldens
 and their [hashes/provenance](../crates/kraken/tests/fixtures/golden/README.md)
 also run in ordinary tests without Docker. MunkBottomLoss, MunkLossless and
 SductTrapped are explicitly derived, reduced-grid fixtures. Unmodified MunkK
-and all four original KRAKENC pairs (MunkKleaky, MunkKwb, MunkKbb, sductK)
-are compared end-to-end; the derived trapped sduct is not the original sduct.
+and all five original KRAKENC pairs (MunkKleaky, MunkKwb, MunkKbb, sductK,
+calibK) are compared end-to-end; the derived trapped sduct is not the original
+sduct.
 
 Compare an `R` run against Rust on the host, or on the authoritative pinned
 Linux x86-64 Rust 1.88 environment:

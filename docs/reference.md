@@ -24,19 +24,22 @@ all seventeen cases and the unmodified upstream `MunkK.env`/`.flp` (102 modes,
 The unmodified official sduct case still includes
 leaky modes and is **not** covered by the derived trapped-mode comparison.
 Measured errors and input provenance are recorded alongside the goldens.
-Separate modes-only KRAKENC regressions compare the **derived**
+Separate KRAKENC regressions compare the **derived**
 `PekerisComplex.env`, its blank-restart and slower-fluid-bottom variants
 (four modes each), and a `cLow=1550 m/s` blank-restart variant (three in-band
 modes), two-point graded `N`-profiles in both directions (four modes each),
 and a **derived**, truncated seven-knot MunkLeaky water column with and without
 0.8 dB/wavelength bottom loss (30 modes, nine leaky each) against pinned
-`.mod/.prt` goldens and fresh CI output. The **unmodified upstream**
-`MunkKleaky.env` and `.flp` are now loaded for a separate fresh CI modes-only
-comparison of 329 complex modes. The original `.flp` contributes validated
-FIELD geometry but not Rust mode samples, which come from `.env`; only Fortran
-runs FIELD. A metamorphic frequency/depth-scaling test checks that small
-distinct squared-wavenumbers remain separate; it does not claim a fresh
-Fortran acceptance for scaled inputs. No complex Rust pressure is validated.
+`.mod/.prt` goldens and fresh CI output. Separately derived coherent `.flp`
+inputs compare nine complex line-source pressures for `PekerisComplexBlank`
+and 36 point-source pressures for the lossy seven-knot case with committed
+`.shd` goldens and fresh CI output. The **unmodified upstream**
+`MunkKleaky.env/.flp` pair is compared in fresh CI end to end: all 329 complex
+modes and all 150,801 complex pressures against `.mod/.prt/.shd`. The `.env`
+determines modal samples; the `.flp` determines FIELD geometry. A metamorphic
+frequency/depth-scaling test checks that small distinct squared-wavenumbers
+remain separate; it does not claim a fresh Fortran acceptance for scaled
+inputs.
 
 BELLHOP ray trajectories
 cover all `N/C/P/S/Q/A` sound-speed models. Eigenray and arrival goldens cover

@@ -16,25 +16,22 @@ fn definition() -> CaseDefinition {
 }
 
 #[test]
-fn complex_modes_have_an_explicit_modes_only_boundary() {
+fn complex_modes_and_field_are_independent_products() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let env = root.join("PekerisComplex.env");
     let flp = root.join("Pekeris.flp");
     assert!(load_case(&env, &flp).is_err());
     let case = load_complex_case(env, flp).unwrap();
-    assert_eq!(
-        solve(&case).unwrap_err().diagnostics()[0].field,
-        "mode_solver"
-    );
+    let full = solve(&case).unwrap();
+    assert_eq!(full.modes.modes.len(), 4);
+    assert_eq!(full.field.pressure.len(), 9);
     let mut input = case.into_definition();
     input.mode_limit = 1; // FIELD limit does not truncate the KRAKENC mode file.
-    assert_eq!(
-        solve_complex_modes(&Case::from_definition(input).unwrap())
-            .unwrap()
-            .modes
-            .len(),
-        4
-    );
+    let limited = Case::from_definition(input).unwrap();
+    assert_eq!(solve_complex_modes(&limited).unwrap(), full.modes);
+    let limited = solve(&limited).unwrap();
+    assert_eq!(limited.modes, full.modes);
+    assert!((limited.field.pressure[0] - full.field.pressure[0]).norm() > 1e-6);
 }
 
 #[test]

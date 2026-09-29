@@ -74,11 +74,19 @@ fn complex_fluid_matches_fresh_reference() {
         std::env::var_os("KRAKEN_COMPLEX_REFERENCE_ROOT")
             .expect("KRAKEN_COMPLEX_REFERENCE_ROOT is required"),
     );
-    compare_complex(&fixtures().join(format!("{name}.env")), &reference);
+    let env = fixtures().join(format!("{name}.env"));
+    if matches!(
+        name.as_str(),
+        "PekerisComplexBlank" | "MunkLeakyPartialLoss"
+    ) {
+        compare_complex_field(&env, &env.with_extension("flp"), &reference);
+    } else {
+        compare_complex(&env, &reference);
+    }
 }
 
 #[test]
-#[ignore = "requires unmodified upstream MunkKleaky.env/.flp and pinned Fortran modes"]
+#[ignore = "requires unmodified upstream MunkKleaky.env/.flp and pinned Fortran modes/FIELD"]
 fn complex_original_munkleaky_matches_fresh_reference() {
     let root = PathBuf::from(
         std::env::var_os("KRAKEN_ORIGINAL_MUNKLEAKY_ROOT")
@@ -88,7 +96,50 @@ fn complex_original_munkleaky_matches_fresh_reference() {
         std::env::var_os("KRAKEN_ORIGINAL_MUNKLEAKY_ENV")
             .expect("KRAKEN_ORIGINAL_MUNKLEAKY_ENV is required"),
     );
-    compare_complex_with_flp(&env, &env.with_extension("flp"), &root);
+    compare_complex_field(&env, &env.with_extension("flp"), &root);
+}
+
+#[test]
+fn complex_line_field_matches_pinned_fortran() {
+    let env = fixtures().join("PekerisComplexBlank.env");
+    let case = load_complex_case(&env, env.with_extension("flp")).unwrap();
+    let actual = solve(&case).unwrap();
+    let error = compare_field(
+        &case,
+        &actual.field,
+        &Records::read(&fixtures().join("golden/PekerisComplexBlank.shd")),
+    );
+    eprintln!(
+        "{}: {} KRAKENC line-source pressures, |dp|={error:e}",
+        env.display(),
+        actual.field.pressure.len()
+    );
+}
+
+#[test]
+fn complex_point_field_matches_pinned_fortran() {
+    let env = fixtures().join("MunkLeakyPartialLoss.env");
+    compare_complex_field(
+        &env,
+        &env.with_extension("flp"),
+        &fixtures().join("golden/MunkLeakyPartialLoss"),
+    );
+}
+
+fn compare_complex_field(env: &Path, flp: &Path, reference: &Path) {
+    let case = load_complex_case(env, flp).unwrap();
+    let actual = solve(&case).unwrap();
+    let modes = Records::read(&reference.with_extension("mod"));
+    let field = Records::read(&reference.with_extension("shd"));
+    let printed = fs::read_to_string(reference.with_extension("prt")).unwrap();
+    let errors = compare_modes(&case, &actual.modes, &modes, &printed);
+    let pressure_error = compare_field(&case, &actual.field, &field);
+    eprintln!(
+        "{}: {} KRAKENC modes, {} pressure samples; errors {errors:?}, |dp|={pressure_error:e}",
+        env.display(),
+        actual.modes.modes.len(),
+        actual.field.pressure.len()
+    );
 }
 
 fn compare_complex(env: &Path, reference: &Path) {

@@ -48,9 +48,9 @@ jobs:
                 cp /opt/acoustics-toolbox/tests/MunkLeaky/MunkKleaky.env /opt/acoustics-toolbox/tests/MunkLeaky/MunkKleaky.flp /out/"
       - name: Prepare pinned original MunkK modes and FIELD
         run: tools/reference/run-kraken-case.sh kraken target/reference/cases/MunkK.env
-      - name: Smoke pinned KRAKENC and FIELD
+      - name: Prepare pinned original MunkKleaky modes and FIELD
         run: tools/reference/run-kraken-case.sh krakenc target/reference/cases/MunkKleaky.env
-      - name: Fluid KRAKENC modes numerical differential
+      - name: Fluid KRAKENC modes and FIELD numerical differential
         run: |
           for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss; do
             tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
@@ -59,8 +59,8 @@ jobs:
             cargo test --release -p kraken --test differential_reference \
               complex_fluid_matches_fresh_reference -- --ignored --exact --nocapture
           done
-          # This .env/.flp pair is unmodified; the .flp selects sampling depths only.
-          # Rust KRAKENC FIELD remains unsupported. Reuse the prior Fortran smoke .mod/.prt.
+          # This .env/.flp pair is unmodified. Compare its full .mod/.prt/.shd;
+          # Fortran and Rust both use .env for modal depths and .flp for FIELD geometry.
           KRAKEN_ORIGINAL_MUNKLEAKY_ENV="$PWD/target/reference/cases/MunkKleaky.env" \
           KRAKEN_ORIGINAL_MUNKLEAKY_ROOT="$PWD/target/reference/MunkKleaky-krakenc/MunkKleaky" \
           cargo test --release -p kraken --test differential_reference \

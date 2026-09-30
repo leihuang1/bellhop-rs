@@ -9,6 +9,8 @@ use crate::{
 };
 
 const MAX_PROFILE_POINTS: usize = MAX_VECTOR_LENGTH;
+const MAX_FREQUENCIES: usize = 1000;
+const MAX_FREQUENCY_INPUT_VALUES: usize = 5_000_000;
 
 /// Load the supported single-fluid subset of a KRAKEN `.env` and FIELD `.flp` pair.
 ///
@@ -49,6 +51,31 @@ pub fn load_complex_case(
     )
 }
 
+/// Load one validated case per frequency, in legacy input order.
+///
+/// Each case can be passed to `solve`; results remain frequency-domain products.
+/// Single-frequency inputs also work. Geometry/profile copies are bounded.
+///
+/// # Errors
+///
+/// Returns structured parse, mesh-scaling, and case validation diagnostics.
+pub fn load_frequency_cases(
+    env_path: impl AsRef<Path>,
+    flp_path: impl AsRef<Path>,
+    mode_solver: ModeSolver,
+) -> Result<Vec<Case>, DiagnosticReport> {
+    let env_path = env_path.as_ref();
+    let flp_path = flp_path.as_ref();
+    parse_frequency_cases(
+        &read_file(env_path)?,
+        &read_file(flp_path)?,
+        env_path,
+        flp_path,
+        mode_solver,
+        false,
+    )
+}
+
 fn parse_case(
     env_source: &str,
     flp_source: &str,
@@ -64,7 +91,6 @@ fn parse_case(
     )
 }
 
-#[allow(clippy::float_cmp)]
 fn parse_case_with_solver(
     env_source: &str,
     flp_source: &str,
@@ -72,7 +98,38 @@ fn parse_case_with_solver(
     flp_path: &Path,
     mode_solver: ModeSolver,
 ) -> Result<Case, DiagnosticReport> {
+    parse_frequency_cases(
+        env_source,
+        flp_source,
+        env_path,
+        flp_path,
+        mode_solver,
+        true,
+    )
+    .map(|mut cases| cases.pop().unwrap())
+}
+
+#[allow(clippy::float_cmp, clippy::too_many_lines)]
+fn parse_frequency_cases(
+    env_source: &str,
+    flp_source: &str,
+    env_path: &Path,
+    flp_path: &Path,
+    mode_solver: ModeSolver,
+    single_frequency: bool,
+) -> Result<Vec<Case>, DiagnosticReport> {
     let mut environment = parse_environment_with_solver(env_source, env_path, mode_solver)?;
+    if single_frequency && environment.frequencies_hz.len() != 1 {
+        let (line, column) = environment.locations["frequencies_hz"];
+        return Err(one(
+            "KR0202",
+            "multiple frequencies require load_frequency_cases",
+            "frequencies_hz",
+            env_path,
+            line,
+            column,
+        ));
+    }
     let mut field = parse_field(flp_source, flp_path)?;
     // ReadSzRz stores depths in single precision. Keep an interface sample on
     // the exact validated f64 boundary even when the f32 spelling rounds upward.
@@ -103,10 +160,11 @@ fn parse_case_with_solver(
     };
     let env_locations = environment.locations;
     let field_locations = field.locations;
-    Case::from_definition(CaseDefinition {
+    let definition = CaseDefinition {
         title: environment.title,
         mode_solver,
         frequency_hz: environment.frequency_hz,
+        mesh_reference_frequency_hz: environment.broadband.then_some(environment.frequency_hz),
         water_depth_m: environment.water_depth_m,
         interpolation: environment.interpolation,
         surface_boundary: environment.surface_boundary,
@@ -127,38 +185,88 @@ fn parse_case_with_solver(
         receiver_depths_m: field.receiver_depths,
         receiver_ranges_m: field.receiver_ranges_m,
         receiver_offsets_m: field.receiver_offsets_m,
-    })
-    .map_err(|mut report| {
-        for diagnostic in &mut report.diagnostics {
-            let (locations, path, record) = match diagnostic.field.as_str() {
-                "water_depth_m" | "mesh_points" => (&env_locations, env_path, "water_header"),
-                "sound_speed_profile" | "water_density_g_cm3" => {
-                    (&env_locations, env_path, "sound_speed_profile")
-                }
-                "bottom_sound_speed_mps"
-                | "bottom_density_g_cm3"
-                | "bottom_attenuation_db_per_wavelength" => {
-                    (&env_locations, env_path, bottom_location)
-                }
-                "max_range_m" => (&env_locations, env_path, "max_range_km"),
-                "mode_sample_depths_m" => (&env_locations, env_path, "mode_receiver_depths_m"),
-                "source_depths_m" => (&field_locations, flp_path, "field_source_depths_m"),
-                "receiver_depths_m" => (&field_locations, flp_path, "field_receiver_depths_m"),
-                "receiver_ranges_m" | "field_grid" => {
-                    (&field_locations, flp_path, "receiver_ranges_km")
-                }
-                "receiver_offsets_m" => (&field_locations, flp_path, "receiver_offsets_m"),
-                "mode_limit" => (&field_locations, flp_path, "mode_limit"),
-                other => (&env_locations, env_path, other),
-            };
-            if let Some(&(line, column)) = locations.get(record) {
-                diagnostic.path = path.to_path_buf();
-                diagnostic.line = line;
-                diagnostic.column = column;
-            }
-        }
-        report
-    })
+    };
+    let values = definition.sound_speed_profile.len()
+        + definition.mode_sample_depths_m.len()
+        + definition.source_depths_m.len()
+        + definition.receiver_depths_m.len()
+        + definition.receiver_ranges_m.len()
+        + definition.receiver_offsets_m.len();
+    if values
+        .checked_mul(environment.frequencies_hz.len())
+        .is_none_or(|n| n > MAX_FREQUENCY_INPUT_VALUES)
+    {
+        let &(line, column) = env_locations
+            .get("frequencies_hz")
+            .unwrap_or(&env_locations["frequency_hz"]);
+        return Err(one(
+            "KR0201",
+            "frequency cases exceed the input storage limit",
+            "frequencies_hz",
+            env_path,
+            line,
+            column,
+        ));
+    }
+    environment
+        .frequencies_hz
+        .into_iter()
+        .map(|frequency_hz| {
+            let mut input = definition.clone();
+            input.frequency_hz = frequency_hz;
+            Case::from_definition(input)
+                .and_then(|case| {
+                    if case.mesh_reference_frequency_hz.is_some() {
+                        case.mesh_points_at(1)?;
+                    }
+                    Ok(case)
+                })
+                .map_err(|mut report| {
+                    for diagnostic in &mut report.diagnostics {
+                        let (locations, path, record) = match diagnostic.field.as_str() {
+                            "water_depth_m" | "mesh_points" => {
+                                (&env_locations, env_path, "water_header")
+                            }
+                            "sound_speed_profile" | "water_density_g_cm3" => {
+                                (&env_locations, env_path, "sound_speed_profile")
+                            }
+                            "bottom_sound_speed_mps"
+                            | "bottom_density_g_cm3"
+                            | "bottom_attenuation_db_per_wavelength" => {
+                                (&env_locations, env_path, bottom_location)
+                            }
+                            "max_range_m" => (&env_locations, env_path, "max_range_km"),
+                            "mesh_reference_frequency_hz" => {
+                                (&env_locations, env_path, "frequency_hz")
+                            }
+                            "mode_sample_depths_m" => {
+                                (&env_locations, env_path, "mode_receiver_depths_m")
+                            }
+                            "source_depths_m" => {
+                                (&field_locations, flp_path, "field_source_depths_m")
+                            }
+                            "receiver_depths_m" => {
+                                (&field_locations, flp_path, "field_receiver_depths_m")
+                            }
+                            "receiver_ranges_m" | "field_grid" => {
+                                (&field_locations, flp_path, "receiver_ranges_km")
+                            }
+                            "receiver_offsets_m" => {
+                                (&field_locations, flp_path, "receiver_offsets_m")
+                            }
+                            "mode_limit" => (&field_locations, flp_path, "mode_limit"),
+                            other => (&env_locations, env_path, other),
+                        };
+                        if let Some(&(line, column)) = locations.get(record) {
+                            diagnostic.path = path.to_path_buf();
+                            diagnostic.line = line;
+                            diagnostic.column = column;
+                        }
+                    }
+                    report
+                })
+        })
+        .collect()
 }
 
 fn read_file(path: &Path) -> Result<String, DiagnosticReport> {
@@ -466,6 +574,8 @@ fn number(token: &Token, path: &Path, field: &str) -> Result<f64, DiagnosticRepo
 struct Environment {
     title: String,
     frequency_hz: f64,
+    frequencies_hz: Vec<f64>,
+    broadband: bool,
     water_depth_m: f64,
     interpolation: Interpolation,
     surface_boundary: SurfaceBoundary,
@@ -512,9 +622,10 @@ fn parse_environment_with_solver(
     if !matches!(option(0), b'N' | b'C' | b'P' | b'S' | b'A')
         || !matches!(option(1), b'V' | b'R')
         || !matches!(option(2), b'N' | b'W')
-        || (mode_solver == ModeSolver::Kraken && [option(3), option(4), option(5)] != *b"   ")
-        || (mode_solver == ModeSolver::Krakenc
-            && !matches!([option(3), option(4), option(5)], [b' ', b' ' | b'.', b' ']))
+        || option(3) != b' '
+        || (mode_solver == ModeSolver::Kraken && option(4) != b' ')
+        || (mode_solver == ModeSolver::Krakenc && !matches!(option(4), b' ' | b'.'))
+        || !matches!(option(5), b' ' | b'B')
         || options
             .text
             .as_bytes()
@@ -524,7 +635,7 @@ fn parse_environment_with_solver(
     {
         return Err(one(
             "KR0202",
-            "requires N/C/P/S or fixed analytic A interpolation, vacuum or rigid surface, N/W attenuation without water loss, and one frequency",
+            "requires N/C/P/S or fixed analytic A interpolation, vacuum or rigid surface, N/W attenuation without water loss, and optional B frequencies",
             "top_options",
             path,
             options.line,
@@ -682,11 +793,38 @@ fn parse_environment_with_solver(
     let max_range_m = reader.scalar("max_range_km")? * 1000.0;
     let source_depths = read_vector(&mut reader, "mode_source_depths_m", true)?;
     let receiver_depths = read_vector(&mut reader, "mode_receiver_depths_m", true)?;
+    let broadband = option(5) == b'B';
+    let frequencies_hz = if broadband {
+        let count = reader.count("frequencies_hz.count")?;
+        if count > MAX_FREQUENCIES {
+            return Err(reader_error(
+                &reader,
+                "KR0201",
+                "at most 1000 frequencies are supported",
+                "frequencies_hz.count",
+            ));
+        }
+        // Unlike ReadVector, ReadfreqVec/SubTab preserves frequency order.
+        let frequencies = read_vector_values(&mut reader, "frequencies_hz", count, false)?;
+        if frequencies.iter().any(|&f| f <= 0.0) {
+            return Err(reader_error(
+                &reader,
+                "KR0201",
+                "frequencies must be positive",
+                "frequencies_hz",
+            ));
+        }
+        frequencies
+    } else {
+        vec![frequency_hz]
+    };
     reader.finish()?;
 
     Ok(Environment {
         title,
         frequency_hz,
+        frequencies_hz,
+        broadband,
         water_depth_m,
         interpolation,
         surface_boundary: if option(1) == b'V' {
@@ -723,6 +861,19 @@ fn read_vector(
     single_precision: bool,
 ) -> Result<Vec<f64>, DiagnosticReport> {
     let count = reader.count(&format!("{field}.count"))?;
+    let mut values = read_vector_values(reader, field, count, single_precision)?;
+    // The reference ReadVector sorts each vector, including receiver offsets.
+    values.sort_by(f64::total_cmp);
+    Ok(values)
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+fn read_vector_values(
+    reader: &mut Reader,
+    field: &str,
+    count: usize,
+    single_precision: bool,
+) -> Result<Vec<f64>, DiagnosticReport> {
     let mut values = reader.vector(count, field)?;
     if single_precision {
         for value in &mut values {
@@ -758,8 +909,6 @@ fn read_vector(
             field,
         ));
     }
-    // The reference ReadVector sorts each vector, including receiver offsets.
-    values.sort_by(f64::total_cmp);
     Ok(values)
 }
 
@@ -849,8 +998,107 @@ fn one(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_case, parse_environment, parse_field, read_file};
+    use super::{parse_case, parse_environment, parse_field, parse_frequency_cases, read_file};
     use std::path::Path;
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn broadband_preserves_order_and_scales_before_mesh_rounding() {
+        let env = include_str!("../tests/fixtures/PekerisBroadband.env");
+        let flp = include_str!("../tests/fixtures/PekerisBroadband.flp");
+        let parse = |source: &str| {
+            parse_frequency_cases(
+                source,
+                flp,
+                Path::new("case.env"),
+                Path::new("case.flp"),
+                crate::ModeSolver::Kraken,
+                false,
+            )
+            .unwrap()
+        };
+        let cases = parse(env);
+        assert_eq!(
+            cases.iter().map(|c| c.frequency_hz).collect::<Vec<_>>(),
+            [75.0, 50.0, 62.5]
+        );
+        assert_eq!(cases[0].mesh_reference_frequency_hz, Some(50.0));
+        for (case, expected) in
+            cases
+                .iter()
+                .zip([[151, 303, 606], [101, 202, 404], [126, 252, 505]])
+        {
+            for (multiplier, n) in [1, 2, 4].into_iter().zip(expected) {
+                assert_eq!(case.mesh_points_at(multiplier).unwrap(), n);
+            }
+        }
+        // Resolve NG=0 at freq0 (66), not at the current frequency (100).
+        let automatic = parse(&env.replace("101 0.0", "0 0.0"));
+        assert_eq!(automatic[0].mesh_points_at(1).unwrap(), 99);
+        for frequency in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let mut input = cases[0].clone().into_definition();
+            input.mesh_reference_frequency_hz = Some(frequency);
+            let report = crate::Case::from_definition(input).unwrap_err();
+            assert_eq!(report.diagnostics()[0].field, "mesh_reference_frequency_hz");
+        }
+        let ordered = parse(&env.replace("75.0 50.0 62.5 /", "100.0 50.0 /"));
+        assert_eq!(
+            ordered.iter().map(|c| c.frequency_hz).collect::<Vec<_>>(),
+            [100.0, 75.0, 50.0]
+        );
+        assert_eq!(
+            parse(&env.replace("75.0 50.0 62.5 /", "75.0 75.0 50.0 /"))[1].frequency_hz,
+            75.0
+        );
+        let report =
+            parse_case(env, flp, Path::new("case.env"), Path::new("case.flp")).unwrap_err();
+        assert_eq!(report.diagnostics()[0].field, "frequencies_hz");
+        assert_eq!(report.diagnostics()[0].line, 17);
+    }
+
+    #[test]
+    fn broadband_rejects_bad_frequencies_and_bounded_storage() {
+        let env = include_str!("../tests/fixtures/PekerisBroadband.env");
+        let flp = include_str!("../tests/fixtures/PekerisBroadband.flp");
+        for source in [
+            env.replace("75.0 50.0 62.5 /", "0.0 50.0 62.5 /"),
+            env.replace("75.0 50.0 62.5 /", "NaN 50.0 62.5 /"),
+            env.replace("75.0 50.0 62.5 /", "-75.0 50.0 62.5 /"),
+            env.replace("3\n75.0", "1001\n75.0"),
+            env.replace("75.0 50.0 62.5 /", "75.0 50.0\n"),
+            env.replace("50.0\n1\n", "0.0\n1\n"),
+            env.replace("75.0 50.0 62.5 /", "0.01 50.0 62.5 /"),
+        ] {
+            assert!(
+                parse_frequency_cases(
+                    &source,
+                    flp,
+                    Path::new("case.env"),
+                    Path::new("case.flp"),
+                    crate::ModeSolver::Kraken,
+                    false
+                )
+                .is_err(),
+                "accepted {source}"
+            );
+        }
+        let source = env.replace("3\n75.0 50.0 62.5 /", "100\n50.0 100.0 /");
+        let field = flp.replace("3\n0.5 1.0 2.0 /", "100000\n0.5 2.0 /");
+        let report = parse_frequency_cases(
+            &source,
+            &field,
+            Path::new("case.env"),
+            Path::new("case.flp"),
+            crate::ModeSolver::Kraken,
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            report.diagnostics()[0]
+                .message
+                .contains("input storage limit")
+        );
+    }
 
     #[test]
     fn oversized_files_are_rejected_before_parsing() {

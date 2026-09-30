@@ -49,7 +49,10 @@ KRAKENC path supports complex modes and coherent line-/point-source FIELD for
 lossless `N/C` water over a fluid bottom with optional `W` loss and Richardson
 mesh extrapolation, covering trapped and leaky spectral intervals. Unmodified
 MunkKleaky, MunkKwb, MunkKbb, sductK and refined calibK `.env/.flp` pairs are
-accepted end to end (1,077 modes and 201,201 complex pressures for sductK). Its
+accepted end to end (1,077 modes and 201,201 complex pressures for sductK).
+`legacy::load_frequency_cases` supports discrete multi-frequency KRAKEN/KRAKENC
+runs; original `BroadBand/MunkK` passes at both 50 and 500 Hz (102/1,023 modes,
+1,003,002 total complex pressures). This is not a time-domain response. Its
 full 2D acceptance target and explicit exclusions are in
 [the KRAKEN compatibility matrix](docs/kraken-compatibility.md).
 

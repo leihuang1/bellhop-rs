@@ -147,6 +147,9 @@ pub struct CaseDefinition {
     pub title: String,
     pub mode_solver: ModeSolver,
     pub frequency_hz: f64,
+    /// Nominal frequency for scaling the mesh; `None` uses `frequency_hz`.
+    /// Legacy broadband inputs retain freq0 here, including for automatic meshes.
+    pub mesh_reference_frequency_hz: Option<f64>,
     pub water_depth_m: f64,
     pub interpolation: Interpolation,
     pub surface_boundary: SurfaceBoundary,
@@ -161,7 +164,7 @@ pub struct CaseDefinition {
     /// Bottom half-space attenuation in dB per wavelength (0 for lossless or rigid).
     pub bottom_attenuation_db_per_wavelength: f64,
     pub source_geometry: SourceGeometry,
-    /// Base finite-difference mesh size, or 0 for 20 points per bottom wavelength.
+    /// Mesh intervals at the reference frequency, or 0 for 20 per last-SSP wavelength.
     pub mesh_points: usize,
     pub c_low_mps: f64,
     pub c_high_mps: f64,
@@ -216,6 +219,15 @@ impl Case {
         }
         if definition.frequency_hz <= 0.0 {
             diagnostics.push(error("frequency_hz", "frequency must be positive"));
+        }
+        if definition
+            .mesh_reference_frequency_hz
+            .is_some_and(|frequency| !frequency.is_finite() || frequency <= 0.0)
+        {
+            diagnostics.push(error(
+                "mesh_reference_frequency_hz",
+                "mesh reference frequency must be finite and positive",
+            ));
         }
         if definition.water_depth_m <= 0.0 {
             diagnostics.push(error("water_depth_m", "water depth must be positive"));
@@ -455,6 +467,54 @@ impl Case {
     #[must_use]
     pub fn into_definition(self) -> CaseDefinition {
         self.0
+    }
+
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
+    pub(crate) fn mesh_points_at(&self, multiplier: usize) -> Result<usize, DiagnosticReport> {
+        let reference = self
+            .mesh_reference_frequency_hz
+            .unwrap_or(self.frequency_hz);
+        // Analytic INIT leaves the reference's last-read sound speed at 1500.
+        let last_speed = self
+            .sound_speed_profile
+            .last()
+            .map_or(1500.0, |p| p.sound_speed_mps);
+        let needed = (self.water_depth_m / (last_speed / reference / 20.0))
+            .floor()
+            .max(10.0);
+        let base = if self.mesh_points == 0 {
+            needed
+        } else {
+            self.mesh_points as f64
+        };
+        if !needed.is_finite()
+            || base < (needed as usize / 2) as f64
+            || base > MAX_MESH_POINTS as f64
+        {
+            return Err(solver::error(
+                "KR0302",
+                "mesh is too coarse or exceeds the mesh limit",
+                "mesh_points",
+            ));
+        }
+        // INT(NG * NV * freq / freq0), not INT(NG * freq / freq0) * NV.
+        let scaled = if self.mesh_reference_frequency_hz.is_some() {
+            (base * multiplier as f64 * self.frequency_hz / reference).floor()
+        } else {
+            base * multiplier as f64
+        };
+        if !scaled.is_finite() || !(10.0..=MAX_MESH_POINTS as f64).contains(&scaled) {
+            return Err(solver::error(
+                "KR0302",
+                "scaled or refined mesh exceeds the mesh limits",
+                "mesh_points",
+            ));
+        }
+        Ok(scaled as usize)
     }
 }
 

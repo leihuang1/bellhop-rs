@@ -35,18 +35,6 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         ));
     }
     let omega = 2.0 * PI * case.frequency_hz;
-    let needed = (case.water_depth_m * case.frequency_hz * 20.0
-        / case.sound_speed_profile.last().unwrap().sound_speed_mps)
-        .floor()
-        .max(10.0);
-    let base = if case.mesh_points == 0 {
-        needed as usize
-    } else {
-        case.mesh_points
-    };
-    if !needed.is_finite() || base < needed as usize / 2 || base > crate::MAX_MESH_POINTS {
-        return Err(error("KR0302", "unsupported KRAKENC mesh", "mesh_points"));
-    }
     let profile = Profile::new(case)?;
     let bottom_c = Complex64::new(
         case.bottom_sound_speed_mps,
@@ -69,16 +57,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let mut work = 0;
     for set in 0..5 {
         let multiplier = 1_usize << set;
-        let n = base
-            .checked_mul(multiplier)
-            .filter(|&n| n <= crate::MAX_MESH_POINTS)
-            .ok_or_else(|| {
-                error(
-                    "KR0302",
-                    "refined KRAKENC mesh exceeds the mesh limit",
-                    "mesh_points",
-                )
-            })?;
+        let n = case.mesh_points_at(multiplier)?;
         let h = case.water_depth_m / n as f64;
         let mut min_speed = f64::INFINITY;
         let b: Vec<_> = (0..=n)

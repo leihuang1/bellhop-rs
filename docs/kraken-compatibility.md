@@ -11,8 +11,9 @@ KRAKENC slice computes trapped and leaky modes and coherent line-/point-source
 FIELD for lossless `N/C` water, vacuum surface and fluid bottom with optional
 `W` loss and up to five Richardson-extrapolated meshes. Unmodified
 `MunkKleaky`, `MunkKwb`, `MunkKbb`, `sductK` and `calibK` `.env/.flp` pairs
-pass end-to-end differential.
-It is not the full matrix below; unsupported inputs are rejected.
+pass end-to-end differential. Discrete multi-frequency KRAKEN/KRAKENC cases
+are also supported; unmodified `tests/BroadBand/MunkK.env/.flp` passes at 50
+and 500 Hz. This is not the full matrix below; unsupported inputs are rejected.
 
 ## Products
 
@@ -140,13 +141,45 @@ pass fresh `.mod/.prt/.shd` comparison in CI:
 
 Repeated pinned runs produce identical `.mod/.shd` binaries for each original
 pair; the original artifacts stay out of Git. The sduct FIELD has 216,693,477
-modal contributions, below the measured 250-million-work ceiling. Water loss
+modal contributions, below the 550-million-per-frequency work ceiling. Water loss
 and `P/S/A` complex interpolation remain unsupported. Upstream
 `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)
 checks committed `.mod/.shd/.prt` goldens and newly generated pinned Fortran
 output in CI; provenance is recorded
 [with the goldens](../crates/kraken/tests/fixtures/golden/README.md).
+
+### Multiple frequencies
+
+`legacy::load_frequency_cases(env, flp, ModeSolver)` returns a `Vec<Case>` in
+input frequency order. Each case uses the existing `solve` (or KRAKENC
+`solve_complex_modes`) and produces a separately labelled frequency-domain
+result. `load_case` and `load_complex_case` reject multiple frequencies rather
+than silently taking the first. No batched solver, FFT, time-domain response,
+CLI, JSON or HDF5 adapter is added by this slice.
+
+The sixth top-option character `B` enables a frequency count/vector after
+`.env` source/receiver depths. Frequencies are finite and positive; duplicates
+and descending order are preserved, unlike sorted depth/range vectors. Slash-
+terminated endpoint subtabulation uses double precision. The nominal `freq0`
+remains `CaseDefinition::mesh_reference_frequency_hz = Some(freq0)`; `None`
+uses the single case frequency. Automatic NG is resolved at freq0, then each
+mesh uses `INT(NG * multiplier * frequency / freq0)`, not an already-rounded
+base mesh multiplied afterward. For example NG=101 at freq0=50 Hz gives
+151/303/606 intervals at 75 Hz, and 126/252/505 at 62.5 Hz. Existing `N/W`
+loss semantics remain unchanged; modes and bottom loss are recomputed at every
+frequency, not obtained by scaling a previous mode set.
+
+Two **derived** Pekeris broadband pairs have 75/50/62.5 Hz in that order,
+NG=101 and RMax=1000 km: KRAKEN has 5/3/4 modes, KRAKENC has 7/4/6, with
+nine line-source pressures per frequency. They pass committed and fresh
+`.mod/.prt/.shd` comparisons. The **unmodified upstream**
+`tests/BroadBand/MunkK.env/.flp` uses automatic `S` water sampling and `W`
+bottom loss at 50/500 Hz: 102/1,023 modes, 501,501 pressures per frequency,
+1,003,002 pressures total. Three pinned runs produced identical `.mod/.shd`
+binaries; fresh CI compares both complete frequency blocks. Original artifacts
+are not committed and do not replace the different single-frequency
+`tests/Munk/MunkK` pair.
 
 ### Legacy syntax and limits in this slice
 
@@ -167,11 +200,18 @@ output in CI; provenance is recorded
   this is not a general Fortran list-directed reader. All parsed numbers must
   be finite, SSP depths strictly increase from zero to the interface, and
   semantic diagnostics retain input-file records.
-- Each input file is capped at 1 MiB; vectors at 100,000 entries; mesh at
-  1,000,000 grid intervals; roots at 20,000 modes; mode shapes at 5,000,000
-  values; all mesh searches at 300,000,000 counted operations; pressure grids
-  at 1,000,000 samples and 250,000,000 modal contributions (covering original
-  sductK).
+- Each input file is capped at 1 MiB; vectors at 100,000 entries; frequency
+  count at 1,000; cloned frequency-case input vectors at 5,000,000 values.
+  Per frequency: mesh at 1,000,000 grid intervals; roots at 20,000 modes;
+  mode shapes at 5,000,000 values; all KRAKEN mesh searches at 2,500,000,000
+  conservative operations and KRAKENC at 300,000,000 counted operations;
+  pressure grids at 1,000,000 samples and 550,000,000 modal contributions.
+  The larger KRAKEN/FIELD work bounds cover original BroadBand/MunkK at
+  500 Hz (2,273,677,857 conservative root operations, 513,035,523 FIELD
+  contributions); numerical tolerances are unchanged. There is no batched
+  execution/output allocation: the loader bounds cumulative input copies,
+  while callers can solve and discard results one frequency at a time. Work
+  limits apply to each `solve`, not cumulatively across separate calls.
 - `mesh_points` = 0 selects the reference's automatic base mesh (at least ten,
   ~20 points per wavelength); otherwise 10–1,000,000 is allowed if not too
   coarse. `max_range_m` = 0 uses the base mesh only; larger values control
@@ -248,9 +288,11 @@ attenuation, normalized/aligned mode shapes, and complex pressure-field samples.
 Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
 the pinned reference workflow numerically compares all seventeen constructed
-KRAKEN fixtures, ten derived KRAKENC mode fixtures, four derived KRAKENC FIELD
-fixtures, and unmodified upstream MunkK, MunkKleaky, MunkKwb, MunkKbb, sductK
-and calibK modes and FIELD. Original `.mod/.shd` output is not committed.
+single-frequency KRAKEN fixtures, ten derived single-frequency KRAKENC mode
+fixtures, four derived single-frequency KRAKENC FIELD fixtures, two broadband
+Pekeris derivatives, and unmodified upstream MunkK, MunkKleaky, MunkKwb,
+MunkKbb, sductK, calibK and BroadBand/MunkK modes and FIELD. Original
+`.mod/.shd` output is not committed.
 
 ## Repository shape
 

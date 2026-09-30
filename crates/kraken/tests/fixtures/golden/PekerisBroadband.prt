@@ -1,0 +1,100 @@
+ _________________________________________________
+
+ KRAKEN- Derived broadband Pekeris, unsorted frequencies and fractional meshes
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   1
+
+
+     N2-Linear approximation to SSP
+     Attenuation units: dB/wavelength
+     VACUUM
+
+       ( # mesh points =   101  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1500.00      0.00     1.00       0.0000    0.0000
+    100.00      1500.00      0.00     1.00       0.0000    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     ACOUSTO-ELASTIC half-space
+    100.00      1700.00      0.00     1.50       0.8000    0.0000
+
+ cLow =   1400.0     m/s      cHigh =   1700.0     m/s
+ RMax =   1000.0     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            1
+    Source   z-coordinates, Sz (m)
+                 75.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            3
+    Receiver z-coordinates, Rz (m)
+                 25.0000       75.0000       99.0000
+
+ __________________________________________________________________________
+
+
+    Number of frequencies =           3
+    Frequencies (Hz)
+   75.0000       50.0000       62.5000
+ __________________________________________________________________________
+
+ Frequency =   75.00     Hz
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            5
+        1            0.311E-02s
+                --- Number of modes =            5
+        2            0.740E-03s
+        4            0.462E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.3128591156     -0.12E-04   1506.233555       1494.88
+    2  0.3089032320     -0.46E-04   1525.522718       1478.94
+    3  0.3021416036     -0.10E-03   1559.662398       1451.00
+    4  0.2923751281     -0.19E-03   1611.761237       1410.10
+    5  0.2795166003     -0.51E-03   1685.906660       1303.61
+ __________________________________________________________________________
+
+ Frequency =   50.00     Hz
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            3
+        1            0.318E-03s
+                --- Number of modes =            3
+        2            0.284E-03s
+        4            0.104E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2076474935     -0.23E-04   1512.945136       1490.29
+    2  0.2020993574     -0.89E-04   1554.479289       1458.65
+    3  0.1924258779     -0.23E-03   1632.624826       1401.09
+ __________________________________________________________________________
+
+ Frequency =   62.50     Hz
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            4
+        1            0.337E-03s
+                --- Number of modes =            4
+        2            0.329E-03s
+        4            0.134E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2602922761     -0.16E-04   1508.685112       1493.12
+    2  0.2556774467     -0.62E-04   1535.916002       1471.36
+    3  0.2477170863     -0.14E-03   1585.272488       1432.66
+    4  0.2361922733     -0.34E-03   1662.624590       1368.79
+ _________________________________________________
+
+ End of environmental file

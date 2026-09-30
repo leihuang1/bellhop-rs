@@ -77,10 +77,37 @@ for case in MunkKleaky MunkKwb MunkKbb sductK calibK; do
 done
 ```
 
+For multi-frequency runs, the same comparator reads every frequency block in
+`.mod/.prt/.shd`. The two Pekeris inputs below are **derived**; the extracted
+BroadBand/MunkK pair is **unmodified upstream**, distinct from tests/Munk/MunkK:
+
+```sh
+for case in PekerisBroadband PekerisComplexBroadband; do
+  engine=kraken
+  if [ "$case" = PekerisComplexBroadband ]; then engine=krakenc; fi
+  tools/reference/run-kraken-case.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
+  KRAKEN_FREQUENCY_SOLVER="$engine" \
+  KRAKEN_DIFFERENTIAL_ENV="$PWD/crates/kraken/tests/fixtures/$case.env" \
+  KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/$case-$engine/$case" \
+    cargo test --release -p kraken --test differential_reference \
+      multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+done
+mkdir -p target/reference/cases/BroadBand
+docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/cases/BroadBand:/out" \
+  --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 -c \
+  'cp /opt/acoustics-toolbox/tests/BroadBand/MunkK.env /opt/acoustics-toolbox/tests/BroadBand/MunkK.flp /out/'
+tools/reference/run-kraken-case.sh kraken target/reference/cases/BroadBand/MunkK.env target/reference/BroadBand-MunkK-kraken
+KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
+KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK" \
+  cargo test --release -p kraken --test differential_reference \
+    multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+```
+
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
-seventeen cases with fixed tolerances, plus the full unmodified upstream MunkK
-pair and the unmodified upstream MunkAnalytic `.env` with a derived coherent
+seventeen single-frequency cases and two derived broadband cases with fixed
+tolerances, plus the full unmodified upstream MunkK and BroadBand/MunkK pairs
+and the unmodified upstream MunkAnalytic `.env` with a derived coherent
 FIELD `.flp`. The original MunkAnalytic three-line `.flp` fails in v2023.5
 FIELD itself and is not an accepted upstream pair. Raw small reference goldens
 and their [hashes/provenance](../crates/kraken/tests/fixtures/golden/README.md)

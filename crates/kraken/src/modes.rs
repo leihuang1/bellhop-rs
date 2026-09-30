@@ -8,15 +8,15 @@
 use crate::profile::Profile;
 use crate::solver::error;
 use crate::{
-    BottomBoundary, Case, DiagnosticReport, MAX_MESH_POINTS, MAX_MODE_LIMIT, ModeSet, NormalMode,
-    SurfaceBoundary,
+    BottomBoundary, Case, DiagnosticReport, MAX_MODE_LIMIT, ModeSet, NormalMode, SurfaceBoundary,
 };
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
 const MAX_SHAPES: usize = 5_000_000;
-// ponytail: fixed numerical work budget; parallel root searches only if real cases require it.
-const MAX_WORK: usize = 300_000_000;
+// ponytail: 2.5b conservative work covers BroadBand/MunkK at 500 Hz (2.28b);
+// use measured root work or faster isolation if larger spectra are required.
+const MAX_WORK: usize = 2_500_000_000;
 const ROOT_STEPS: usize = 64;
 
 #[allow(
@@ -42,36 +42,14 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         )
     };
     let profile = Profile::new(case)?;
-    // Analytic INIT does not read points, leaving Fortran's alphaR default at 1500.
-    let last_speed = case
-        .sound_speed_profile
-        .last()
-        .map_or(1500.0, |p| p.sound_speed_mps);
-    let needed = (case.water_depth_m / (last_speed / case.frequency_hz / 20.0))
-        .floor()
-        .max(10.0);
-    if !needed.is_finite()
-        || !omega.is_finite()
+    if !omega.is_finite()
         || !bottom_k2.is_finite()
         || !bottom_complex_k2.re.is_finite()
         || !bottom_complex_k2.im.is_finite()
-        || needed > 2.0 * MAX_MESH_POINTS as f64
     {
         return Err(error(
             "KR0302",
             "frequency/profile requires an unsupported mesh",
-            "mesh_points",
-        ));
-    }
-    let base = if case.mesh_points == 0 {
-        needed as usize
-    } else {
-        case.mesh_points
-    };
-    if base < needed as usize / 2 || base > MAX_MESH_POINTS {
-        return Err(error(
-            "KR0302",
-            "mesh is too coarse or exceeds the mesh limit",
             "mesh_points",
         ));
     }
@@ -80,16 +58,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let mut work = 0_usize;
     for set in 0..5 {
         let multiplier = 1 << set;
-        let n = base
-            .checked_mul(multiplier)
-            .filter(|n| *n <= MAX_MESH_POINTS)
-            .ok_or_else(|| {
-                error(
-                    "KR0302",
-                    "refined mesh exceeds the mesh limit",
-                    "mesh_points",
-                )
-            })?;
+        let n = case.mesh_points_at(multiplier)?;
         let mesh = Mesh::new(case, &profile, n, omega, bottom_k2, bottom_complex_k2)?;
         let roots = mesh.roots(&mut work)?;
         if set == 0 {
@@ -524,7 +493,7 @@ mod tests {
         let linear = Case::from_definition(input.clone()).unwrap();
         assert!((Profile::new(&linear).unwrap().speed(50.0) - 1550.0).abs() < 1e-12);
         input.frequency_hz = 1000.0;
-        input.mesh_points = 100_000;
+        input.mesh_points = 1_000_000;
         let report = solve(&Case::from_definition(input).unwrap()).unwrap_err();
         assert!(report.diagnostics()[0].message.contains("work limit"));
     }

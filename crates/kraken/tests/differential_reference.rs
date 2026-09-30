@@ -1,11 +1,11 @@
-//! Test-only reader for pinned little-endian, single-frequency fluid .mod/.shd files.
+//! Test-only reader for pinned little-endian, single-profile fluid .mod/.shd files.
 //! These binary formats are reference artifacts, not a production output contract.
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use kraken::{
     Case, ModeSet, PressureField,
-    legacy::{load_case, load_complex_case},
+    legacy::{load_case, load_complex_case, load_frequency_cases},
     solve, solve_complex_modes,
 };
 use num_complex::Complex64;
@@ -172,6 +172,37 @@ fn compare_complex_with_flp(env: &Path, flp: &Path, reference: &Path) {
 }
 
 #[test]
+fn multifrequency_modes_and_field_match_pinned_goldens() {
+    for (name, solver) in [
+        ("PekerisBroadband", kraken::ModeSolver::Kraken),
+        ("PekerisComplexBroadband", kraken::ModeSolver::Krakenc),
+    ] {
+        compare_frequencies(
+            &fixtures().join(name).with_extension("env"),
+            &fixtures().join("golden").join(name),
+            solver,
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires pinned multi-frequency Fortran modes and FIELD"]
+fn multifrequency_fluid_matches_fresh_reference() {
+    let env = PathBuf::from(
+        std::env::var_os("KRAKEN_DIFFERENTIAL_ENV").expect("KRAKEN_DIFFERENTIAL_ENV is required"),
+    );
+    let reference = PathBuf::from(
+        std::env::var_os("KRAKEN_DIFFERENTIAL_ROOT").expect("KRAKEN_DIFFERENTIAL_ROOT is required"),
+    );
+    let solver = if std::env::var("KRAKEN_FREQUENCY_SOLVER").as_deref() == Ok("krakenc") {
+        kraken::ModeSolver::Krakenc
+    } else {
+        kraken::ModeSolver::Kraken
+    };
+    compare_frequencies(&env, &reference, solver);
+}
+
+#[test]
 #[ignore = "requires a pinned external Fortran reference run"]
 fn fluid_matches_fresh_reference() {
     let env =
@@ -198,6 +229,35 @@ fn compare(env: &Path, reference: &Path) {
     );
 }
 
+fn compare_frequencies(env: &Path, reference: &Path, solver: kraken::ModeSolver) {
+    let cases = load_frequency_cases(env, env.with_extension("flp"), solver).unwrap();
+    let modes = Records::read(&reference.with_extension("mod"));
+    let field = Records::read(&reference.with_extension("shd"));
+    let printed = fs::read_to_string(reference.with_extension("prt")).unwrap();
+    assert_eq!(
+        count(modes.record(0), 84),
+        cases.len(),
+        "mode frequency count"
+    );
+    assert_eq!(
+        count(field.record(2), 0),
+        cases.len(),
+        "FIELD frequency count"
+    );
+    for (index, case) in cases.iter().enumerate() {
+        let result = solve(case).unwrap();
+        let errors = compare_modes_at(case, &result.modes, &modes, &printed, index);
+        let pressure_error = compare_field_at(case, &result.field, &field, index);
+        eprintln!(
+            "{}: {} Hz, {} modes, {} pressures; errors {errors:?}, |dp|={pressure_error:e}",
+            env.display(),
+            case.frequency_hz,
+            result.modes.modes.len(),
+            result.field.pressure.len()
+        );
+    }
+}
+
 fn close(actual: f64, expected: f64, tolerance: f64, field: &str) -> f64 {
     let error = (actual - expected).abs();
     assert!(
@@ -211,15 +271,32 @@ fn complex_close(actual: Complex64, expected: Complex64, tolerance: f64, field: 
     close((actual - expected).norm(), 0.0, tolerance, field)
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
 fn compare_modes(
     case: &Case,
     actual: &ModeSet,
     file: &Records,
     printed: &str,
 ) -> (f64, f64, f64, f64) {
+    assert_eq!(count(file.record(0), 84), 1, "mode frequency count");
+    compare_modes_at(case, actual, file, printed, 0)
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
+fn compare_modes_at(
+    case: &Case,
+    actual: &ModeSet,
+    file: &Records,
+    printed: &str,
+    frequency_index: usize,
+) -> (f64, f64, f64, f64) {
     let header = file.record(0);
-    assert_eq!(count(header, 84), 1, "mode frequency count");
+    assert!(frequency_index < count(header, 84));
+    close(
+        actual.frequency_hz,
+        case.frequency_hz,
+        0.0,
+        "result frequency",
+    );
     assert_eq!(count(header, 88), 1, "medium count");
     assert_eq!(
         count(header, 92),
@@ -233,7 +310,7 @@ fn compare_modes(
     );
     assert_eq!(&file.record(1)[4..12], b"ACOUSTIC", "fluid material");
     close(
-        double(file.record(3), 0),
+        double(file.record(3), 8 * frequency_index),
         case.frequency_hz,
         1e-12,
         "mode frequency",
@@ -246,18 +323,26 @@ fn compare_modes(
             "mode depth",
         );
     }
-    let mode_count = count(file.record(5), 0);
-    assert_eq!(mode_count, actual.modes.len(), "mode count");
     let modes_per_record = file.record_bytes / 8;
-    assert_eq!(
-        file.len(),
-        7 + mode_count + mode_count.div_ceil(modes_per_record),
-        "mode file record count"
-    );
+    let mut first = 5;
+    for _ in 0..frequency_index {
+        let modes = count(file.record(first), 0);
+        first += 2 + modes + modes.div_ceil(modes_per_record);
+    }
+    let mode_count = count(file.record(first), 0);
+    assert_eq!(mode_count, actual.modes.len(), "mode count");
+    if frequency_index + 1 == count(header, 84) {
+        assert_eq!(
+            file.len(),
+            first + 2 + mode_count + mode_count.div_ceil(modes_per_record),
+            "mode file record count"
+        );
+    }
 
     // .prt preserves extrapolated k to ten decimal places; .mod stores complex32.
-    let (_, table) = printed
-        .split_once("Group Speed\n")
+    let table = printed
+        .split("Group Speed\n")
+        .nth(frequency_index + 1)
         .expect("modal print table");
     let rows: Vec<_> = table
         .lines()
@@ -313,7 +398,7 @@ fn compare_modes(
         close(mode.group_speed_mps, values[3], 0.005, "group speed");
     }
     for (index, mode) in actual.modes.iter().enumerate() {
-        let k_record = file.record(7 + mode_count + index / modes_per_record);
+        let k_record = file.record(first + 2 + mode_count + index / modes_per_record);
         let stored = complex(k_record, 8 * (index % modes_per_record));
         close(
             f64::from(mode.horizontal_wavenumber_rad_per_m.re as f32),
@@ -333,7 +418,7 @@ fn compare_modes(
             },
             "imaginary wavenumber (.mod)",
         ));
-        let shape = file.record(7 + index);
+        let shape = file.record(first + 2 + index);
         assert_eq!(mode.eigenfunction.len(), actual.sampled_depths_m.len());
         let reference: Vec<_> = (0..mode.eigenfunction.len())
             .map(|i| complex(shape, 8 * i))
@@ -356,11 +441,23 @@ fn compare_modes(
     (max_k, max_loss, max_binary_loss, max_shape)
 }
 
-#[allow(clippy::cast_possible_truncation)]
 fn compare_field(case: &Case, actual: &PressureField, file: &Records) -> f64 {
+    assert_eq!(count(file.record(2), 0), 1, "FIELD frequency count");
+    compare_field_at(case, actual, file, 0)
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn compare_field_at(
+    case: &Case,
+    actual: &PressureField,
+    file: &Records,
+    frequency_index: usize,
+) -> f64 {
     assert_eq!(&file.record(1)[..10], b"          ", "FIELD plot type");
     let header = file.record(2);
-    for offset in [0, 4, 8, 12] {
+    let frequencies = count(header, 0);
+    assert!(frequency_index < frequencies);
+    for offset in [4, 8, 12] {
         assert_eq!(count(header, offset), 1, "frequency/bearing/x/y count");
     }
     assert_eq!(count(header, 16), actual.source_depths_m.len());
@@ -368,7 +465,7 @@ fn compare_field(case: &Case, actual: &PressureField, file: &Records) -> f64 {
     assert_eq!(count(header, 24), actual.receiver_ranges_m.len());
     // FIELD leaves header freq0 unset; freqVec is the authoritative frequency.
     close(
-        double(file.record(3), 0),
+        double(file.record(3), 8 * frequency_index),
         case.frequency_hz,
         1e-12,
         "field frequency",
@@ -394,11 +491,14 @@ fn compare_field(case: &Case, actual: &PressureField, file: &Records) -> f64 {
     assert_eq!(actual.receiver_offsets_m, case.receiver_offsets_m);
     let rows = actual.source_depths_m.len() * actual.receiver_depths_m.len();
     let ranges = actual.receiver_ranges_m.len();
-    assert_eq!(file.len(), 10 + rows, "field record count");
+    assert_eq!(file.len(), 10 + frequencies * rows, "field record count");
     assert_eq!(actual.pressure.len(), rows * ranges);
     let mut maximum = 0.0_f64;
     for (index, &pressure) in actual.pressure.iter().enumerate() {
-        let expected = complex(file.record(10 + index / ranges), 8 * (index % ranges));
+        let expected = complex(
+            file.record(10 + frequency_index * rows + index / ranges),
+            8 * (index % ranges),
+        );
         maximum = maximum.max(complex_close(
             pressure,
             expected,
@@ -458,6 +558,35 @@ fn double(bytes: &[u8], offset: usize) -> f64 {
 
 fn complex(bytes: &[u8], offset: usize) -> Complex64 {
     Complex64::new(single(bytes, offset), single(bytes, offset + 4))
+}
+
+#[test]
+fn multifrequency_comparator_detects_later_frequency_corruption() {
+    let root = fixtures().join("PekerisBroadband");
+    let cases = load_frequency_cases(
+        root.with_extension("env"),
+        root.with_extension("flp"),
+        kraken::ModeSolver::Kraken,
+    )
+    .unwrap();
+    let case = &cases[1];
+    let result = solve(case).unwrap();
+    let root = fixtures().join("golden/PekerisBroadband");
+    let mut modes = Records::read(&root.with_extension("mod"));
+    let printed = fs::read_to_string(root.with_extension("prt")).unwrap();
+    let first_count = count(modes.record(5), 0);
+    let first = 7 + first_count + first_count.div_ceil(modes.record_bytes / 8);
+    let offset = (first + 2 + result.modes.modes.len()) * modes.record_bytes;
+    modes.bytes[offset..offset + 4].copy_from_slice(&f32::NAN.to_le_bytes());
+    assert!(
+        std::panic::catch_unwind(|| compare_modes_at(case, &result.modes, &modes, &printed, 1))
+            .is_err()
+    );
+    let mut field = Records::read(&root.with_extension("shd"));
+    let rows = case.source_depths_m.len() * case.receiver_depths_m.len();
+    let offset = (10 + rows) * field.record_bytes;
+    field.bytes[offset..offset + 4].copy_from_slice(&f32::NAN.to_le_bytes());
+    assert!(std::panic::catch_unwind(|| compare_field_at(case, &result.field, &field, 1)).is_err());
 }
 
 #[test]

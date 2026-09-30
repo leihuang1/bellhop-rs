@@ -10,7 +10,7 @@ The compatibility oracle is the official Acoustics Toolbox release `v2023.5`:
 Small BELLHOP numerical goldens are committed under
 `crates/bellhop/tests/fixtures/golden`. Their per-file provenance, hashes,
 compiler, target, and flags are recorded alongside them. KRAKEN has seventeen
-constructed fluid cases (twelve lossless, five with bottom loss) and raw
+constructed single-frequency fluid cases (twelve lossless, five with bottom loss) and raw
 `.mod/.shd/.prt` goldens with
 [provenance and hashes](../crates/kraken/tests/fixtures/golden/README.md).
 `tools/reference/compare-kraken.sh CASE.env` regenerates reference outputs and
@@ -44,6 +44,18 @@ The `.env` determines modal samples; the
 frequency/depth-scaling test checks that small distinct squared-wavenumbers
 remain separate; it does not claim a fresh Fortran acceptance for scaled
 inputs.
+
+Discrete multi-frequency regressions use two **derived** Pekeris `.env/.flp`
+pairs (KRAKEN and KRAKENC): unsorted 75/50/62.5 Hz, fractional mesh scaling,
+three refinement levels, `W` bottom loss, and nine pressures per frequency.
+Committed `.mod/.prt/.shd` and fresh CI compare every frequency block. Fresh
+CI also compares the **unmodified** `tests/BroadBand/MunkK.env/.flp`:
+102 modes at 50 Hz, 1,023 at 500 Hz, and 501,501 pressures at each frequency
+(1,003,002 total). Three pinned runs yield identical `.mod/.shd`. The reference
+reader checks frequency order, per-frequency mode counts and offsets, shapes,
+printed/binary wavenumbers, group speeds and every pressure; a later-frequency
+corruption regression ensures no frequency is skipped. These are frequency-
+domain results, not a wideband time-domain acceptance.
 
 BELLHOP ray trajectories
 cover all `N/C/P/S/Q/A` sound-speed models. Eigenray and arrival goldens cover

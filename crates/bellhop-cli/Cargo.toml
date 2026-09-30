@@ -9,6 +9,8 @@ repository.workspace = true
 [[bin]]
 name = "bellhop"
 path = "src/main.rs"
+# The library owns the bellhop rustdoc output directory.
+doc = false
 
 [dependencies]
 bellhop = { path = "../bellhop" }

@@ -1,0 +1,108 @@
+ _________________________________________________
+
+ KRAKENC-Derived broadband complex Pekeris, fractional meshes
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   1
+
+
+     N2-Linear approximation to SSP
+     Attenuation units: dB/wavelength
+     VACUUM
+
+       ( # mesh points =   101  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1500.00      0.00     1.00       0.0000    0.0000
+    100.00      1500.00      0.00     1.00       0.0000    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     ACOUSTO-ELASTIC half-space
+    100.00      1700.00      0.00     1.50       0.8000    0.0000
+
+ cLow =   1400.0     m/s      cHigh =   2000.0     m/s
+ RMax =   1000.0     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            1
+    Source   z-coordinates, Sz (m)
+                 75.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            3
+    Receiver z-coordinates, Rz (m)
+                 25.0000       75.0000       99.0000
+
+ __________________________________________________________________________
+
+
+    Number of frequencies =           3
+    Frequencies (Hz)
+   75.0000       50.0000       62.5000
+ __________________________________________________________________________
+
+ Frequency =   75.00     Hz
+
+ Mesh multiplier   CPU seconds
+ Max. number of restarts in root finder, MaxTries =            1
+        1            0.351E-02s
+ Max. number of restarts in root finder, MaxTries =            1
+        2            0.934E-03s
+ Max. number of restarts in root finder, MaxTries =            1
+        4            0.300E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.3128586095     -0.12E-04   1506.235992       1494.90
+    2  0.3089015198     -0.46E-04   1525.531174       1479.05
+    3  0.3021385549     -0.10E-03   1559.678136       1451.35
+    4  0.2923712014     -0.19E-03   1611.782883       1411.69
+    5  0.2795338825     -0.52E-03   1685.802429       1367.97
+    6  0.2621952563     -0.24E-02   1797.282318       1256.28
+    7  0.2386807728     -0.42E-02   1974.347965       1141.67
+ __________________________________________________________________________
+
+ Frequency =   50.00     Hz
+
+ Mesh multiplier   CPU seconds
+ Max. number of restarts in root finder, MaxTries =            1
+        1            0.720E-03s
+ Max. number of restarts in root finder, MaxTries =            1
+        2            0.441E-03s
+ Max. number of restarts in root finder, MaxTries =            1
+        4            0.138E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2076466194     -0.23E-04   1512.951505       1490.36
+    2  0.2020968065     -0.89E-04   1554.498910       1459.10
+    3  0.1924236608     -0.23E-03   1632.643637       1405.91
+    4  0.1780992117     -0.19E-02   1763.956518       1285.17
+ __________________________________________________________________________
+
+ Frequency =   62.50     Hz
+
+ Mesh multiplier   CPU seconds
+ Max. number of restarts in root finder, MaxTries =            1
+        1            0.783E-03s
+ Max. number of restarts in root finder, MaxTries =            1
+        2            0.711E-03s
+ Max. number of restarts in root finder, MaxTries =            1
+        4            0.245E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2602916201     -0.16E-04   1508.688914       1493.16
+    2  0.2556753455     -0.62E-04   1535.928624       1471.55
+    3  0.2477136580     -0.14E-03   1585.294428       1433.52
+    4  0.2361939245     -0.34E-03   1662.612967       1384.17
+    5  0.2201822090     -0.22E-02   1783.518675       1267.51
+    6  0.1966758630     -0.44E-02   1996.681625       1107.60
+ _________________________________________________
+
+ End of environmental file

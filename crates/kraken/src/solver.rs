@@ -5,8 +5,9 @@ use crate::{
 use num_complex::{Complex32, Complex64};
 use std::path::Path;
 
-// ponytail: 250m contributions cover original sductK's 217m; revisit with measured throughput.
-const MAX_FIELD_WORK: usize = 250_000_000;
+// ponytail: 550m contributions cover BroadBand/MunkK's 513m per frequency;
+// precompute modal phases only if measured throughput requires it.
+const MAX_FIELD_WORK: usize = 550_000_000;
 
 pub(super) fn solve(case: &Case) -> Result<SimulationResult, DiagnosticReport> {
     let modes = match case.mode_solver {
@@ -176,7 +177,7 @@ fn field_work_is_bounded_before_modal_products() {
     let modes = ModeSet {
         frequency_hz: case.frequency_hz,
         sampled_depths_m: case.mode_sample_depths_m.clone(),
-        modes: vec![mode; 251],
+        modes: vec![mode; 551],
     };
     assert_eq!(
         synthesize_field(&case, &modes).unwrap_err().diagnostics()[0].field,

@@ -101,6 +101,44 @@ jobs:
           KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK" \
             cargo test --release -p kraken --test differential_reference \
               multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+      - name: KRAKEN CLI HDF5 numerical differential
+        run: |
+          cargo build --release -p kraken-cli
+          for case in PekerisBroadband PekerisComplexBroadband; do
+            engine=kraken
+            if [ "$case" = PekerisComplexBroadband ]; then engine=krakenc; fi
+            output="$PWD/target/reference/$case-$engine/$case.h5"
+            target/release/kraken run "crates/kraken/tests/fixtures/$case.env" --solver "$engine" --output "$output"
+            KRAKEN_HDF5_RESULT="$output" \
+            KRAKEN_FREQUENCY_SOLVER="$engine" \
+            KRAKEN_DIFFERENTIAL_ENV="$PWD/crates/kraken/tests/fixtures/$case.env" \
+            KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/$case-$engine/$case" \
+              cargo test --release -p kraken --test differential_reference \
+                multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+          done
+          for case in MunkKleaky MunkKwb MunkKbb sductK calibK; do
+            output="$PWD/target/reference/$case-krakenc/$case.h5"
+            target/release/kraken run "target/reference/cases/$case.env" --solver krakenc --output "$output"
+            KRAKEN_HDF5_RESULT="$output" \
+            KRAKEN_ORIGINAL_COMPLEX_ENV="$PWD/target/reference/cases/$case.env" \
+            KRAKEN_ORIGINAL_COMPLEX_ROOT="$PWD/target/reference/$case-krakenc/$case" \
+              cargo test --release -p kraken --test differential_reference \
+                complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+          done
+          output="$PWD/target/reference/MunkK-kraken/MunkK.h5"
+          target/release/kraken run target/reference/cases/MunkK.env --output "$output"
+          KRAKEN_HDF5_RESULT="$output" \
+          KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/MunkK.env" \
+          KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/MunkK-kraken/MunkK" \
+            cargo test --release -p kraken --test differential_reference \
+              fluid_matches_fresh_reference -- --ignored --exact --nocapture
+          output="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK.h5"
+          target/release/kraken run target/reference/cases/BroadBand/MunkK.env --output "$output"
+          KRAKEN_HDF5_RESULT="$output" \
+          KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
+          KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK" \
+            cargo test --release -p kraken --test differential_reference \
+              multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
       - name: Critical boundary/interface rays
         run: tools/reference/check-critical-rays.sh
       - name: Official full-grid coherent field (MunkB_Coh)

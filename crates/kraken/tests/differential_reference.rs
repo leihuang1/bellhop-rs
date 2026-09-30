@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use kraken::{
-    Case, ModeSet, PressureField,
+    Case, ModeSet, NormalMode, PressureField, SimulationResult,
     legacy::{load_case, load_complex_case, load_frequency_cases},
     solve, solve_complex_modes,
 };
@@ -137,7 +137,7 @@ fn complex_point_field_matches_pinned_fortran() {
 
 fn compare_complex_field(env: &Path, flp: &Path, reference: &Path) {
     let case = load_complex_case(env, flp).unwrap();
-    let actual = solve(&case).unwrap();
+    let actual = result_for_comparison(&case, 0, 1);
     let modes = Records::read(&reference.with_extension("mod"));
     let field = Records::read(&reference.with_extension("shd"));
     let printed = fs::read_to_string(reference.with_extension("prt")).unwrap();
@@ -214,7 +214,7 @@ fn fluid_matches_fresh_reference() {
 
 fn compare(env: &Path, reference: &Path) {
     let case = load_case(env, env.with_extension("flp")).unwrap();
-    let actual = solve(&case).unwrap();
+    let actual = result_for_comparison(&case, 0, 1);
     let modes = Records::read(&reference.with_extension("mod"));
     let field = Records::read(&reference.with_extension("shd"));
     let printed = fs::read_to_string(reference.with_extension("prt")).unwrap();
@@ -245,7 +245,7 @@ fn compare_frequencies(env: &Path, reference: &Path, solver: kraken::ModeSolver)
         "FIELD frequency count"
     );
     for (index, case) in cases.iter().enumerate() {
-        let result = solve(case).unwrap();
+        let result = result_for_comparison(case, index, cases.len());
         let errors = compare_modes_at(case, &result.modes, &modes, &printed, index);
         let pressure_error = compare_field_at(case, &result.field, &field, index);
         eprintln!(
@@ -256,6 +256,134 @@ fn compare_frequencies(env: &Path, reference: &Path, solver: kraken::ModeSolver)
             result.field.pressure.len()
         );
     }
+}
+
+// Optional CLI-produced HDF5 input exercises the same strict Fortran comparator,
+// rather than trusting only the solver result before serialization.
+fn result_for_comparison(case: &Case, index: usize, frequencies: usize) -> SimulationResult {
+    let Some(path) = std::env::var_os("KRAKEN_HDF5_RESULT") else {
+        return solve(case).unwrap();
+    };
+    let file = hdf5::File::open(path).unwrap();
+    assert_eq!(hdf5_attribute(&file, "schema_name"), "kraken");
+    assert_eq!(
+        file.attr("schema_version")
+            .unwrap()
+            .read_scalar::<u32>()
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        file.attr("frequency_count")
+            .unwrap()
+            .read_scalar::<u64>()
+            .unwrap(),
+        frequencies as u64
+    );
+    assert_eq!(
+        hdf5_attribute(&file, "solver"),
+        match case.mode_solver {
+            kraken::ModeSolver::Kraken => "kraken",
+            kraken::ModeSolver::Krakenc => "krakenc",
+        }
+    );
+    assert_eq!(
+        file.group("frequencies")
+            .unwrap()
+            .member_names()
+            .unwrap()
+            .len(),
+        frequencies
+    );
+    let frequency_vector = hdf5_data::<f64>(&file, "frequency_hz", &[frequencies]);
+    close(
+        frequency_vector[index],
+        case.frequency_hz,
+        0.0,
+        "HDF5 frequency",
+    );
+    let group = file.group(&format!("frequencies/{index}")).unwrap();
+    let frequency_hz = group
+        .attr("frequency_hz")
+        .unwrap()
+        .read_scalar::<f64>()
+        .unwrap();
+    let modes = hdf5_modes(
+        &group.group("modes").unwrap(),
+        frequency_hz,
+        case.mode_sample_depths_m.len(),
+    );
+    let field = group.group("field").unwrap();
+    assert_eq!(
+        hdf5_attribute(&field, "pressure_axis_order"),
+        "source_depth,receiver_depth,receiver_range"
+    );
+    let sources = case.source_depths_m.len();
+    let depths = case.receiver_depths_m.len();
+    let ranges = case.receiver_ranges_m.len();
+    let real = hdf5_data::<f32>(&field, "pressure_real", &[sources, depths, ranges]);
+    let imaginary = hdf5_data::<f32>(&field, "pressure_imaginary", &[sources, depths, ranges]);
+    SimulationResult {
+        modes,
+        field: PressureField {
+            source_depths_m: hdf5_data(&field, "source_depth_m", &[sources]),
+            receiver_depths_m: hdf5_data(&field, "receiver_depth_m", &[depths]),
+            receiver_ranges_m: hdf5_data(&field, "receiver_range_m", &[ranges]),
+            receiver_offsets_m: hdf5_data(&field, "receiver_offset_m", &[depths]),
+            pressure: real
+                .into_iter()
+                .zip(imaginary)
+                .map(|(r, i)| Complex64::new(f64::from(r), f64::from(i)))
+                .collect(),
+        },
+    }
+}
+
+fn hdf5_modes(group: &hdf5::Group, frequency_hz: f64, depths: usize) -> ModeSet {
+    assert_eq!(
+        hdf5_attribute(group, "eigenfunction_axis_order"),
+        "mode,sample_depth"
+    );
+    let count = group.dataset("horizontal_wavenumber_real").unwrap().size();
+    let real = hdf5_data::<f64>(group, "horizontal_wavenumber_real", &[count]);
+    let imaginary = hdf5_data::<f64>(group, "horizontal_wavenumber_imaginary", &[count]);
+    let phase = hdf5_data::<f64>(group, "phase_speed_mps", &[count]);
+    let speed = hdf5_data::<f64>(group, "group_speed_mps", &[count]);
+    let attenuation = hdf5_data::<f64>(group, "attenuation_nepers_per_m", &[count]);
+    let shape_real = hdf5_data::<f64>(group, "eigenfunction_real", &[count, depths]);
+    let shape_imaginary = hdf5_data::<f64>(group, "eigenfunction_imaginary", &[count, depths]);
+    ModeSet {
+        frequency_hz,
+        sampled_depths_m: hdf5_data(group, "sample_depth_m", &[depths]),
+        modes: (0..count)
+            .map(|index| NormalMode {
+                horizontal_wavenumber_rad_per_m: Complex64::new(real[index], imaginary[index]),
+                phase_speed_mps: phase[index],
+                group_speed_mps: speed[index],
+                attenuation_nepers_per_m: attenuation[index],
+                eigenfunction: (index * depths..(index + 1) * depths)
+                    .map(|sample| Complex64::new(shape_real[sample], shape_imaginary[sample]))
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+fn hdf5_data<T: hdf5::H5Type>(group: &hdf5::Group, name: &str, shape: &[usize]) -> Vec<T> {
+    let dataset = group.dataset(name).unwrap();
+    assert_eq!(dataset.shape(), shape, "HDF5 {name} shape");
+    assert!(dataset.dtype().unwrap().is::<T>(), "HDF5 {name} datatype");
+    dataset.read_raw().unwrap()
+}
+
+fn hdf5_attribute(location: &hdf5::Location, name: &str) -> String {
+    location
+        .attr(name)
+        .unwrap()
+        .read_scalar::<hdf5::types::VarLenUnicode>()
+        .unwrap()
+        .as_str()
+        .to_owned()
 }
 
 fn close(actual: f64, expected: f64, tolerance: f64, field: &str) -> f64 {

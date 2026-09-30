@@ -57,6 +57,16 @@ printed/binary wavenumbers, group speeds and every pressure; a later-frequency
 corruption regression ensures no frequency is skipped. These are frequency-
 domain results, not a wideband time-domain acceptance.
 
+The [KRAKEN CLI/HDF5 adapter](kraken-output-format.md) is independently checked
+through its actual serialized output: `KRAKEN_HDF5_RESULT` makes the same test-only
+comparator read `.h5` modes and FIELD instead of recomputing the in-memory
+result. Fresh CI exercises both Pekeris broadband derivatives, original MunkK,
+all five original KRAKENC pairs and original BroadBand/MunkK through this path,
+with every frequency/sample and unchanged tolerances. Schema/metadata/units,
+exact Rust-value round-trips and file/quota failure protections also run without
+Docker. Existing BELLHOP schema-v3 tests remain unchanged; Rust `.h5` output is
+not a Fortran golden.
+
 BELLHOP ray trajectories
 cover all `N/C/P/S/Q/A` sound-speed models. Eigenray and arrival goldens cover
 Cartesian and ray-centered geometric-hat beams, Cartesian geometric-Gaussian

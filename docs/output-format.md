@@ -1,4 +1,7 @@
-# HDF5 output schema
+# BELLHOP HDF5 output schema
+
+KRAKEN/KRAKENC use a [separate schema v1](kraken-output-format.md); this
+BELLHOP v3 contract is unchanged.
 
 Schema version 3 is written by both `bellhop run` and `POST /v1/run` through the
 shared `bellhop-hdf5` crate. The CLI installs a file only after a complete

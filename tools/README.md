@@ -103,6 +103,24 @@ KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK" \
     multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
 ```
 
+To validate the actual Rust [CLI/HDF5 product](../docs/kraken-output-format.md),
+set `KRAKEN_HDF5_RESULT` for the same comparator. With the fresh reference above:
+
+```sh
+cargo run --release -p kraken-cli -- run target/reference/cases/BroadBand/MunkK.env \
+  --output target/reference/BroadBand-MunkK-kraken/MunkK.h5 --overwrite
+KRAKEN_HDF5_RESULT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK.h5" \
+KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
+KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK" \
+  cargo test --release -p kraken --test differential_reference \
+    multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+```
+
+CI additionally runs this serialized-output path for both broadband Pekeris
+derivatives, original single-frequency MunkK and all five original KRAKENC
+pairs. The optional reader checks schema identity, native datatypes, axes and
+all values; numerical tolerances are shared with the direct solver path.
+
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
 seventeen single-frequency cases and two derived broadband cases with fixed

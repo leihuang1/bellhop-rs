@@ -1,0 +1,116 @@
+ _________________________________________________
+
+ KRAKEN- Derived WaterLossPower: water/material attenuation
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   1
+
+
+     C-Linear approximation to SSP
+     Attenuation units: dB/m with a power law and transition frequency
+     VACUUM
+
+( # mesh points =   101  RMS roughness =   0.00     beta =   1.50     fT =   60.00     )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1500.00      0.00     1.00       0.0010    0.0000
+     43.00      1530.00      0.00     1.00       0.0008    0.0000
+    100.00      1500.00      0.00     1.00       0.0007    0.0000
+
+                      ( RMS roughness =   0.00     beta =  0.750     fT =   70.0     )
+     ACOUSTO-ELASTIC half-space
+    100.00      1700.00      0.00     1.50       0.0074    0.0000
+
+ cLow =   1400.0     m/s      cHigh =   1700.0     m/s
+ RMax =   1000.0     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            1
+    Source   z-coordinates, Sz (m)
+                 75.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            3
+    Receiver z-coordinates, Rz (m)
+                 25.0000       75.0000       99.0000
+
+ __________________________________________________________________________
+
+
+    Number of frequencies =           4
+    Frequencies (Hz)
+   75.0000       50.0000       62.5000       50.0000
+ __________________________________________________________________________
+
+ Frequency =   75.00     Hz
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            4
+        1            0.325E-02s
+                --- Number of modes =            4
+        2            0.675E-03s
+        4            0.452E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.3091989378     -0.15E-03   1524.063767       1510.91
+    2  0.3057950017     -0.17E-03   1541.028779       1494.90
+    3  0.2991298893     -0.19E-03   1575.365468       1465.90
+    4  0.2892361356     -0.22E-03   1629.253195       1425.73
+ __________________________________________________________________________
+
+ Frequency =   50.00     Hz
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            3
+        1            0.420E-03s
+                --- Number of modes =            3
+        2            0.360E-03s
+        4            0.138E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2051901000     -0.10E-03   1531.064439       1508.65
+    2  0.2000867004     -0.12E-03   1570.115678       1473.70
+    3  0.1905097569     -0.18E-03   1649.045543       1420.72
+ __________________________________________________________________________
+
+ Frequency =   62.50     Hz
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            4
+        1            0.489E-03s
+                --- Number of modes =            4
+        2            0.358E-03s
+        4            0.204E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2572129300     -0.13E-03   1526.747048       1510.47
+    2  0.2531241950     -0.15E-03   1551.408714       1486.79
+    3  0.2452405450     -0.18E-03   1601.281231       1447.56
+    4  0.2337053576     -0.26E-03   1680.316984       1398.91
+ __________________________________________________________________________
+
+ Frequency =   50.00     Hz
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            3
+        1            0.318E-03s
+                --- Number of modes =            3
+        2            0.229E-03s
+        4            0.155E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2051901000     -0.10E-03   1531.064439       1508.65
+    2  0.2000867004     -0.12E-03   1570.115678       1473.70
+    3  0.1905097569     -0.18E-03   1649.045543       1420.72
+ _________________________________________________
+
+ End of environmental file

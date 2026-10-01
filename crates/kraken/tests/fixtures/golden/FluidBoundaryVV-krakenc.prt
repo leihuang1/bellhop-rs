@@ -1,0 +1,57 @@
+ _________________________________________________
+
+ KRAKENC-Derived smooth V/V boundaries with spline water absorption
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   1
+
+
+     Spline approximation to SSP
+     Attenuation units: dB/wavelength
+     VACUUM
+
+       ( # mesh points =   101  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1500.00      0.00     1.00       0.0300    0.0000
+     43.00      1530.00      0.00     1.00       0.0250    0.0000
+    100.00      1500.00      0.00     1.00       0.0200    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     VACUUM
+
+ cLow =   1400.0     m/s      cHigh =   1700.0     m/s
+ RMax =   1000.0     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            1
+    Source   z-coordinates, Sz (m)
+                 75.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            5
+    Receiver z-coordinates, Rz (m)
+                 0.00000       25.0000       75.0000       99.0000
+   100.000
+
+
+ Mesh multiplier   CPU seconds
+ Max. number of restarts in root finder, MaxTries =            1
+        1            0.277E-02s
+ Max. number of restarts in root finder, MaxTries =            1
+        2            0.289E-03s
+ Max. number of restarts in root finder, MaxTries =            1
+        4            0.850E-04s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2034032025     -0.93E-04   1544.514843       1508.19
+    2  0.1966494463     -0.97E-04   1597.559877       1449.31
+ _________________________________________________
+
+ End of environmental file

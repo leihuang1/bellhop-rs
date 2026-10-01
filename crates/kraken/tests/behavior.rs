@@ -99,16 +99,20 @@ fn complex_case_accepts_extrapolation_and_lossless_cubic_profiles() {
         );
     }
     for boundary in ["surface", "bottom"] {
-        let mut unsupported = base.clone();
+        let mut rigid = base.clone();
         if boundary == "surface" {
-            unsupported.surface_boundary = SurfaceBoundary::Rigid;
+            rigid.surface_boundary = SurfaceBoundary::Rigid;
         } else {
-            unsupported.bottom_boundary = BottomBoundary::Rigid;
-            unsupported.bottom_sound_speed_mps = 0.0;
-            unsupported.bottom_density_g_cm3 = 0.0;
+            rigid.bottom_boundary = BottomBoundary::Rigid;
+            rigid.bottom_sound_speed_mps = 0.0;
+            rigid.bottom_density_g_cm3 = 0.0;
         }
-        let report = solve_complex_modes(&Case::from_definition(unsupported).unwrap()).unwrap_err();
-        assert_eq!(report.diagnostics()[0].field, "mode_solver");
+        assert_ne!(
+            solve_complex_modes(&Case::from_definition(rigid).unwrap())
+                .unwrap()
+                .modes,
+            [] as [kraken::NormalMode; 0]
+        );
     }
 }
 
@@ -255,7 +259,7 @@ fn analytic_munk_requires_the_fixed_lossless_water_column() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/MunkAnalytic");
     let case = load_case(root.with_extension("env"), root.with_extension("flp")).unwrap();
     assert_eq!(case.interpolation, kraken::Interpolation::AnalyticMunk);
-    assert!(case.sound_speed_profile.is_empty());
+    assert_eq!(case.sound_speed_profile, [] as [kraken::SoundSpeedPoint; 0]);
     let result = solve(&case).unwrap();
     assert_eq!(result.modes.modes.len(), 102);
     assert_eq!(result.field.pressure.len(), 25);

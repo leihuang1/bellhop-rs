@@ -27,9 +27,7 @@ const ROOT_STEPS: usize = 64;
 )]
 pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let omega = 2.0 * PI * case.frequency_hz;
-    let (bottom_k2, bottom_complex_k2) = if case.bottom_boundary == BottomBoundary::Rigid {
-        (0.0, Complex64::new(0.0, 0.0))
-    } else {
+    let (bottom_k2, bottom_complex_k2) = if case.bottom_boundary == BottomBoundary::FluidHalfSpace {
         // AttenMod::CRCI converts dB/wavelength to a positive imaginary sound speed.
         let bottom_c = Complex64::new(
             case.bottom_sound_speed_mps,
@@ -40,6 +38,8 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             (omega / case.bottom_sound_speed_mps).powi(2),
             (Complex64::new(omega, 0.0) / bottom_c).powi(2),
         )
+    } else {
+        (0.0, Complex64::new(0.0, 0.0))
     };
     let profile = Profile::new(case)?;
     if !omega.is_finite()
@@ -126,7 +126,10 @@ struct Mesh<'a> {
     omega: f64,
     bottom_k2: f64,
     bottom_complex_k2: Complex64,
+    surface_k2: f64,
+    surface_complex_k2: Complex64,
     b1: Vec<f64>,
+    b1c: Vec<f64>,
     min_speed: f64,
 }
 
@@ -143,12 +146,24 @@ impl<'a> Mesh<'a> {
         let h = case.water_depth_m / n as f64;
         let mut min_speed = f64::INFINITY;
         let mut invalid_speed = false;
+        let water_loss = case
+            .water_attenuation_db_per_wavelength
+            .iter()
+            .any(|&a| a != 0.0);
+        let mut b1c = Vec::with_capacity(n + 1);
         let b1: Vec<_> = (0..=n)
             .map(|i| {
-                let speed = profile.mesh_speed(i, n);
-                invalid_speed |= !speed.is_finite() || speed <= 0.0;
-                min_speed = min_speed.min(speed);
-                -2.0 + h * h * (omega * omega / (speed * speed))
+                let speed = profile.mesh_complex_speed(i, n);
+                invalid_speed |= !speed.re.is_finite() || speed.re <= 0.0 || !speed.im.is_finite();
+                min_speed = min_speed.min(speed.re);
+                if water_loss {
+                    let k2 = Complex64::new(omega * omega, 0.0) / speed.powi(2);
+                    b1c.push(k2.im);
+                    -2.0 + h * h * k2.re
+                } else {
+                    b1c.push(0.0);
+                    -2.0 + h * h * (omega * omega / (speed.re * speed.re))
+                }
             })
             .collect();
         if invalid_speed {
@@ -158,11 +173,35 @@ impl<'a> Mesh<'a> {
                 "sound_speed_profile",
             ));
         }
-        if h <= 0.0 || !h.is_finite() || b1.iter().any(|x| !x.is_finite()) {
+        if h <= 0.0 || !h.is_finite() || b1.iter().chain(&b1c).any(|x| !x.is_finite()) {
             return Err(error(
                 "KR0302",
                 "mesh coefficients exceed numeric range",
                 "mesh_points",
+            ));
+        }
+        let (surface_k2, surface_complex_k2) =
+            if case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+                let c = Complex64::new(
+                    case.surface_sound_speed_mps,
+                    case.surface_attenuation_db_per_wavelength * case.surface_sound_speed_mps
+                        / (8.685_889_6 * 2.0 * PI),
+                );
+                (
+                    (omega / case.surface_sound_speed_mps).powi(2),
+                    (Complex64::new(omega, 0.0) / c).powi(2),
+                )
+            } else {
+                (0.0, Complex64::new(0.0, 0.0))
+            };
+        if !surface_k2.is_finite()
+            || !surface_complex_k2.re.is_finite()
+            || !surface_complex_k2.im.is_finite()
+        {
+            return Err(error(
+                "KR0302",
+                "surface impedance exceeds numeric range",
+                "surface_boundary",
             ));
         }
         Ok(Self {
@@ -171,7 +210,10 @@ impl<'a> Mesh<'a> {
             omega,
             bottom_k2,
             bottom_complex_k2,
+            surface_k2,
+            surface_complex_k2,
             b1,
+            b1c,
             min_speed,
         })
     }
@@ -182,34 +224,46 @@ impl<'a> Mesh<'a> {
 
     fn bottom_diagonal(&self, x: f64) -> f64 {
         let diagonal = (self.b1.last().unwrap() - self.h * self.h * x) * 0.5;
-        if self.case.bottom_boundary == BottomBoundary::Rigid {
-            diagonal
-        } else {
+        if self.case.bottom_boundary == BottomBoundary::FluidHalfSpace {
             diagonal
                 - self.h * self.case.water_density_g_cm3 / self.case.bottom_density_g_cm3
                     * self.bottom_gamma(x).re
+        } else {
+            diagonal
+        }
+    }
+
+    fn surface_gamma(&self, x: f64) -> Complex64 {
+        (Complex64::new(x, 0.0) - self.surface_complex_k2).sqrt()
+    }
+
+    fn surface_diagonal(&self, x: f64) -> f64 {
+        let diagonal = (self.b1[0] - self.h * self.h * x) * 0.5;
+        if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+            diagonal
+                - self.h * self.case.water_density_g_cm3 / self.case.surface_density_g_cm3
+                    * self.surface_gamma(x).re
+        } else {
+            diagonal
         }
     }
 
     // Inertia of the symmetric tridiagonal acoustic operator A(x): number of roots above x.
     fn count(&self, x: f64) -> usize {
         let shift = self.h * self.h * x;
-        let rigid = self.case.surface_boundary == SurfaceBoundary::Rigid;
+        let first = usize::from(self.case.surface_boundary == SurfaceBoundary::Vacuum);
+        let end = self.b1.len() - usize::from(self.case.bottom_boundary == BottomBoundary::Vacuum);
         let mut pivot = 0.0;
         let mut count = 0;
-        for i in usize::from(!rigid)..self.b1.len() {
+        for i in first..end {
             let d = if i == 0 {
-                (self.b1[0] - shift) * 0.5
+                self.surface_diagonal(x)
             } else if i + 1 == self.b1.len() {
                 self.bottom_diagonal(x)
             } else {
                 self.b1[i] - shift
             };
-            pivot = if i == usize::from(!rigid) {
-                d
-            } else {
-                d - 1.0 / pivot
-            };
+            pivot = if i == first { d } else { d - 1.0 / pivot };
             if pivot.abs() < 1e-30 {
                 pivot = -1e-30;
             }
@@ -242,6 +296,8 @@ impl<'a> Mesh<'a> {
             || !high.is_finite()
             || (self.case.bottom_boundary == BottomBoundary::FluidHalfSpace
                 && low <= self.bottom_k2)
+            || (self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace
+                && low <= self.surface_k2)
         {
             return Err(error(
                 "KR0301",
@@ -304,7 +360,8 @@ impl<'a> Mesh<'a> {
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_precision_loss,
-        clippy::many_single_char_names
+        clippy::many_single_char_names,
+        clippy::too_many_lines
     )]
     fn mode(&self, x: f64) -> Result<NormalMode, DiagnosticReport> {
         let n = self.b1.len();
@@ -316,17 +373,37 @@ impl<'a> Mesh<'a> {
             d[0] = 1.0;
             e[1] = 0.0;
         } else {
-            d[0] *= 0.5; // rigid surface: pressure derivative vanishes
+            d[0] = self.surface_diagonal(x) / h_rho;
         }
-        d[n - 1] = self.bottom_diagonal(x) / h_rho;
+        if self.case.bottom_boundary == BottomBoundary::Vacuum {
+            d[n - 1] = 1.0;
+            e[n - 1] = 0.0;
+        } else {
+            d[n - 1] = self.bottom_diagonal(x) / h_rho;
+        }
         let mut phi = inverse_iteration(&d, &e)?;
         let mut norm = 0.0;
         let mut slow = 0.0;
+        let mut volume_loss = 0.0;
         for (i, &value) in phi.iter().enumerate() {
             let weight = if i == 0 || i + 1 == n { 0.5 } else { 1.0 };
             let mass = weight * self.h * value * value / self.case.water_density_g_cm3;
             norm += mass;
+            volume_loss += mass * self.b1c[i];
             slow += mass * (self.b1[i] + 2.0) / (self.omega * self.omega * self.h * self.h);
+        }
+        if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+            let gamma = (x - self.surface_complex_k2.re).sqrt();
+            let x1 = 0.999_999_9 * x;
+            let x2 = 1.000_000_1 * x;
+            let derivative = (self.surface_gamma(x2).re - self.surface_gamma(x1).re)
+                / (self.case.surface_density_g_cm3 * (x2 - x1));
+            norm += derivative * phi[0].powi(2);
+            slow += phi[0].powi(2)
+                / (2.0
+                    * gamma
+                    * self.case.surface_density_g_cm3
+                    * self.case.surface_sound_speed_mps.powi(2));
         }
         if self.case.bottom_boundary == BottomBoundary::FluidHalfSpace {
             let gamma = (x - self.bottom_complex_k2.re).sqrt();
@@ -374,11 +451,25 @@ impl<'a> Mesh<'a> {
             .collect();
         // BCImpedance returns the real admittance for mode finding and the
         // complex admittance for first-order attenuation (Normalize in kraken.f90).
-        let loss_k2 = if self.case.bottom_boundary == BottomBoundary::Rigid {
-            0.0
+        // Pinned top-half-space perturbation takes a default-kind CMPLX/SQRT.
+        let top_loss = if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+            let z = Complex64::new(x, 0.0) - self.surface_complex_k2;
+            -f64::from(
+                num_complex::Complex32::new(z.re as f32, z.im as f32)
+                    .sqrt()
+                    .im,
+            ) * phi[0].powi(2)
+                / self.case.surface_density_g_cm3
         } else {
-            -self.bottom_gamma(x).im * phi[n - 1].powi(2) / self.case.bottom_density_g_cm3
+            0.0
         };
+        let loss_k2 = volume_loss * scale * scale
+            + top_loss
+            + if self.case.bottom_boundary == BottomBoundary::FluidHalfSpace {
+                -self.bottom_gamma(x).im * phi[n - 1].powi(2) / self.case.bottom_density_g_cm3
+            } else {
+                0.0
+            };
         let k = Complex64::new(x, loss_k2).sqrt();
         Ok(NormalMode {
             horizontal_wavenumber_rad_per_m: k,

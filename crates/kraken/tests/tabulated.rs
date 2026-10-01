@@ -11,7 +11,11 @@ fn fixture(name: &str) -> PathBuf {
 
 #[test]
 fn table_snapshots_do_not_reread_files_and_old_snapshot_api_requires_the_resource() {
-    for (name, extension) in [("TabRefBrcN", "brc"), ("TabRefIrcC", "irc")] {
+    for (name, extension) in [
+        ("TabRefBrcN", "brc"),
+        ("TabRefIrcC", "irc"),
+        ("FluidTrcC", "trc"),
+    ] {
         let root = fixture(name);
         let env = fs::read_to_string(root.with_extension("env")).unwrap();
         let flp = fs::read_to_string(root.with_extension("flp")).unwrap();
@@ -19,16 +23,22 @@ fn table_snapshots_do_not_reread_files_and_old_snapshot_api_requires_the_resourc
         let env_path = Path::new("not-on-disk.env");
         let flp_path = Path::new("not-on-disk.flp");
         assert_eq!(
-            legacy::bottom_table_extension(&env, env_path, ModeSolver::Krakenc).unwrap(),
+            if extension == "trc" {
+                legacy::surface_table_extension(&env, env_path, ModeSolver::Krakenc)
+            } else {
+                legacy::bottom_table_extension(&env, env_path, ModeSolver::Krakenc)
+            }
+            .unwrap(),
             Some(extension)
         );
-        let from_sources = legacy::load_frequency_cases_with_bottom_table(
+        let from_sources = legacy::load_frequency_cases_with_boundary_tables(
             &env,
             &flp,
             env_path,
             flp_path,
             ModeSolver::Krakenc,
-            Some(&table),
+            (extension == "trc").then_some(table.as_str()),
+            (extension != "trc").then_some(table.as_str()),
         )
         .unwrap();
         let from_files =
@@ -50,6 +60,70 @@ fn table_snapshots_do_not_reread_files_and_old_snapshot_api_requires_the_resourc
         assert!(report.to_string().contains("snapshot is missing"));
         assert!(legacy::load_case(root.with_extension("env"), root.with_extension("flp")).is_err());
     }
+}
+
+#[test]
+fn surface_table_limits_are_validated_at_the_public_case_boundary() {
+    let root = fixture("FluidTrcN");
+    let input = legacy::load_complex_case(root.with_extension("env"), root.with_extension("flp"))
+        .unwrap()
+        .into_definition();
+    for change in [
+        "solver",
+        "interpolation",
+        "loss",
+        "refinement",
+        "broadband",
+        "evanescent",
+        "material",
+        "topP",
+        "bottomTable",
+        "count",
+    ] {
+        let mut invalid = input.clone();
+        match change {
+            "solver" => invalid.mode_solver = ModeSolver::Kraken,
+            "interpolation" => invalid.interpolation = Interpolation::Spline,
+            "loss" => {
+                invalid.water_attenuation_db_per_wavelength =
+                    vec![0.1; invalid.sound_speed_profile.len()];
+            }
+            "refinement" => invalid.max_range_m = 1.0,
+            "broadband" => invalid.mesh_reference_frequency_hz = Some(50.0),
+            "evanescent" => invalid.c_low_mps = 1400.0,
+            "material" => invalid.surface_density_g_cm3 = 1.0,
+            "topP" => {
+                invalid.surface_boundary = SurfaceBoundary::Impedance {
+                    frequency_hz: 50.0,
+                    points: Vec::new(),
+                }
+            }
+            "bottomTable" => {
+                invalid.bottom_boundary = invalid.surface_boundary.clone();
+                invalid.bottom_sound_speed_mps = 0.0;
+                invalid.bottom_density_g_cm3 = 0.0;
+                invalid.bottom_attenuation_db_per_wavelength = 0.0;
+            }
+            _ => {
+                if let SurfaceBoundary::Reflection(p) = &mut invalid.surface_boundary {
+                    p.truncate(1);
+                }
+            }
+        }
+        assert!(Case::from_definition(invalid).is_err(), "{change}");
+    }
+    let env = fs::read_to_string(root.with_extension("env")).unwrap();
+    let flp = fs::read_to_string(root.with_extension("flp")).unwrap();
+    let old = legacy::load_frequency_cases_with_bottom_table(
+        &env,
+        &flp,
+        &root.with_extension("env"),
+        &root.with_extension("flp"),
+        ModeSolver::Krakenc,
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(old.diagnostics()[0].path, root.with_extension("trc"));
 }
 
 #[test]

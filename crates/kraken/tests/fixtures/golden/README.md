@@ -586,3 +586,353 @@ beaf3c12ec89a29353fea7881fd6902f6a0fd76df1a794b8809e0aa9614fbdc2  golden/SductPc
 2f02671e650292a9ad799d615edfb34a6ae15b6b0ff42bbebc19559e06d55ed0  golden/SductSpline.prt
 3621e5a0127af8031c10c4df9eaf2a9307d963511f4cd2de166a90030c0e4388  golden/SductSpline.shd
 ```
+
+## Water-material checkpoint reference artifacts
+
+These are **derived** fixture pairs, not unmodified upstream VolAtt inputs.
+`WaterLossN/C/P/S`, `WaterLossUnitN/M/F/Q/L`, `WaterLossPower` and
+`WaterLossThorp/Fg/Bio` derive from committed `PekerisSpline3.env`:
+preserve 100 m, nonuniform nodes at 0/43/100 m (1500/1530/1500 m/s), density 1,
+fluid bottom 1700 m/s / density 1.5, cLow/cHigh 1400/1700 and RMax=1000 km.
+Change the title, interpolation/loss options, NG=101, and node/bottom absorption.
+Their FIELD input is the existing `Pekeris.flp`, copied byte-for-byte.
+
+Base W losses at the three nodes are 0.03/0.025/0.02 dB/wavelength, with
+0.25 dB/wavelength bottom loss. N/M/F/Q/L variants encode equivalent loss
+at nominal 50 Hz, with full-precision conversion values written into each input.
+Power-law m uses the equivalent 50 Hz dB/m values, distinct water beta/fT
+1.5/60 Hz and bottom 0.75/70 Hz, and ordered 75/50/62.5/50 Hz (including a repeat).
+Volume variants use 500 Hz, NG=1003 and zero explicit absorption: Thorp;
+FG with T=10, salinity=35, pH=8, mean depth=50 m; or two overlapping bio layers
+(0,80,500,2.5,0.25) and (43,120,600,3,0.15). Biological loss is converted at
+SSP knots and excluded from the half-space (`UpdateHSLoss` uses HUGE depth).
+
+`WaterLossLeaky` derives from `MunkLeakyPchipBroadband.env/.flp`: retain
+the seven-node 1 km PCHIP profile, NG=803, 0.8 W bottom loss, cHigh=1700,
+RMax=1000 km and 75/50/62.5/50 Hz with point-source geometry; add node water
+absorption `0.015 + depth_m * 0.00001` dB/wavelength. Only the title and node
+absorption records change; inherited values are written explicitly.
+
+All 27 workflows used the pinned version/compiler/flags above. Three runs
+per workflow produced byte-identical `.mod/.shd`; `.prt` below is the first
+run with only trailing whitespace removed (timings are not required identical).
+Both Rust API and actual CLI-HDF5 comparisons pass at unchanged tolerances:
+36 frequency blocks, 404 modes, 432 pressures; local max |dp|=3.332001e-8.
+First-mesh shapes/group speeds, refined k, signed imaginary k, every frequency
+and pressure are checked. Existing golden files and tolerances are unchanged.
+Fresh Linux CI is configured; this local checkpoint is not final CI evidence.
+
+| Workflow | Modes by frequency | Pressures |
+|---|---|---:|
+| `WaterLossBio-kraken` | 30 | 9 |
+| `WaterLossBio-krakenc` | 30 | 9 |
+| `WaterLossC-kraken` | 3 | 9 |
+| `WaterLossC-krakenc` | 3 | 9 |
+| `WaterLossFg-kraken` | 30 | 9 |
+| `WaterLossFg-krakenc` | 30 | 9 |
+| `WaterLossLeaky-krakenc` | 45/30/37/30 | 144 |
+| `WaterLossN-kraken` | 3 | 9 |
+| `WaterLossN-krakenc` | 3 | 9 |
+| `WaterLossP-kraken` | 3 | 9 |
+| `WaterLossP-krakenc` | 3 | 9 |
+| `WaterLossPower-kraken` | 4/3/4/3 | 36 |
+| `WaterLossPower-krakenc` | 4/3/4/3 | 36 |
+| `WaterLossS-kraken` | 3 | 9 |
+| `WaterLossS-krakenc` | 3 | 9 |
+| `WaterLossThorp-kraken` | 30 | 9 |
+| `WaterLossThorp-krakenc` | 30 | 9 |
+| `WaterLossUnitF-kraken` | 3 | 9 |
+| `WaterLossUnitF-krakenc` | 3 | 9 |
+| `WaterLossUnitL-kraken` | 3 | 9 |
+| `WaterLossUnitL-krakenc` | 3 | 9 |
+| `WaterLossUnitM-kraken` | 3 | 9 |
+| `WaterLossUnitM-krakenc` | 3 | 9 |
+| `WaterLossUnitN-kraken` | 3 | 9 |
+| `WaterLossUnitN-krakenc` | 3 | 9 |
+| `WaterLossUnitQ-kraken` | 3 | 9 |
+| `WaterLossUnitQ-krakenc` | 3 | 9 |
+
+SHA-256 (relative to `tests/fixtures`):
+
+```text
+1d885bca3ed56b1317bd24d596362fc86083777190c683e31618bf43a1d892b6  WaterLossBio.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossBio.flp
+c02dc04fd145d9322b71de46c56795930fb7e40f15d993646168dfb99ad18db2  WaterLossC.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossC.flp
+a7ba8966dfd24279468e94614ff4ca4b41a5190143c52baa2700be8f98cefd74  WaterLossFg.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossFg.flp
+1082f00d18fc1ed306d1f92cc931cb33004a3f0c9775685a025bc2f9c6580181  WaterLossLeaky.env
+091559b2bb618a0a872df944651b920ffbefa0c75939280e265e1a236745fe25  WaterLossLeaky.flp
+1db85acac50186af96ecd33567d9c6f8bbd01c6f83d0e2101de08a83f01e1e13  WaterLossN.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossN.flp
+c317667254892b01bea254546fb191769b4b188ef47633cb034076398e66223d  WaterLossP.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossP.flp
+731b058cea06c31a2a8da5f1a5b1672981128e0a24453882fb614b406ca0e731  WaterLossPower.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossPower.flp
+ea2c91de2316a17b15f20231fb753c4787dbb1f7ce99659ec21a7e91c91c9109  WaterLossS.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossS.flp
+78eac4647f394c5eec56793615544662cfca786d92ac77432d0d8a06e198421b  WaterLossThorp.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossThorp.flp
+75340aa61102dfd7f81feac72ec8d810d0cbe3acf9567e702ef7745e731fdeed  WaterLossUnitF.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossUnitF.flp
+8621d0bcbfea47435a082ee62490774fefdaef270e902b253acd9ee7ae228e51  WaterLossUnitL.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossUnitL.flp
+559d77136e062a6ea941d5ff80610069970b5d1d48dbcda93d8037a69ffd92c1  WaterLossUnitM.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossUnitM.flp
+c397aefeb7e673877ec58666fcc8a632714d6b6e34cd9b5254cd990fb5dc313b  WaterLossUnitN.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossUnitN.flp
+df6ae7f85a90e50653fe0e0a8abdba21dae0780cdb13432ad712462d2f0b09a7  WaterLossUnitQ.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  WaterLossUnitQ.flp
+49b792a512ec5fc75f6e8a8ec3528de05e0d22ff05b7b51a125ae6c8b08cbeec  golden/WaterLossBio-kraken.mod
+2b52912296da19f651d982238933b61761a60eb0580e6b33292fedbd2682743c  golden/WaterLossBio-kraken.prt
+1fdfd03e6b2b109357128018ed09cfb28d65190a48c58e6092631942b9014be5  golden/WaterLossBio-kraken.shd
+732867b45afaba02c2d0f041b502b724048d85a0f1edc564fe02731e8989f9e9  golden/WaterLossBio-krakenc.mod
+edab66eea26ca5bd32a5ec62772e92abd96aace29cd44e149397663cd1aed84f  golden/WaterLossBio-krakenc.prt
+5c361d7f254dcdaac85feb44b2d447223ef1406fedd30b16924e37d035a17a1f  golden/WaterLossBio-krakenc.shd
+c5c1701e9bc5ad44f40349d03c5e45f09e3a3baec63850effb933530365d7131  golden/WaterLossC-kraken.mod
+83b5b7eb7a44db252c1ee82e5884fbdf8c4f7854b1e8d44acc866f549fd3afe1  golden/WaterLossC-kraken.prt
+37fc5a68a1be0d822c0255d12b884335a5d465fdc75b9b79b593e62f14c4673e  golden/WaterLossC-kraken.shd
+8acaa78b42bacd1649f423f42fc146d1e021e72def49fba71a2fa29eb0b773a3  golden/WaterLossC-krakenc.mod
+b10c1b51816f4e714adb60766b92d2bf9a1bb63dcd4b65ae6541681065d81c19  golden/WaterLossC-krakenc.prt
+f52689b24d957febe88091a92902cce296923428e07aaca67914e481affc877d  golden/WaterLossC-krakenc.shd
+2d5661e13b13eab261f0b3ba33b8ed60b2166e71e541677293c6753068f300cc  golden/WaterLossFg-kraken.mod
+d1cf9866960f9dc321ded31f7e7976f26c7ec63ad68c885b767c2afbe1afdbb8  golden/WaterLossFg-kraken.prt
+f706d5757d9261892ccc313edc4cc85edf532e455002514a175af3d4cc9716f3  golden/WaterLossFg-kraken.shd
+a849d8f09cf2e4b09d37a2a8c710ff0ea89afe533452a553b0d44f2be419a92b  golden/WaterLossFg-krakenc.mod
+c09b6fc715324aee77506f5800d1fff88ce79bf6e042029532012f6abe571ab2  golden/WaterLossFg-krakenc.prt
+cdafdb119a6c655b9b0d44a42d154a3d12eea77d979ec9d22a49a7f3b61d9862  golden/WaterLossFg-krakenc.shd
+0e523b1f53f2cb69a7073e016d1a783d58c757e8473d0cdc62d2dbd506f7bc0b  golden/WaterLossLeaky-krakenc.mod
+6e573202acac3b2d9e87a7dd21aa08268a5c75ed02b7c48b527994cdbcd554de  golden/WaterLossLeaky-krakenc.prt
+37f6f3b6e6fedf81d514a2015f66370c2584bf9687eca5ca9222831c72bcb244  golden/WaterLossLeaky-krakenc.shd
+c79d214d10dbbeb915ef61f8fe828311699da3950ea773a76fc816bee5e83f40  golden/WaterLossN-kraken.mod
+e2280d7639b248b56287fe5a2c627dd8589f4dd60ac5e809791f0ed12d33ce29  golden/WaterLossN-kraken.prt
+7190725e4e7ccd9f3691a8934ff9704cab6901561cb7b173ce90ed2348800aa1  golden/WaterLossN-kraken.shd
+9c951da44e95904fcc95a720f0ef398ffce4be1cc60e14b7764204297325f789  golden/WaterLossN-krakenc.mod
+3ebbd0224e7a02589fbfda583d2834a8f32b2a55cf104dc0d256a8676e94d5d1  golden/WaterLossN-krakenc.prt
+9af97678d510d5cad4b4bf732f2666efe9cf954a1b957cdd7b9d1221da30e2d2  golden/WaterLossN-krakenc.shd
+95bfec35ec2d9ddb9c9464112b4920663eda3a5c51df7d5b67fc0b9488454309  golden/WaterLossP-kraken.mod
+5929bb4d83d25ae71bbb0d5b5a76944c479c532bb2ae56c388b7826b5fe11628  golden/WaterLossP-kraken.prt
+a4859ec0eb9e770aee40b831cbb24b0ce214c19558f6a9920de209cbb390eea6  golden/WaterLossP-kraken.shd
+1e2ea85c77e9f9d24004f1ecac826530e74e492772d386937e9f62c6b7d62937  golden/WaterLossP-krakenc.mod
+82d12e41e7f40ba3a503a984b0f40ef2d3b3c51f0ec263c04f369bffb2a5eec0  golden/WaterLossP-krakenc.prt
+7e512d4b76a8c357d503e950b70fd730ce04abf44f69395a39b4001777c28ffe  golden/WaterLossP-krakenc.shd
+6b2607d4a0a497ecd7c83f62e6728931bc854860e829956150806c682b54c4b8  golden/WaterLossPower-kraken.mod
+eb743b79d32137d2d555e2a2afa1ab5daee4b34d1a9c9db29cbc2de6afc141d1  golden/WaterLossPower-kraken.prt
+e2563a6f885f22903d06d5bb5cac97254058de8031c0627a63ec7207031700d8  golden/WaterLossPower-kraken.shd
+865faa38afb8a0a7def776195b28647fb24374a1f5d75795ffcf9beb72a58297  golden/WaterLossPower-krakenc.mod
+ff2bd5b42a9c8284abaf8d72019f6a8ac769a76146e9a26d1a012152cae4e0fd  golden/WaterLossPower-krakenc.prt
+ab88da7b5e1a996281509f8e60c551942866df60bdee6c170fe389c49757bfb6  golden/WaterLossPower-krakenc.shd
+cfe9f3b8ddc0205fe5b00f561a51a3a3c7057a82fefe9d83cf8265b2c76407a8  golden/WaterLossS-kraken.mod
+c61834c38ab8a69119d562fb76f5676d3b078b70814d6269b744123597629446  golden/WaterLossS-kraken.prt
+0858be506783cfa1774eec2a3485e61d8ef8fdac0d0b2ada226538c308d7f885  golden/WaterLossS-kraken.shd
+7cdf9769fe177f2643a45c3018db9a8e651709de88ebcdeb6db42f2b08248320  golden/WaterLossS-krakenc.mod
+55c96686f2ba6a603aac42a39fbf9d6588f82ad7e569fa8b52994220c521e98f  golden/WaterLossS-krakenc.prt
+939e126fcbbe2a4806671d9282c8926e8be3702a1e72be20b94d824435bd8b08  golden/WaterLossS-krakenc.shd
+271c06e4f74e02ab5aa52e2e5b3bfd61dad5917f6608eba262c8dfb0f91b66e1  golden/WaterLossThorp-kraken.mod
+d476179d2c7866e4d7759809311dd8975d069f757827385f55026eaafb65c623  golden/WaterLossThorp-kraken.prt
+621f452fe80a9d542db36f85be80e35b6ccdecf0f605603b5e05e804fe6feb4c  golden/WaterLossThorp-kraken.shd
+d2879af7ccc865713cee95b32f9af391e58b25e51ebe17dbaa22a461dc87fdef  golden/WaterLossThorp-krakenc.mod
+91d5030f2fec85916e130a7c5cd81838b951d601e407e345e459ae3d45494682  golden/WaterLossThorp-krakenc.prt
+d72385140c5035fc7a44b7d780ce7f42aabc0f0a2fe5b8abeaf4f6b634df6782  golden/WaterLossThorp-krakenc.shd
+3e5c4136e2918178b2c2ea9a5e7caf1bda516414a197b184d58b6de6339e6355  golden/WaterLossUnitF-kraken.mod
+8e11f769b829da57c771633225c98408d086aa0c13c1f1544654f55a729a8aa5  golden/WaterLossUnitF-kraken.prt
+37fc5a68a1be0d822c0255d12b884335a5d465fdc75b9b79b593e62f14c4673e  golden/WaterLossUnitF-kraken.shd
+1b451b4a5b6f40c207944cbd6d034ab30c315f8a8d8d3ee5cb3377907eb33e1e  golden/WaterLossUnitF-krakenc.mod
+3f87cc2ed0f566ed6e574eed03e8d09fa210b4076964ba0eb8ecf06c65dc0980  golden/WaterLossUnitF-krakenc.prt
+f52689b24d957febe88091a92902cce296923428e07aaca67914e481affc877d  golden/WaterLossUnitF-krakenc.shd
+c1110cfcfd93ef78ae4ca6fdb61f4a226b5503a48d2053a23a0f334293b59948  golden/WaterLossUnitL-kraken.mod
+b4fe72d248aa84682ec2a2aa21e5fb2d0939fde7568e514dd8a721b1ae3af0d0  golden/WaterLossUnitL-kraken.prt
+37fc5a68a1be0d822c0255d12b884335a5d465fdc75b9b79b593e62f14c4673e  golden/WaterLossUnitL-kraken.shd
+50ab22cd2b6d404984966eb058d2dbd40c59512274e0ce4a968910c2f8338889  golden/WaterLossUnitL-krakenc.mod
+eb927d8bf84cfb3061c7bf3fab3dbd2d40046e2c78b830df1950dfe1452e0cf0  golden/WaterLossUnitL-krakenc.prt
+f52689b24d957febe88091a92902cce296923428e07aaca67914e481affc877d  golden/WaterLossUnitL-krakenc.shd
+30dc0b93c6df0e78623798f78d44263646f314ed4e70f50a5ed890a6f7e33b11  golden/WaterLossUnitM-kraken.mod
+c3a224b6c8afa4f1227193ae0c49dde57809296d72c3a2d08623ea7b6bf99874  golden/WaterLossUnitM-kraken.prt
+37fc5a68a1be0d822c0255d12b884335a5d465fdc75b9b79b593e62f14c4673e  golden/WaterLossUnitM-kraken.shd
+02d0bae536d0d2b59ffcbe611a5b9380b47cdaf74c8e5b02ad9076d525c977d9  golden/WaterLossUnitM-krakenc.mod
+fa8ba0fd6f452ee8f1b98e6daa6369f33fb2f7fa4f7a6e2cd2c7c8a94b66a079  golden/WaterLossUnitM-krakenc.prt
+f52689b24d957febe88091a92902cce296923428e07aaca67914e481affc877d  golden/WaterLossUnitM-krakenc.shd
+a6cf2e1d599235c8fda5b81ffca19b97c4e80cc643aa1bb276597a366c6cbc81  golden/WaterLossUnitN-kraken.mod
+23fd3cfe08aae50fad3a54c4cb8215a6a26a88af16c2ab6ebe0a92bda9e1ad4d  golden/WaterLossUnitN-kraken.prt
+37fc5a68a1be0d822c0255d12b884335a5d465fdc75b9b79b593e62f14c4673e  golden/WaterLossUnitN-kraken.shd
+4415355ba8183a98be202988c7dbd1fb77083e71a9a7227a7b9d5546c8ad8382  golden/WaterLossUnitN-krakenc.mod
+963f066146fccdc1d20c431b8934f546a4646003514241f7298de4e5cf80b968  golden/WaterLossUnitN-krakenc.prt
+f52689b24d957febe88091a92902cce296923428e07aaca67914e481affc877d  golden/WaterLossUnitN-krakenc.shd
+c6d04bca2793582a803a23eb3a896eb0eef2493fefeed32af0ff68dd155f0f92  golden/WaterLossUnitQ-kraken.mod
+a13eb0f6371d947c5f733d967db11859e230c87bb60b9ecea92745ea17f89954  golden/WaterLossUnitQ-kraken.prt
+37fc5a68a1be0d822c0255d12b884335a5d465fdc75b9b79b593e62f14c4673e  golden/WaterLossUnitQ-kraken.shd
+522b3b74fe76d9a61a654a800bf2f8235c2bf4bccd4b2d9a59fb0de12ac2867e  golden/WaterLossUnitQ-krakenc.mod
+25c184d921e2afb3770eab16bce279133b3ae6c0a7005c3af71846c3e90f89f0  golden/WaterLossUnitQ-krakenc.prt
+f52689b24d957febe88091a92902cce296923428e07aaca67914e481affc877d  golden/WaterLossUnitQ-krakenc.shd
+```
+
+## Smooth-boundary and top-TRC reference artifacts
+
+These fourteen input pairs are **derived**, not original upstream boundary/TRC
+workflows. The nine `FluidBoundary{V,R,A}{V,R,A}` pairs derive from `WaterLossS`:
+retain 50 Hz, 100 m spline water at 0/43/100 m (1500/1530/1500 m/s), node losses
+0.03/0.025/0.02 W, NG=101 and RMax=1000 km. Change only title/boundaries, add
+1900 m/s / density 1.1 / 0.3 W top material for A, remove bottom material for
+V/R, and extend modal samples to 0/25/75/99/100 m. FIELD is byte-identical
+`Pekeris.flp`. A bottom retains 1700 m/s / density 1.5 / 0.25 W. Both backends
+compare the whole trapped spectrum. `FluidBoundaryAir` derives from AA: C water,
+343 m/s / density 0.0012 / zero explicit top loss, RMax=0 and KRAKENC only.
+
+`FluidRigidPlaneLoss` derives from `PekerisRigidPlane.env/.flp`: retain its
+18.492816128363287 Hz, 77.45263063369381 m, 1595.8580929574603 m/s constant
+water, rigid ends and original geometry; add 0.03 W water loss and use NG=68.
+The automatic NG=17 variant changes the searched KRAKENC mode count across
+meshes and is explicitly rejected, not truncated to the first-mesh spectrum.
+
+`FluidTrcN/C` derive from `PekerisComplexGradient.env`: retain 1500→1520 m/s,
+100 m, density 1 and cHigh=2000; set top F, NG=101, cLow=1550, 0.25 W A-bottom
+loss and modal samples 0/25/75/99/100 m. `FluidTrcRigid` replaces that C case's
+bottom with R and removes its half-space record. FIELD is `Pekeris.flp`;
+constructed `.trc` bytes are copied from `TabRefBrcN.brc` (0/45/90 degrees,
+0.8 magnitude, unwrapped 170/190/210-degree phases). The accepted spectral
+window is propagating at pinned BCImpedancec's last-node inside-water speed.
+An earlier cLow=1400 experiment had a growing reference root and is **not**
+accepted; evanescent TRC, top P and simultaneous top/bottom tables are rejected.
+
+All 24 workflows use the pinned version/compiler/flags at the top of this file.
+Three runs produce byte-identical `.mod/.shd`; `.prt` is run1 with trailing
+whitespace removed, not timing-normalized. Every mode and pressure passes the
+existing API and actual CLI-HDF5 comparator: **68 modes, 202 pressures**, local
+max |dp|=9.424322e-8. Combined with water-material fixtures: 51 workflows,
+60 frequency blocks, 472 modes and 634 pressures. No old golden or tolerance
+changes; configured fresh Linux CI is separate from these local results.
+
+| Workflow | Modes | Pressures |
+|---|---:|---:|
+| `FluidBoundaryVV-kraken` | 2 | 9 |
+| `FluidBoundaryVR-kraken` | 3 | 9 |
+| `FluidBoundaryVA-kraken` | 3 | 9 |
+| `FluidBoundaryRV-kraken` | 3 | 9 |
+| `FluidBoundaryRR-kraken` | 3 | 9 |
+| `FluidBoundaryRA-kraken` | 3 | 9 |
+| `FluidBoundaryAV-kraken` | 3 | 9 |
+| `FluidBoundaryAR-kraken` | 3 | 9 |
+| `FluidBoundaryAA-kraken` | 3 | 9 |
+| `FluidRigidPlaneLoss-kraken` | 2 | 2 |
+| `FluidBoundaryVV-krakenc` | 2 | 9 |
+| `FluidBoundaryVR-krakenc` | 3 | 9 |
+| `FluidBoundaryVA-krakenc` | 3 | 9 |
+| `FluidBoundaryRV-krakenc` | 3 | 9 |
+| `FluidBoundaryRR-krakenc` | 3 | 9 |
+| `FluidBoundaryRA-krakenc` | 3 | 9 |
+| `FluidBoundaryAV-krakenc` | 3 | 9 |
+| `FluidBoundaryAR-krakenc` | 3 | 9 |
+| `FluidBoundaryAA-krakenc` | 3 | 9 |
+| `FluidRigidPlaneLoss-krakenc` | 2 | 2 |
+| `FluidBoundaryAir-krakenc` | 3 | 9 |
+| `FluidTrcN-krakenc` | 3 | 9 |
+| `FluidTrcC-krakenc` | 3 | 9 |
+| `FluidTrcRigid-krakenc` | 3 | 9 |
+
+SHA-256 paths are relative to `crates/kraken/tests/fixtures`:
+
+```text
+f31d59f67a7c63e3458e4573c34bf6b164c5e0643aac116053c4b90cd9ab277f  FluidBoundaryAA.env
+25706ee0446d6936311029874997a93aa634d0f344d46f000534c0b93f96981c  FluidBoundaryAR.env
+fd4c44ca1777804aae4f36889da9d097ef072f1d29bddc73c8f43d3ce7026159  FluidBoundaryAV.env
+4114f037c9766ac7f978c0249fc46772158d007bb4d5ceaab22952f824ca1220  FluidBoundaryAir.env
+14521c384f526d7cac05a132cd6736ea130e04a968fbe1e2724562d94e6ef3d3  FluidBoundaryRA.env
+26463bec789b3ff1eb4934e1ce093b09b7f841b2815f8c61b351bd4ef642c125  FluidBoundaryRR.env
+190a6a66c0e17b1f60b77e533ba4f11fc9607f7fdcd5b9157667cfa773858718  FluidBoundaryRV.env
+1a8d914f69a6a00d7b476a606ebc7b6e18f9625bfe38c3fece6df0d2f36bb5f6  FluidBoundaryVA.env
+bf50f3811d8361577686107255ea9fce856864becbb65773ab88628e9707a1af  FluidBoundaryVR.env
+06ba754520578d0c584a67c74b37877765d856954c44b4d141af2256cf5ee787  FluidBoundaryVV.env
+7f2d6013c433e987995703c3f30f95058e2714a7160f8f5dc832838a5fdc2f74  FluidRigidPlaneLoss.env
+d67dc6e7bafcdddb665e19d30abe226e9b37eed6c9713f7b96e783304f3c4ac3  FluidTrcC.env
+351fb0dfa8f3a993a8d2e8e844799cfc7694aef565159cf863b25bf82738ff4f  FluidTrcN.env
+71c396c2836de56aa5909fedca1db04dc80d6a6e290b404d9a4fab8e446f8fd9  FluidTrcRigid.env
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidBoundaryAA.flp
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidBoundaryAR.flp
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidBoundaryAV.flp
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidBoundaryAir.flp
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidBoundaryRA.flp
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidBoundaryRR.flp
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidBoundaryRV.flp
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidBoundaryVA.flp
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidBoundaryVR.flp
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidBoundaryVV.flp
+7b5f65b00eaccf6eea051888aa78566a1d22c1691c7d4e7f7fc6188accd2ebfe  FluidRigidPlaneLoss.flp
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidTrcC.flp
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidTrcN.flp
+38527d0ab6d5360f3ab424b75c8a0c81c375cebd446886a640f639540a03c7d7  FluidTrcRigid.flp
+b2b5a60a8a267ecc6fc98c1ce811515c3282744b5082eb4f7cab598e9587eee2  FluidTrcC.trc
+b2b5a60a8a267ecc6fc98c1ce811515c3282744b5082eb4f7cab598e9587eee2  FluidTrcN.trc
+b2b5a60a8a267ecc6fc98c1ce811515c3282744b5082eb4f7cab598e9587eee2  FluidTrcRigid.trc
+7e45cb56b8904c48891676ae121bd0e748221d005078e68c28390bb2b2aa1a41  golden/FluidBoundaryAA-kraken.mod
+c5c5186229c6ca6fd0dcb75743f7ae79ac5d992eb044f6dd507e0a66a02b6145  golden/FluidBoundaryAA-kraken.prt
+355c740b99ddb80b6385138525253e3cb52ef9fa48693108665e34c954e5a0dd  golden/FluidBoundaryAA-kraken.shd
+57903f0aa6f5bb68a4fad084e0fdfea3e21771613461e84cca93ef3fda033372  golden/FluidBoundaryAA-krakenc.mod
+3871ea27fd9522bab94b916387832892150b959573eb4a819fcd70446452419c  golden/FluidBoundaryAA-krakenc.prt
+06531f73972fd9b308bba9f4d914d0dd4ddae8792f612a6b7e6c24c45cbf6191  golden/FluidBoundaryAA-krakenc.shd
+61b1a83a6520ca3098acbf8303c72b9d4ea1f3a6991b427145b073906a58ec6c  golden/FluidBoundaryAR-kraken.mod
+a2180abbe75e161213ff44b737601c25814c98623a6c2f84dd0de3ee74973b1d  golden/FluidBoundaryAR-kraken.prt
+7d01b150a8357d71a44b328a6fa84eebb43678c7b5744ff306a9832410a93ecc  golden/FluidBoundaryAR-kraken.shd
+8433385ebf890cf55e95cf91ed374e077a90f485700d8644df0b989755ca5d08  golden/FluidBoundaryAR-krakenc.mod
+3dd9193ec8282051d58a807b35776ea3dc196d6354c772c954006d338b117955  golden/FluidBoundaryAR-krakenc.prt
+72f34cbf7a5ac2399332f06cff3a99d69089f200753634d7a8b2503ec57fa541  golden/FluidBoundaryAR-krakenc.shd
+4fe203175f2f60fb81be3b5f551e1ee106f7c1a024e915197d84c0ffb85cd2b5  golden/FluidBoundaryAV-kraken.mod
+48a55a43344f1a87564e498b2fc29c8b88211e390840877816be36091609c522  golden/FluidBoundaryAV-kraken.prt
+05ddd9a816775749dce29de53b1a538f96f8f8ec93750c98642b9b3cb18eb3ff  golden/FluidBoundaryAV-kraken.shd
+e25d246d5833a5389761a2653285b7c59fe72611eafb6bf3e589ae9b935cd2a7  golden/FluidBoundaryAV-krakenc.mod
+544ed6c1b2999a42f83416892b8834d68d2274fecbf81e38a015854c644c3b56  golden/FluidBoundaryAV-krakenc.prt
+a8e6219577f54426d41a579c3266e2ef032f03811a7ee571f3e82ffd2c504ba6  golden/FluidBoundaryAV-krakenc.shd
+236378735d5d95bda6189067ed3cc83a3d6c2fb967da79d5980916ef673a9688  golden/FluidBoundaryAir-krakenc.mod
+75bae62ce2498306aab333731b70cdcd918f769df467b0c16552e47064a554b9  golden/FluidBoundaryAir-krakenc.prt
+f0180cb622ae46253cb63b40a0f5180e1b7987d6ac66bebc2c32b60fe64946d0  golden/FluidBoundaryAir-krakenc.shd
+5009862ec9b76233e13524dafce52a79c55716fa80f9d133443160a56e11d907  golden/FluidBoundaryRA-kraken.mod
+41141ed8f9d1c471f8dc95e23bf055d0d6bd717fbaaf8bdaa9daf992cb0d5068  golden/FluidBoundaryRA-kraken.prt
+65db8ee6a48686378ef0593e4016dd1d1265b4f330e147bb42ff377a11734614  golden/FluidBoundaryRA-kraken.shd
+5ee22ded1b3ca8bec73bd352ab5a89345f5af8e506f9177f95170e7236fd82fb  golden/FluidBoundaryRA-krakenc.mod
+03e8dd5decdb4057cf6dc590046aea4b7252c2677dfe2aa06d0a0e777eb4edaf  golden/FluidBoundaryRA-krakenc.prt
+9be077b7f79b1724919efd752dd9102b534b4c0d17b492194745dfc0b8b37af2  golden/FluidBoundaryRA-krakenc.shd
+f20da842319b1af39596e7d5969ae881bf0754d02d067fe6640a41779c348041  golden/FluidBoundaryRR-kraken.mod
+d7e1dc2067042f15cfccfa865780bb80f3df8a164b76da17d0e2034ed98c42b5  golden/FluidBoundaryRR-kraken.prt
+ea92b82808fb27d9ef7581606795f50446ee324fba5637b49c1726b2a0ea2ee6  golden/FluidBoundaryRR-kraken.shd
+2abc61d2bcace56392fc090c478667c568328e9ad53bb81fc3786dbf9f21c1d1  golden/FluidBoundaryRR-krakenc.mod
+7db5df1d3483cc3aee66b8cb39299ab2ba11a8923531af52c0989eb274fcfa5d  golden/FluidBoundaryRR-krakenc.prt
+0a0f161d99850a9290036c171bc5ce95e1f6722234d086038224ef0f5d1bb4d3  golden/FluidBoundaryRR-krakenc.shd
+8fd8cdc56f4b6355aa6278d893b993db6bde69cd216cf1e540f6956e5ab909f6  golden/FluidBoundaryRV-kraken.mod
+d4e748fa8e7df7b4c2be66bad151e693c9a208df9dcb47bbb68c3b681d067cdf  golden/FluidBoundaryRV-kraken.prt
+681932ec9a4090c1115449b77082bed16394c44bb76d217c0093bd4e7862eac5  golden/FluidBoundaryRV-kraken.shd
+f9e648599664c1b7469278eb787c916581d15a6ff5d4173d8e45a83f69d6c746  golden/FluidBoundaryRV-krakenc.mod
+c2be1dbe4f6b31ea411d4344e5ec92eb9d1a0cdbdd7de999c4e3bff97e6adfb6  golden/FluidBoundaryRV-krakenc.prt
+840b9fa01d627c24a56c05a112e7815d837594168173b510533492b99d604bcd  golden/FluidBoundaryRV-krakenc.shd
+5ba8223279247b3bc1881fc5176224797c01a73c665299574803052efeabe114  golden/FluidBoundaryVA-kraken.mod
+29f32eeab633266a2680e8a71a4c01951847bc61c8176f57cc449d242e8796fe  golden/FluidBoundaryVA-kraken.prt
+0858be506783cfa1774eec2a3485e61d8ef8fdac0d0b2ada226538c308d7f885  golden/FluidBoundaryVA-kraken.shd
+08fd8a25462eff227659beed293bb03caa82c81e7b241d7854530c407f856bd9  golden/FluidBoundaryVA-krakenc.mod
+bb93b8fde85735dfc44440a3343461af96781097827b809261e221a85291b9a9  golden/FluidBoundaryVA-krakenc.prt
+939e126fcbbe2a4806671d9282c8926e8be3702a1e72be20b94d824435bd8b08  golden/FluidBoundaryVA-krakenc.shd
+c9b1e826b7d599f9f96ffe87828f19d1b82a69c35318cf6911519ad52b8ecedd  golden/FluidBoundaryVR-kraken.mod
+ce705db1d10996ecd5c2aebbbf6eabfbcd6bab9ecf5eeb74d44efe7546b75dd1  golden/FluidBoundaryVR-kraken.prt
+39a94f64e4d7de81d2075d4cc144541534eb2d48f69a32aa53bf397fefd9327a  golden/FluidBoundaryVR-kraken.shd
+c224145a9959150c50b0973aec4d980f04e816f3a52d5d2749e8060d3ba12c1e  golden/FluidBoundaryVR-krakenc.mod
+197df1ee0ee19940fd987c2681307fb20f0136d209443f6440565c48dff6860d  golden/FluidBoundaryVR-krakenc.prt
+e7fdbb50b4501a54eb7e7fe6608c7b795faba06c04834daa3ab0472418fdd752  golden/FluidBoundaryVR-krakenc.shd
+a8b27208ce108c226cd42d3c9a9cc4ca1a03efa1ea4a56026fd1a4b208522536  golden/FluidBoundaryVV-kraken.mod
+b25f2fc73154f91fc6fc24848699d2a71c83fa181bdf630c7eaf3d3e991c4e9f  golden/FluidBoundaryVV-kraken.prt
+967bd8704ef9d8f957b4eaf088fca79760f9071ec28970c16f4b3dd4139932f4  golden/FluidBoundaryVV-kraken.shd
+f0f443b981171efa3dc194952ee14a520b18cf6526d7381379075388d69049a6  golden/FluidBoundaryVV-krakenc.mod
+956f585471118f4d2ce86acc4ea1c358f3cc7f586a5bc923761f39c2d4843e56  golden/FluidBoundaryVV-krakenc.prt
+c8304e027063a4eeee7dab41f96f3728097d45abb5b02fcd54ee1a1cdad03b5b  golden/FluidBoundaryVV-krakenc.shd
+23fdd7ffab6d366e5442af431c938315b7c927986ddddb391dcf22e6b1177462  golden/FluidRigidPlaneLoss-kraken.mod
+84fdc918266e8091b20a4b068ae62c7feff14d4b05fd5c38cffe866a1999f93f  golden/FluidRigidPlaneLoss-kraken.prt
+a3b458f1145c4d92d3c3b0351790ff7b1a33c8f294c76da7f4af86deefe44dd7  golden/FluidRigidPlaneLoss-kraken.shd
+50803a37e349e2ddab0ccea56d62bded56efc80c23280cfd9a3035b03cde6d10  golden/FluidRigidPlaneLoss-krakenc.mod
+19d03e82f9c8f33affc9d2434fa439704b475900be945429c7b3d0e50a345e63  golden/FluidRigidPlaneLoss-krakenc.prt
+4fcda7aaf520c735c008aa70ec9f4be07e4e015f4ef5859424d8e3317aabc3a3  golden/FluidRigidPlaneLoss-krakenc.shd
+9c381861f712780bc531445ac86d61a7f00e460564017d9d876004385babcba5  golden/FluidTrcC-krakenc.mod
+9b65cad5e5c5e5c4e3a8e36388f6c2d0ee20a0696760e6059cc1474100560a24  golden/FluidTrcC-krakenc.prt
+5c9bc8010aa20e84f2c12a60085743ba30d4297bc4e166ed496d6bac2ffb3ae4  golden/FluidTrcC-krakenc.shd
+d1b1904e809f9afa1da2015ca69bdd56f54ea826c28325513f4af456bd50d374  golden/FluidTrcN-krakenc.mod
+0ff75cc6af3b565c2ec6aa9e120668a8763b78389a59f0f46faa3e89b1a41064  golden/FluidTrcN-krakenc.prt
+90ecb3ccc03e06a20213a410ce44ba01b3894880d9758b46d6e6286e3656c454  golden/FluidTrcN-krakenc.shd
+765e331c634ef047e777dac5e6a65a105a279321458b6595329fe3b609bae227  golden/FluidTrcRigid-krakenc.mod
+084eb9b4988bee683c21dc849a0b42547a0b43ca1589316eac7beb8b752ea64e  golden/FluidTrcRigid-krakenc.prt
+fb2f022adb7652222a1d80a01668f3e6da6106ff8a2ed15acf9344e0c327b974  golden/FluidTrcRigid-krakenc.shd
+```

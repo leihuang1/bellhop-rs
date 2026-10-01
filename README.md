@@ -45,11 +45,15 @@ layer inputs needed to produce a table.
 
 The workspace also contains a separate KRAKEN rewrite: `kraken` currently covers
 validated single-fluid-layer `N/C/P/S` and fixed analytic Munk `A` sound-speed profiles, vacuum or rigid
-surface, modes with a fluid (`A`) or rigid (`R`) bottom and optional fluid-bottom
-`W` attenuation, and coherent line- or point-source FIELD. A separate, narrow
+surface, modes with a fluid (`A`) or rigid (`R`) bottom, water/bottom material
+attenuation, and coherent line- or point-source FIELD. A separate, narrow
 KRAKENC path supports complex modes and coherent line-/point-source FIELD for
-lossless `N/C/P/S/fixed-Munk-A` water over a fluid bottom with optional `W` loss and Richardson
-mesh extrapolation, covering trapped and leaky spectral intervals. Unmodified
+complex `N/C/P/S` or lossless fixed-Munk-A water over a fluid bottom with Richardson
+mesh extrapolation, covering trapped and leaky spectral intervals. Legacy
+N/M/m/F/W/Q/L loss units and T/F/B volume loss are supported; density gradients,
+and extra layers remain excluded. Both backends accept smooth V/R/A top and
+bottom combinations; KRAKENC also accepts a propagating, single-frequency N/C
+top F/TRC subset (cLow >= last-node speed), with no refinement or simultaneous bottom table. Unmodified
 MunkKleaky, MunkKwb, MunkKbb, sductK and refined calibK `.env/.flp` pairs are
 accepted end to end (1,077 modes and 201,201 complex pressures for sductK).
 Cubic/analytic KRAKENC derivatives and unmodified MunkS/MunkAnalytic environments
@@ -70,7 +74,7 @@ cargo run --release -p kraken-cli -- run crates/kraken/tests/fixtures/PekerisCom
 ```
 
 The `kraken` binary reads `.env` plus the same-stem `.flp` (or `--flp PATH`),
-and the selected `.brc/.irc` for KRAKENC table bottoms, then writes [KRAKEN HDF5 schema v1](docs/kraken-output-format.md). Frequencies
+and the selected `.brc/.irc` bottom or `.trc` top resource for KRAKENC, then writes [KRAKEN HDF5 schema v1](docs/kraken-output-format.md). Frequencies
 are solved and written sequentially in input order, including duplicates;
 existing outputs require `--overwrite`. The default cumulative output quota is
 256 MiB (`--max-output-bytes`). This adapter does **not** expand the numerical

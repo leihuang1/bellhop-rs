@@ -5,11 +5,12 @@ The numerical reference is Acoustics Toolbox `v2023.5`, commit
 Fortran 12.2 environment described in [`reference.md`](reference.md).
 
 **Status:** `crates/kraken` supports range-independent, single-fluid-layer
-trapped or rigid-bottom confined modes with optional bottom-half-space `W`
-attenuation, and coherent line- or point-source FIELD. A separate
-KRAKENC slice computes trapped and leaky modes and coherent line-/point-source
-FIELD for lossless `N/C/P/S/fixed-Munk-A` water, vacuum surface and fluid bottom with optional
-`W` loss and up to five Richardson-extrapolated meshes. Unmodified
+trapped or confined modes with water and fluid-half-space attenuation,
+and coherent line- or point-source FIELD. KRAKENC computes trapped and leaky
+modes and coherent FIELD for complex `N/C/P/S` or lossless fixed-Munk-A water.
+Both backends accept smooth V/R/A top and bottom combinations, with bounded
+Richardson refinement; KRAKEN half-spaces must remain trapped. Legacy material
+units N/M/m/F/W/Q/L and added T/F/B volume attenuation are supported as detailed below. Unmodified
 `MunkKleaky`, `MunkKwb`, `MunkKbb`, `sductK` and `calibK` `.env/.flp` pairs
 pass end-to-end differential. Single-frequency, RMax=0 KRAKENC bottom F/BRC
 and P/IRC also pass the original TabRefCoef geo/brc/irc workflows, including
@@ -40,16 +41,17 @@ separate product and acceptance contract.
 The KRAKEN `load_case`/`solve` path currently accepts a narrow legacy
 `.env`/`.flp` subset:
 
-- one frequency and one lossless, constant-density fluid water layer using
+- one frequency and one constant-density fluid water layer using
   `N` (N²-linear), `C` (sound-speed-linear), `P` (monotone PCHIP), `S`
   (not-a-knot cubic spline), or `A` (the fixed 5000 m analytic Munk profile
   from upstream `misc/munk.f90`); depth-varying sound speed is supported,
   but density gradients and additional layers are not;
-- a smooth vacuum (`V`) or rigid (`R`) surface and either a smooth acoustic
-  fluid bottom half-space (`A`) with zero loss (`N`) or non-negative `W` bottom
-  loss (dB/wavelength), or a smooth rigid (`R`) bottom with no half-space record
-  or material properties. Water-column loss, other loss units, elastic layers,
-  and rough boundaries are not supported;
+- smooth vacuum (`V`), rigid (`R`) or acoustic fluid half-space (`A`) at either
+  end. A boundaries carry material/volume attenuation; V/R have no half-space
+  record or material properties. Real KRAKEN requires cHigh no larger than
+  either A-half-space speed; KRAKENC also accepts radiating/leaky half-spaces.
+  N/C/P/S water supports nonnegative absorption; analytic A remains lossless.
+  Elastic layers and rough boundaries are not supported;
 - a coherent, omnidirectional line (`X`) or point (`R`) source (`O`, `C`),
   with one range-independent FIELD profile at 0 km;
 - finite, in-water source/receiver depths. FIELD normally interpolates the
@@ -68,16 +70,15 @@ profile between two rigid boundaries, the zero-order plane mode lies at the
 upper spectral endpoint; the search includes the rounded finite-difference
 endpoint. A fluid bottom includes the decaying half-space contribution to
 normalization and the pinned
-reference's first-order perturbation for bottom attenuation. Analytic Munk
+reference's first-mesh perturbation for water and both A-boundary attenuations. Analytic Munk
 sampling preserves upstream's f32 intermediate `eps` and grid step even though
 its sound speed is stored as f64. Point-source FIELD
 uses the reference's `sqrt(k)` modal factor and cylindrical spreading. The
 former closed-form Pekeris solver remains **only in tests** as an independent
 analytical cross-check. Analytic `A` has no SSP point records, uses density 1,
 and requires the upstream formula's 5000 m water column; it is not a general
-configurable analytic profile. The parser rejects other boundary types, water
-loss, other loss units, source types, and FIELD options instead of silently
-changing meaning.
+configurable analytic profile. The parser rejects unaccepted boundary types,
+source types, and FIELD options instead of silently changing meaning.
 
 Seventeen constructed fixture pairs cover Pekeris (including a three-point
 spline with forced extrapolation, an alternate lossy bottom, derived rigid
@@ -97,8 +98,8 @@ original `.env/.flp` *pair* is not claimed as accepted. The KRAKEN sduct
 derivatives still remove the original leaky phase-speed interval; **unmodified**
 `sductK` is instead compared through KRAKENC below.
 The separate KRAKENC `load_complex_case`/`solve_complex_modes` path currently
-supports lossless `N/C/P/S/fixed-Munk-A` water, vacuum surface, fluid half-space with
-zero or `W` attenuation (including a bottom slower than the water), trapped
+supports complex `N/C/P/S` or lossless fixed-Munk-A water, smooth V/R/A boundaries
+with material/volume attenuation (including half-spaces slower than the water), trapped
 or leaky phase-speed intervals, and non-negative `RMax`. The KRAKENC legacy
 reader accepts both blank and dotted restart options. The `.env` supplies modal sample depths; `.flp`
 supplies FIELD geometry, used by `solve` for coherent line-/point-source
@@ -152,7 +153,7 @@ pass fresh `.mod/.prt/.shd` comparison in CI:
 Repeated pinned runs produce identical `.mod/.shd` binaries for each original
 pair; the original artifacts stay out of Git. The sduct FIELD has 216,693,477
 modal contributions, below the 550-million-per-frequency work ceiling. Water loss
-remains unsupported. KRAKENC `P/S/A` profile evidence is detailed below. Upstream
+and smooth complex boundaries are covered by the derived workflows below. KRAKENC `P/S/A` profile evidence is detailed below. Upstream
 `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)
 checks committed `.mod/.shd/.prt` goldens and newly generated pinned Fortran
@@ -161,13 +162,14 @@ output in CI; provenance is recorded
 
 ### KRAKENC cubic and analytic water
 
-KRAKENC now reuses the existing real/lossless `Profile` for PCHIP (`P`),
-not-a-knot cubic spline (`S`) and the fixed 5000 m Munk formula (`A`). This does
-**not** add water-column attenuation or complex-valued SSP interpolation.
-The half-space slice retains vacuum top, constant density and A bottom with
-optional W loss, blank/dotted restarts, bounded Richardson refinement and
+The earlier interpolation checkpoint reused the real/lossless `Profile` for
+PCHIP (`P`), not-a-knot cubic spline (`S`) and the fixed 5000 m Munk formula (`A`).
+Complex N/C/P/S water and additional loss units are added by the material
+checkpoint below; analytic A remains lossless. The half-space slice retains
+vacuum top, constant density and A bottom, blank/dotted restarts, bounded Richardson refinement and
 ordered discrete frequencies. F/P table boundaries remain **N/C only**;
-complex rigid boundaries, density gradients and extra layers remain excluded.
+density gradients and extra layers remain excluded. Smooth complex rigid
+boundaries are covered by the boundary checkpoint below.
 Spline positivity and coefficient-overflow checks still run at `CaseDefinition`
 validation. Both mode backends share analytic mesh sampling: the f32 step from
 `5000.0 / N` is promoted to f64 separately from the physical finite-difference
@@ -204,13 +206,99 @@ exit 3 after the first frequency, preserves an existing output and cleans
 scratch; no partial/truncated result is accepted. Full 50/500 Hz upstream
 BroadBand/MunkK remains accepted through KRAKEN, not KRAKENC.
 
+### Single-fluid material attenuation
+
+N/C/P/S SSP nodes accept nonnegative compressional absorption. The legacy
+loader converts N (neper/m), M (dB/m), F (dB/m-kHz), W (dB/wavelength), Q
+(quality factor; Q=0 means no loss), L (loss parameter), and m (dB/m at freq0
+with a power law and transition frequency). For m, the water header adds beta/fT
+and the bottom-options record adds its own beta/fT; require beta >= 0 and fT > 0.
+The fourth option character adds Thorp T, Francois–Garrison F (T, salinity, pH,
+mean depth), or biological B (1..200 finite layers with positive resonance/Q).
+Legacy trailing-value inheritance applies to node absorption as to sound speed.
+
+`CaseDefinition::water_attenuation_db_per_wavelength` is empty for lossless
+water or holds one effective value per SSP node **at the case frequency**.
+The existing bottom attenuation field uses the same canonical unit. Both
+backends share complex SSP interpolation: convert losses at the supplied nodes
+before interpolation, use complex N², and interpolate P/S real and imaginary
+parts independently. Reject nonfinite coefficients and cubic negative/gain
+undershoot, or Im(c) > Re(c). KRAKEN uses Re(omega²/c²) for real roots and the
+first-mesh volume/boundary loss perturbation; KRAKENC uses complex coefficients
+through shooting, inverse iteration and normalization. Refinement, frequency
+order/repetition, mode limits, work ceilings and output schema are unchanged.
+
+Volume loss is recomputed per frequency and sampled **at SSP nodes**, not at
+each finite-difference node. Thorp/FG also apply to a fluid half-space; biological
+layers do not (`UpdateHSLoss` passes HUGE(depth)). Analytic Munk rejects volume
+addition and has no lossy point records. F/P bottoms remain lossless N/C only;
+the later boundary checkpoint adds smooth rigid/half-space combinations and
+limited top TRC, not lossy/P/S/A table combinations.
+Density gradients remain rejected: pinned acoustic shooting/vector/normalization
+homogenize density using the top of each medium, not a physical density gradient.
+
+Fourteen explicitly **derived** input pairs produce 27 accepted reference
+workflows (13 through both backends, leaky broadband through KRAKENC only),
+36 frequency blocks, 404 modes and 432 pressures. All `.mod/.shd` outputs are
+byte-identical in three pinned runs. Offline goldens, API and actual CLI-HDF5
+comparisons use existing tolerances; local maximum pressure error is 3.34e-8.
+`WaterLossN/C/P/S` cover depth-varying complex SSPs; `WaterLossUnitN/M/F/Q/L`
+cover additional material units; `WaterLossPower` covers distinct water/bottom
+power laws, a transition inside 75/50/62.5/50 Hz and fractional NG scaling;
+`WaterLossThorp/Fg/Bio` cover volume terms at 500 Hz, including overlapping
+biological layers; `WaterLossLeaky` combines PCHIP water loss, bottom loss,
+leaky modes, refinement and repeated frequencies. These are **not** acceptance
+of original upstream VolAtt input pairs. Fresh CI is configured to check the
+same 27 workflows through the API and actual HDF5 output.
+
+### Smooth boundaries and top reflection tables
+
+Both backends accept all nine smooth top/bottom V/R/A combinations. Public
+`Boundary` is shared by `SurfaceBoundary`/`BottomBoundary` aliases; top A uses
+`surface_sound_speed_mps`, `surface_density_g_cm3` and
+`surface_attenuation_db_per_wavelength` (canonical at the case frequency).
+Non-A boundaries require all three corresponding material fields to be zero.
+Normalization, group speed and KRAKEN first-mesh loss perturbation include each
+A half-space; KRAKENC uses complex impedance at either end. Legacy top A inherits
+its material into the first water record, as in pinned ReadEnvironment; top A
+with m units is rejected because the reference does not define its power-law
+parameters. Source/receiver depths remain inside water, not in either half-space.
+
+Eleven derived pairs cover the nine V/R/A combinations with spline water loss,
+refinement and boundary loss, a constant rigid-rigid lossy plane mode (NG=68),
+and a radiating 343 m/s air top (KRAKENC only): 21 API/CLI-HDF5 workflows.
+The automatic NG=17 rigid-plane variant changes its searched mode count between
+meshes and is explicitly rejected, not trimmed to the first mesh. Complex
+refinement seeds each root from raw previous meshes (Neville interpolation in
+h²), independently of Richardson output rows; this prevents third-mesh root
+skipping with the top A/vacuum-bottom case. Shapes/group speeds remain first-mesh.
+
+Top F consumes a bounded same-stem `.trc` in the same count/angle/magnitude/
+unwrapped-phase format as BRC. It is restricted to single-frequency KRAKENC,
+lossless N/C water, RMax=0, blank restart, no B option and a smooth V/R/A bottom.
+**cLow must be at least the last SSP-node speed**, the inside-water speed used
+by pinned BCImpedancec even at the top. Evanescent top-table roots, simultaneous
+top/bottom tables and top P/IRC are explicitly rejected. A forward-gradient
+TRC experiment outside this bound produced a growing reference root and is not
+accepted; no root is dropped to make the comparison pass. Three constructed
+TRC derivatives with N/C water, cLow=1550 and A/R bottoms add three workflows.
+All 24 boundary `.mod/.shd` workflows are byte-identical in three pinned runs.
+Their complete modes/FIELD and actual CLI-HDF5 pass existing tolerances.
+
+`load_frequency_cases_with_boundary_tables` parses supplied top/bottom snapshots
+without rereading them; older source APIs explicitly reject a missing TRC.
+CLI provenance adds `/inputs/trc` and protects that consumed resource/aliases
+as output destinations, including input, quota and numerical failures.
+`surface_boundary` and bottom V are additive HDF5-v1 metadata; datasets are unchanged.
+These are constructed/derived fixtures, not acceptance of an original TRC pair.
+
 ### Tabulated KRAKENC bottoms
 
 Bottom `F` consumes the same-stem `.brc`; `P` consumes `.irc`. This slice
 requires **one frequency, RMax=0, lossless constant-density N/C single water
 layer, vacuum top, smooth bottom and blank restart option**. The `B` frequency
 option (even with one value), table mesh refinement, random restarts, real
-KRAKEN F/P, top TRC and elastic/multilayer propagation are rejected or remain
+KRAKEN F/P, simultaneous top TRC and elastic/multilayer propagation are rejected or remain
 outside this slice. There is no half-space record/material for F/P; direct
 `CaseDefinition` half-space speed, density and attenuation must be zero.
 
@@ -284,8 +372,8 @@ uses the single case frequency. Automatic NG is resolved at freq0, then each
 mesh uses `INT(NG * multiplier * frequency / freq0)`, not an already-rounded
 base mesh multiplied afterward. For example NG=101 at freq0=50 Hz gives
 151/303/606 intervals at 75 Hz, and 126/252/505 at 62.5 Hz. Existing `N/W`
-loss semantics remain unchanged; modes and bottom loss are recomputed at every
-frequency, not obtained by scaling a previous mode set.
+loss semantics remain unchanged; modes and material/volume loss are recomputed
+at every frequency, not obtained by scaling a previous mode set.
 
 Two **derived** Pekeris broadband pairs have 75/50/62.5 Hz in that order,
 NG=101 and RMax=1000 km: KRAKEN has 5/3/4 modes, KRAKENC has 7/4/6, with
@@ -310,8 +398,8 @@ are not committed and do not replace the different single-frequency
   Omitted trailing material values retain the previous point's values (Fortran
   defaults on the first). `/` ends that
   record, **not** the SSP; the interface depth ends the SSP. The acoustic bottom
-  half-space record may similarly inherit omitted trailing values; a rigid or
-  tabulated bottom has **no** half-space record. In a direct `CaseDefinition`,
+  half-space record may similarly inherit omitted trailing values; a vacuum,
+  rigid or tabulated boundary has **no** half-space record. In a direct `CaseDefinition`,
   its bottom sound speed, density, and loss must all be zero (absent material).
 - Fortran null slots and repetition syntax remain unsupported and are rejected;
   this is not a general Fortran list-directed reader. All parsed numbers must
@@ -413,8 +501,10 @@ broadband Pekeris derivatives and a broadband PCHIP Munk derivative, and unmodif
 upstream MunkK, MunkKleaky, MunkKwb, MunkKbb, sductK, calibK, BroadBand/MunkK
 and all three neggradC geo/brc/irc modes and FIELD. Unmodified MunkS and
 MunkAnalytic environments are additionally checked through KRAKENC with
-separately derived FIELD geometry. Original
-`.mod/.shd` output is not committed.
+separately derived FIELD geometry. The 27 derived water-material workflows
+above, plus 24 derived smooth-boundary/TRC workflows, also have committed
+goldens and configured API/CLI-HDF5 fresh comparisons.
+Original `.mod/.shd` output is not committed.
 
 ## Repository shape
 

@@ -107,11 +107,11 @@ fn complex_case_accepts_extrapolation_and_lossless_cubic_profiles() {
             rigid.bottom_sound_speed_mps = 0.0;
             rigid.bottom_density_g_cm3 = 0.0;
         }
-        assert!(
-            !solve_complex_modes(&Case::from_definition(rigid).unwrap())
+        assert_ne!(
+            solve_complex_modes(&Case::from_definition(rigid).unwrap())
                 .unwrap()
-                .modes
-                .is_empty()
+                .modes,
+            [] as [kraken::NormalMode; 0]
         );
     }
 }
@@ -259,7 +259,7 @@ fn analytic_munk_requires_the_fixed_lossless_water_column() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/MunkAnalytic");
     let case = load_case(root.with_extension("env"), root.with_extension("flp")).unwrap();
     assert_eq!(case.interpolation, kraken::Interpolation::AnalyticMunk);
-    assert!(case.sound_speed_profile.is_empty());
+    assert_eq!(case.sound_speed_profile, [] as [kraken::SoundSpeedPoint; 0]);
     let result = solve(&case).unwrap();
     assert_eq!(result.modes.modes.len(), 102);
     assert_eq!(result.field.pressure.len(), 25);

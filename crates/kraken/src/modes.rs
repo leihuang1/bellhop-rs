@@ -141,23 +141,11 @@ impl<'a> Mesh<'a> {
         bottom_complex_k2: Complex64,
     ) -> Result<Self, DiagnosticReport> {
         let h = case.water_depth_m / n as f64;
-        let analytic = case.interpolation == crate::Interpolation::AnalyticMunk;
-        // munk.f90 computes 5000.0 / N in f32 before assigning it to f64 h.
-        let profile_h = if analytic {
-            f64::from(5000.0_f32 / n as f32)
-        } else {
-            h
-        };
         let mut min_speed = f64::INFINITY;
         let mut invalid_speed = false;
         let b1: Vec<_> = (0..=n)
             .map(|i| {
-                let depth = i as f64 * profile_h;
-                let speed = profile.speed(if analytic {
-                    depth
-                } else {
-                    depth.min(case.water_depth_m)
-                });
+                let speed = profile.mesh_speed(i, n);
                 invalid_speed |= !speed.is_finite() || speed <= 0.0;
                 min_speed = min_speed.min(speed);
                 -2.0 + h * h * (omega * omega / (speed * speed))

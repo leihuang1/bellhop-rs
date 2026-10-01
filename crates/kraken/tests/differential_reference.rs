@@ -69,6 +69,23 @@ fn complex_fluid_modes_match_pinned_fortran() {
 }
 
 #[test]
+fn complex_cubic_and_analytic_modes_and_field_match_pinned_goldens() {
+    for name in [
+        "MunkLeakyPartialP",
+        "MunkLeakyPartialS",
+        "PekerisComplexSpline3",
+        "MunkAnalyticComplex",
+    ] {
+        let env = fixtures().join(name).with_extension("env");
+        compare_complex_field(
+            &env,
+            &env.with_extension("flp"),
+            &fixtures().join("golden").join(name),
+        );
+    }
+}
+
+#[test]
 fn tabulated_bottom_modes_and_field_match_pinned_goldens() {
     for name in ["TabRefBrcN", "TabRefBrcC", "TabRefIrcN", "TabRefIrcC"] {
         let env = fixtures().join(name).with_extension("env");
@@ -89,14 +106,7 @@ fn complex_fluid_matches_fresh_reference() {
             .expect("KRAKEN_COMPLEX_REFERENCE_ROOT is required"),
     );
     let env = fixtures().join(format!("{name}.env"));
-    if matches!(
-        name.as_str(),
-        "PekerisComplexBlank"
-            | "PekerisComplexRefined"
-            | "MunkLeakyPartialLoss"
-            | "MunkLeakyPartialC"
-    ) || name.starts_with("TabRef")
-    {
+    if env.with_extension("flp").is_file() {
         compare_complex_field(&env, &env.with_extension("flp"), &reference);
     } else {
         compare_complex(&env, &reference);
@@ -104,7 +114,7 @@ fn complex_fluid_matches_fresh_reference() {
 }
 
 #[test]
-#[ignore = "requires unmodified upstream complex .env/.flp and pinned Fortran modes/FIELD"]
+#[ignore = "requires external KRAKENC .env/.flp snapshots and pinned Fortran modes/FIELD"]
 fn complex_original_fluid_matches_fresh_reference() {
     let env = PathBuf::from(
         std::env::var_os("KRAKEN_ORIGINAL_COMPLEX_ENV")
@@ -189,6 +199,7 @@ fn multifrequency_modes_and_field_match_pinned_goldens() {
     for (name, solver) in [
         ("PekerisBroadband", kraken::ModeSolver::Kraken),
         ("PekerisComplexBroadband", kraken::ModeSolver::Krakenc),
+        ("MunkLeakyPchipBroadband", kraken::ModeSolver::Krakenc),
     ] {
         compare_frequencies(
             &fixtures().join(name).with_extension("env"),

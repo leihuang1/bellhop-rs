@@ -50,7 +50,7 @@ coherent FIELD `.flp` files), run the same pinned Fortran calculation
 and comparator used by CI:
 
 ```sh
-for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexRefined PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC TabRefBrcN TabRefBrcC TabRefIrcN TabRefIrcC; do
+for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexRefined PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC MunkLeakyPartialP MunkLeakyPartialS PekerisComplexSpline3 MunkAnalyticComplex TabRefBrcN TabRefBrcC TabRefIrcN TabRefIrcC; do
   tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
   KRAKEN_COMPLEX_CASE="$case" \
   KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -76,6 +76,40 @@ for case in MunkKleaky MunkKwb MunkKbb sductK calibK; do
       complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
 done
 ```
+
+KRAKENC P/S/fixed-Munk-A interpolation uses the same lossless `Profile`; four
+cubic/analytic fixtures above compare full modes and FIELD. `MunkS.env` is an
+upstream **SCOOTER environment**, not an original KRAKENC/FIELD pair. It and
+original `MunkAnalytic.env` can additionally be run with KRAKENC and a separately
+**derived** coherent `.flp`; neither original three-line `.flp` parses in FIELD.
+To reproduce direct and actual CLI-HDF5 comparisons without changing either env:
+
+```sh
+mkdir -p target/reference/profile-environments
+docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/profile-environments:/out" \
+  --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 -c \
+  'cp /opt/acoustics-toolbox/tests/Munk/MunkS.env /opt/acoustics-toolbox/tests/Munk/MunkAnalytic.env /out/'
+cargo build --release -p kraken-cli
+for case in MunkS MunkAnalytic; do
+  env="$PWD/target/reference/profile-environments/$case.env"
+  cp crates/kraken/tests/fixtures/MunkAnalytic.flp "${env%.env}.flp"
+  root="$PWD/target/reference/profile-environments/$case/$case"
+  tools/reference/run-kraken-case.sh krakenc "$env" "$(dirname "$root")"
+  KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
+    cargo test --release -p kraken --test differential_reference \
+      complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+  target/release/kraken run "$env" --solver krakenc --output "$root.h5" --overwrite
+  KRAKEN_HDF5_RESULT="$root.h5" \
+  KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
+    cargo test --release -p kraken --test differential_reference \
+      complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+done
+```
+
+Both have 102 modes and 25 pressures. Their `.mod/.shd` and all five new derived
+cubic/analytic/broadband workflows were identical in three pinned runs. Hashes,
+source and explicit input changes accompany the goldens. This is environment
+acceptance with derived FIELD geometry, not original-pair or SCOOTER acceptance.
 
 For original **KRAKENC** TabRefCoef, rebuild the image to include source-built
 BOUNCE (the archive's `bounce.exe`/`bounce.o` are deleted before compilation).
@@ -114,9 +148,9 @@ For multi-frequency runs, the same comparator reads every frequency block in
 BroadBand/MunkK pair is **unmodified upstream**, distinct from tests/Munk/MunkK:
 
 ```sh
-for case in PekerisBroadband PekerisComplexBroadband; do
+for case in PekerisBroadband PekerisComplexBroadband MunkLeakyPchipBroadband; do
   engine=kraken
-  if [ "$case" = PekerisComplexBroadband ]; then engine=krakenc; fi
+  if [ "$case" != PekerisBroadband ]; then engine=krakenc; fi
   tools/reference/run-kraken-case.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
   KRAKEN_FREQUENCY_SOLVER="$engine" \
   KRAKEN_DIFFERENTIAL_ENV="$PWD/crates/kraken/tests/fixtures/$case.env" \
@@ -135,6 +169,18 @@ KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK" \
     multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
 ```
 
+`MunkLeakyPchipBroadband` above is **derived**, with 75/50/62.5/50 Hz in input
+order, NG=803, meshes 1/2/4, 45/30/37/30 modes and 36 pressures per block.
+The full original BroadBand/MunkK comparison remains **KRAKEN**, not KRAKENC:
+KRAKENC 50 Hz passes locally but 500 Hz hits the unchanged 300M root-work ceiling.
+CI verifies explicit CLI failure and atomic-output protection after 50 Hz succeeds:
+
+```sh
+KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
+  cargo test --release -p kraken-cli --test run \
+    original_complex_spline_broadband_retains_the_work_limit_and_output -- --ignored --exact --nocapture
+```
+
 To validate the actual Rust [CLI/HDF5 product](../docs/kraken-output-format.md),
 set `KRAKEN_HDF5_RESULT` for the same comparator. With the fresh reference above:
 
@@ -150,12 +196,15 @@ KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK" \
 
 CI additionally runs this serialized-output path for both broadband Pekeris
 derivatives, original single-frequency MunkK and all five original KRAKENC
-pairs. The optional reader checks schema identity, native datatypes, axes and
+pairs, the four cubic/analytic derivatives, broadband PCHIP Munk and unmodified
+MunkS/analytic environments with derived FIELD geometry. The optional reader
+checks schema identity, native datatypes, axes and
 all values; numerical tolerances are shared with the direct solver path.
 
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
-seventeen single-frequency cases and two derived broadband cases with fixed
+seventeen single-frequency KRAKEN cases, the KRAKENC derivatives above and
+three derived broadband cases with fixed
 tolerances, plus the full unmodified upstream MunkK and BroadBand/MunkK pairs
 and the unmodified upstream MunkAnalytic `.env` with a derived coherent
 FIELD `.flp`. The original MunkAnalytic three-line `.flp` fails in v2023.5

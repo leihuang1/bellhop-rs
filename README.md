@@ -48,16 +48,19 @@ validated single-fluid-layer `N/C/P/S` and fixed analytic Munk `A` sound-speed p
 surface, modes with a fluid (`A`) or rigid (`R`) bottom and optional fluid-bottom
 `W` attenuation, and coherent line- or point-source FIELD. A separate, narrow
 KRAKENC path supports complex modes and coherent line-/point-source FIELD for
-lossless `N/C` water over a fluid bottom with optional `W` loss and Richardson
+lossless `N/C/P/S/fixed-Munk-A` water over a fluid bottom with optional `W` loss and Richardson
 mesh extrapolation, covering trapped and leaky spectral intervals. Unmodified
 MunkKleaky, MunkKwb, MunkKbb, sductK and refined calibK `.env/.flp` pairs are
 accepted end to end (1,077 modes and 201,201 complex pressures for sductK).
+Cubic/analytic KRAKENC derivatives and unmodified MunkS/MunkAnalytic environments
+with separately derived FIELD geometry also pass modes, FIELD and CLI/HDF5.
 Single-frequency, RMax=0 KRAKENC F/BRC and P/IRC bottoms also accept original
 TabRefCoef geo/brc/irc inputs with generated reference tables, including all
 151,803 pressures; auxiliary-file snapshots are recorded in CLI/HDF5 provenance.
 `legacy::load_frequency_cases` supports discrete multi-frequency KRAKEN/KRAKENC
-runs; original `BroadBand/MunkK` passes at both 50 and 500 Hz (102/1,023 modes,
-1,003,002 total complex pressures). This is not a time-domain response. Its
+runs; original `BroadBand/MunkK` passes through KRAKEN at 50 and 500 Hz (102/1,023 modes,
+1,003,002 total complex pressures). KRAKENC 500 Hz still hits its unchanged
+300M root-work ceiling; no partial result is published. This is not a time-domain response. Its
 full 2D acceptance target and explicit exclusions are in
 [the KRAKEN compatibility matrix](docs/kraken-compatibility.md).
 

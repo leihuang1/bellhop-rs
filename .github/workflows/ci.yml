@@ -44,7 +44,7 @@ jobs:
             -c "cp /opt/acoustics-toolbox/tests/Munk/MunkB_Coh.env /out/ && \
                 cp /opt/acoustics-toolbox/tests/SBCX/sbcx_Arr_asc.env /out/ && \
                 cp /opt/acoustics-toolbox/tests/Munk/MunkK.env /opt/acoustics-toolbox/tests/Munk/MunkK.flp /out/ && \
-                cp /opt/acoustics-toolbox/tests/Munk/MunkAnalytic.env /out/ && \
+                cp /opt/acoustics-toolbox/tests/Munk/MunkAnalytic.env /opt/acoustics-toolbox/tests/Munk/MunkS.env /out/ && \
                 cp /opt/acoustics-toolbox/tests/MunkLeaky/MunkKleaky.env /opt/acoustics-toolbox/tests/MunkLeaky/MunkKleaky.flp /out/ && \
                 cp /opt/acoustics-toolbox/tests/MunkLeaky/MunkKwb.env /opt/acoustics-toolbox/tests/MunkLeaky/MunkKwb.flp /out/ && \
                 cp /opt/acoustics-toolbox/tests/MunkLeaky/MunkKbb.env /opt/acoustics-toolbox/tests/MunkLeaky/MunkKbb.flp /out/ && \
@@ -56,7 +56,7 @@ jobs:
         run: tools/reference/run-kraken-case.sh kraken target/reference/cases/MunkK.env
       - name: Fluid KRAKENC modes and FIELD numerical differential
         run: |
-          for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexRefined PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC TabRefBrcN TabRefBrcC TabRefIrcN TabRefIrcC; do
+          for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexRefined PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC MunkLeakyPartialP MunkLeakyPartialS PekerisComplexSpline3 MunkAnalyticComplex TabRefBrcN TabRefBrcC TabRefIrcN TabRefIrcC; do
             tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
             KRAKEN_COMPLEX_CASE="$case" \
             KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -86,9 +86,9 @@ jobs:
             fluid_matches_fresh_reference -- --ignored --exact --nocapture
       - name: Multi-frequency modes and FIELD numerical differential
         run: |
-          for case in PekerisBroadband PekerisComplexBroadband; do
+          for case in PekerisBroadband PekerisComplexBroadband MunkLeakyPchipBroadband; do
             engine=kraken
-            if [ "$case" = PekerisComplexBroadband ]; then engine=krakenc; fi
+            if [ "$case" != PekerisBroadband ]; then engine=krakenc; fi
             tools/reference/run-kraken-case.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             KRAKEN_FREQUENCY_SOLVER="$engine" \
             KRAKEN_DIFFERENTIAL_ENV="$PWD/crates/kraken/tests/fixtures/$case.env" \
@@ -104,9 +104,9 @@ jobs:
       - name: KRAKEN CLI HDF5 numerical differential
         run: |
           cargo build --release -p kraken-cli
-          for case in PekerisBroadband PekerisComplexBroadband; do
+          for case in PekerisBroadband PekerisComplexBroadband MunkLeakyPchipBroadband; do
             engine=kraken
-            if [ "$case" = PekerisComplexBroadband ]; then engine=krakenc; fi
+            if [ "$case" != PekerisBroadband ]; then engine=krakenc; fi
             output="$PWD/target/reference/$case-$engine/$case.h5"
             target/release/kraken run "crates/kraken/tests/fixtures/$case.env" --solver "$engine" --output "$output"
             KRAKEN_HDF5_RESULT="$output" \
@@ -163,6 +163,36 @@ jobs:
               cargo test --release -p kraken --test differential_reference \
                 complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
           done
+      - name: KRAKENC cubic and analytic profiles through CLI HDF5
+        run: |
+          for case in MunkLeakyPartialP MunkLeakyPartialS PekerisComplexSpline3 MunkAnalyticComplex; do
+            output="$PWD/target/reference/$case-krakenc/$case.h5"
+            target/release/kraken run "crates/kraken/tests/fixtures/$case.env" --solver krakenc --output "$output"
+            KRAKEN_HDF5_RESULT="$output" \
+            KRAKEN_COMPLEX_CASE="$case" \
+            KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
+              cargo test --release -p kraken --test differential_reference \
+                complex_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+          done
+          # These are unmodified upstream environments plus a DERIVED FIELD input.
+          # MunkS was a SCOOTER fixture; neither original three-line .flp parses in FIELD.
+          for case in MunkS MunkAnalytic; do
+            cp crates/kraken/tests/fixtures/MunkAnalytic.flp "target/reference/cases/$case.flp"
+            tools/reference/run-kraken-case.sh krakenc "target/reference/cases/$case.env"
+            env="$PWD/target/reference/cases/$case.env"
+            root="$PWD/target/reference/$case-krakenc/$case"
+            KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
+              cargo test --release -p kraken --test differential_reference \
+                complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+            target/release/kraken run "$env" --solver krakenc --output "$root.h5"
+            KRAKEN_HDF5_RESULT="$root.h5" \
+            KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
+              cargo test --release -p kraken --test differential_reference \
+                complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+          done
+          KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
+            cargo test --release -p kraken-cli --test run \
+              original_complex_spline_broadband_retains_the_work_limit_and_output -- --ignored --exact --nocapture
       - name: Critical boundary/interface rays
         run: tools/reference/check-critical-rays.sh
       - name: Official full-grid coherent field (MunkB_Coh)

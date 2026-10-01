@@ -1,13 +1,11 @@
 // Adapted from Acoustics Toolbox v2023.5 Kraken/krakenc.f90,
 // Kraken/InverseIterationMod.f90 and misc/RootFinderSecantMod.f90.
 // Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
-//! Lossless N/C-profile fluid water column over a fluid half-space,
-//! vacuum surface and optional Richardson mesh extrapolation.
+//! Lossless N/C/P/S/fixed-Munk-A water over a fluid half-space,
+//! vacuum surface and optional Richardson mesh extrapolation; N/C table bottoms.
 use crate::profile::Profile;
 use crate::solver::error;
-use crate::{
-    BottomBoundary, Case, DiagnosticReport, Interpolation, ModeSet, NormalMode, SurfaceBoundary,
-};
+use crate::{BottomBoundary, Case, DiagnosticReport, ModeSet, NormalMode, SurfaceBoundary};
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
@@ -22,15 +20,12 @@ const SECANT_RELATIVE_TOLERANCE: f64 = 1e-14;
     clippy::too_many_lines
 )]
 pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
-    if !matches!(
-        case.interpolation,
-        Interpolation::N2Linear | Interpolation::CLinear
-    ) || case.surface_boundary != SurfaceBoundary::Vacuum
+    if case.surface_boundary != SurfaceBoundary::Vacuum
         || case.bottom_boundary == BottomBoundary::Rigid
     {
         return Err(error(
             "KR0302",
-            "KRAKENC currently requires lossless N/C-profile water with a vacuum surface and fluid bottom with optional W attenuation",
+            "KRAKENC requires lossless N/C/P/S/fixed-Munk-A water, a vacuum surface and an A fluid or validated F/P table bottom",
             "mode_solver",
         ));
     }
@@ -66,7 +61,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         let mut min_speed = f64::INFINITY;
         let b: Vec<_> = (0..=n)
             .map(|i| {
-                let c = profile.speed((i as f64 * h).min(case.water_depth_m));
+                let c = profile.mesh_speed(i, n);
                 min_speed = min_speed.min(c);
                 if case.bottom_boundary.is_tabulated() {
                     -2.0 + (Complex64::new(h * h * omega.powi(2), 0.0)

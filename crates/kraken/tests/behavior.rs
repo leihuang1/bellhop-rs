@@ -54,7 +54,7 @@ fn complex_case_accepts_slow_bottom_and_default_restart_setting() {
 }
 
 #[test]
-fn complex_case_accepts_extrapolation_but_rejects_unsupported_interpolation() {
+fn complex_case_accepts_extrapolation_and_lossless_cubic_profiles() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let base = load_complex_case(
         root.join("PekerisComplexGradient.env"),
@@ -87,10 +87,61 @@ fn complex_case_accepts_extrapolation_but_rejects_unsupported_interpolation() {
     let report = solve_complex_modes(&Case::from_definition(unconverged).unwrap()).unwrap_err();
     assert_eq!(report.diagnostics()[0].field, "max_range_m");
 
-    let mut pchip = base;
-    pchip.interpolation = kraken::Interpolation::Pchip;
-    let report = solve_complex_modes(&Case::from_definition(pchip).unwrap()).unwrap_err();
-    assert_eq!(report.diagnostics()[0].field, "mode_solver");
+    for interpolation in [kraken::Interpolation::Pchip, kraken::Interpolation::Spline] {
+        let mut cubic = base.clone();
+        cubic.interpolation = interpolation;
+        assert_eq!(
+            solve_complex_modes(&Case::from_definition(cubic).unwrap())
+                .unwrap()
+                .modes
+                .len(),
+            4
+        );
+    }
+    for boundary in ["surface", "bottom"] {
+        let mut unsupported = base.clone();
+        if boundary == "surface" {
+            unsupported.surface_boundary = SurfaceBoundary::Rigid;
+        } else {
+            unsupported.bottom_boundary = BottomBoundary::Rigid;
+            unsupported.bottom_sound_speed_mps = 0.0;
+            unsupported.bottom_density_g_cm3 = 0.0;
+        }
+        let report = solve_complex_modes(&Case::from_definition(unsupported).unwrap()).unwrap_err();
+        assert_eq!(report.diagnostics()[0].field, "mode_solver");
+    }
+}
+
+#[test]
+fn complex_cubic_profiles_retain_numeric_validation() {
+    let mut input = definition();
+    input.mode_solver = kraken::ModeSolver::Krakenc;
+    input.interpolation = kraken::Interpolation::Spline;
+    input.sound_speed_profile = [(0.0, 1500.0), (1.0, 1500.0), (100.0, 1e8)]
+        .map(|(depth_m, sound_speed_mps)| kraken::SoundSpeedPoint {
+            depth_m,
+            sound_speed_mps,
+        })
+        .to_vec();
+    let report = Case::from_definition(input.clone()).unwrap_err();
+    assert!(
+        report
+            .diagnostics()
+            .iter()
+            .any(|d| d.field == "sound_speed_profile")
+    );
+    for interpolation in [kraken::Interpolation::Pchip, kraken::Interpolation::Spline] {
+        input.interpolation = interpolation;
+        input.sound_speed_profile[1].depth_m = 1e-310;
+        input.sound_speed_profile[1].sound_speed_mps = 1e308;
+        let report = Case::from_definition(input.clone()).unwrap_err();
+        assert!(
+            report
+                .diagnostics()
+                .iter()
+                .any(|d| d.field == "sound_speed_profile")
+        );
+    }
 }
 
 #[test]

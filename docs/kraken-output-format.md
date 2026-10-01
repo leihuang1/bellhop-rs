@@ -5,8 +5,8 @@ This is a product adapter for the **currently accepted numerical subset** in
 matrix. It supports legacy `.env/.flp` inputs, KRAKEN or KRAKENC, and discrete
 single/multiple-frequency modes plus coherent FIELD. JSON, HTTP, modes-only CLI
 runs, reflection-table generation, ray arrivals and time-domain synthesis are
-not provided. The original BroadBand/MunkK uses KRAKEN; its `S` water profile
-is still outside KRAKENC's `N/C` subset.
+not provided. Original BroadBand/MunkK is accepted through KRAKEN; KRAKENC
+now supports its S profile but still rejects 500 Hz at the unchanged work ceiling.
 
 ## CLI
 
@@ -19,6 +19,12 @@ The installed binary is `kraken`; `cargo install --path crates/kraken-cli`
 builds it using the existing static HDF5 dependency.
 
 - `--solver kraken|krakenc` defaults to `kraken`; the engine is not guessed.
+- KRAKENC A-bottom lossless water supports N/C/P/S/fixed-Munk-A interpolation,
+  with the existing bounded refinement and frequency-order contract. This is
+  not water attenuation or a complex-valued SSP input. Original BroadBand/MunkK
+  at 500 Hz still exceeds KRAKENC's 300M root-work ceiling: exit 3 preserves the
+  previous output, even after 50 Hz was written to scratch. KRAKEN acceptance
+  of the same pair is unchanged.
 - KRAKENC `F`/`P` bottoms additionally consume same-stem `.brc`/`.irc`; this
   slice is single-frequency, RMax=0, lossless N/C water and vacuum top. Missing,
   malformed or unaccepted table combinations fail explicitly. Rust does not
@@ -172,7 +178,9 @@ same strict `.mod/.prt/.shd` comparator (`KRAKEN_HDF5_RESULT`): both derived
 Pekeris broadband pairs, original single-frequency MunkK, all five original
 KRAKENC pairs, and original BroadBand/MunkK (both frequencies, 1,003,002
 pressures), plus four small table derivatives and all three original TabRefCoef
-geo/brc/irc workflows with BOUNCE-generated resources. Every mode, shape and
+geo/brc/irc workflows with BOUNCE-generated resources, four cubic/analytic
+KRAKENC derivatives, broadband PCHIP Munk and original MunkS/MunkAnalytic
+environments with **derived** FIELD geometry. Every mode, shape and
 pressure is checked at the existing tolerances. The table derivatives have new
 Fortran goldens; no numerical tolerance is changed. Rust HDF5 artifacts
 are not committed as Fortran goldens.

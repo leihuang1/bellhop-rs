@@ -41,6 +41,8 @@ unavailable. BELLHOP v2023.5's `W` boundary option is rejected because the
 reference advertises table generation but contains neither a generator nor the
 layer inputs needed to produce a table.
 
+## KRAKEN/KRAKENC
+
 The workspace also contains a separate KRAKEN rewrite: `kraken` currently covers
 validated single-fluid-layer `N/C/P/S` and fixed analytic Munk `A` sound-speed profiles, vacuum or rigid
 surface, modes with a fluid (`A`) or rigid (`R`) bottom and optional fluid-bottom
@@ -56,13 +58,26 @@ runs; original `BroadBand/MunkK` passes at both 50 and 500 Hz (102/1,023 modes,
 full 2D acceptance target and explicit exclusions are in
 [the KRAKEN compatibility matrix](docs/kraken-compatibility.md).
 
+```console
+cargo run --release -p kraken-cli -- run crates/kraken/tests/fixtures/PekerisBroadband.env --output broadband.h5
+cargo run --release -p kraken-cli -- run crates/kraken/tests/fixtures/PekerisComplexBroadband.env --solver krakenc --output complex.h5
+```
+
+The `kraken` binary reads `.env` plus the same-stem `.flp` (or `--flp PATH`)
+and writes [KRAKEN HDF5 schema v1](docs/kraken-output-format.md). Frequencies
+are solved and written sequentially in input order, including duplicates;
+existing outputs require `--overwrite`. The default cumulative output quota is
+256 MiB (`--max-output-bytes`). This adapter does **not** expand the numerical
+matrix or provide JSON/HTTP or time-domain products. BELLHOP schema v3 is unchanged.
+
 ## Workspace
 
 - `bellhop`: legacy/JSON input models and deterministic solver
-- `bellhop-hdf5`: shared HDF5 schema writer
+- `bellhop-hdf5`: separate BELLHOP v3 and KRAKEN v1 HDF5 adapters
 - `bellhop-cli`: local validation, conversion, and simulation
 - `bellhop-server`: synchronous JSON/HDF5 HTTP service
 - `kraken`: single-fluid-layer 2D KRAKEN modes/FIELD and narrow KRAKENC modes/FIELD slice
+- `kraken-cli`: supported legacy KRAKEN/KRAKENC pairs to atomic, bounded HDF5 output
 
 ## License
 

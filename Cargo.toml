@@ -5,6 +5,7 @@ members = [
     "crates/bellhop-hdf5",
     "crates/bellhop-server",
     "crates/kraken",
+    "crates/kraken-cli",
 ]
 resolver = "2"
 

@@ -13,7 +13,10 @@ FIELD for lossless `N/C` water, vacuum surface and fluid bottom with optional
 `MunkKleaky`, `MunkKwb`, `MunkKbb`, `sductK` and `calibK` `.env/.flp` pairs
 pass end-to-end differential. Discrete multi-frequency KRAKEN/KRAKENC cases
 are also supported; unmodified `tests/BroadBand/MunkK.env/.flp` passes at 50
-and 500 Hz. This is not the full matrix below; unsupported inputs are rejected.
+and 500 Hz. The `kraken` CLI now runs supported legacy pairs and writes
+[KRAKEN HDF5 schema v1](kraken-output-format.md), with sequential frequency
+output and atomic publication. JSON/HTTP remain unimplemented. This is not
+the full matrix below; unsupported inputs are rejected.
 
 ## Products
 
@@ -24,8 +27,8 @@ The target is the two-dimensional normal-mode workflow:
 3. `FIELD` synthesizes complex frequency-domain pressure from a mode set.
 
 The Rust result model exposes modes and pressure fields, not BELLHOP-style ray
-arrivals. Rust output will use a versioned HDF5 schema rather than the Fortran
-`.mod` and `.shd` binary formats. A wideband time-domain response would be a
+arrivals. Rust CLI output uses an independent versioned KRAKEN HDF5 schema,
+not the Fortran `.mod` and `.shd` binary formats or BELLHOP schema v3. A wideband time-domain response would be a
 separate product and acceptance contract.
 
 ## Current slice
@@ -155,8 +158,9 @@ output in CI; provenance is recorded
 input frequency order. Each case uses the existing `solve` (or KRAKENC
 `solve_complex_modes`) and produces a separately labelled frequency-domain
 result. `load_case` and `load_complex_case` reject multiple frequencies rather
-than silently taking the first. No batched solver, FFT, time-domain response,
-CLI, JSON or HDF5 adapter is added by this slice.
+than silently taking the first. The CLI/HDF5 adapter processes these cases
+sequentially with cumulative output quotas; it adds no batched numerical solver,
+FFT, time-domain response, JSON or HTTP endpoint.
 
 The sixth top-option character `B` enables a frequency count/vector after
 `.env` source/receiver depths. Frequencies are finite and positive; duplicates
@@ -208,10 +212,11 @@ are not committed and do not replace the different single-frequency
   pressure grids at 1,000,000 samples and 550,000,000 modal contributions.
   The larger KRAKEN/FIELD work bounds cover original BroadBand/MunkK at
   500 Hz (2,273,677,857 conservative root operations, 513,035,523 FIELD
-  contributions); numerical tolerances are unchanged. There is no batched
-  execution/output allocation: the loader bounds cumulative input copies,
-  while callers can solve and discard results one frequency at a time. Work
-  limits apply to each `solve`, not cumulatively across separate calls.
+  contributions); numerical tolerances are unchanged. The loader bounds
+  cumulative input copies. The CLI additionally bounds cumulative output
+  payload/file size (default 256 MiB), solving and writing one frequency at
+  a time. Numerical work limits apply to each `solve`, not cumulatively
+  across separate calls; the output quota is not a CPU timeout.
 - `mesh_points` = 0 selects the reference's automatic base mesh (at least ten,
   ~20 points per wavelength); otherwise 10–1,000,000 is allowed if not too
   coarse. `max_range_m` = 0 uses the base mesh only; larger values control
@@ -297,6 +302,8 @@ MunkKbb, sductK, calibK and BroadBand/MunkK modes and FIELD. Original
 ## Repository shape
 
 The implementation follows the existing BELLHOP boundaries: `crates/kraken`
-contains validated cases, legacy adapters, mode solving, and FIELD. CLI and HDF5
-adapters can follow once the numerical path is stable. No shared acoustics
-abstraction is planned until real duplication justifies one.
+contains validated cases, legacy adapters, mode solving, and FIELD. The
+`kraken-cli` binary uses `bellhop-hdf5::kraken` for the supported legacy-to-HDF5
+workflow; BELLHOP v3 and KRAKEN v1 schemas and result types remain independent.
+JSON and HTTP adapters are still planned. No shared acoustics abstraction is
+introduced.

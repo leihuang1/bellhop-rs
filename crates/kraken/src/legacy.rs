@@ -8,6 +8,9 @@ use crate::{
     MAX_VECTOR_LENGTH, ModeSolver, SoundSpeedPoint, SourceGeometry, SurfaceBoundary,
 };
 
+/// Maximum byte length of each legacy input, including source-based loading.
+pub const MAX_INPUT_BYTES: u64 = 1_048_576;
+
 const MAX_PROFILE_POINTS: usize = MAX_VECTOR_LENGTH;
 const MAX_FREQUENCIES: usize = 1000;
 const MAX_FREQUENCY_INPUT_VALUES: usize = 5_000_000;
@@ -66,9 +69,36 @@ pub fn load_frequency_cases(
 ) -> Result<Vec<Case>, DiagnosticReport> {
     let env_path = env_path.as_ref();
     let flp_path = flp_path.as_ref();
-    parse_frequency_cases(
+    load_frequency_cases_from_sources(
         &read_file(env_path)?,
         &read_file(flp_path)?,
+        env_path,
+        flp_path,
+        mode_solver,
+    )
+}
+
+/// Load frequency cases from exact UTF-8 input snapshots, preserving source locations.
+///
+/// This lets adapters record hashes of the bytes actually parsed, without rereading files.
+/// The same input-size and validation limits as the file loader apply.
+///
+/// # Errors
+///
+/// Returns structured input-size, parse, mesh-scaling, and case diagnostics.
+pub fn load_frequency_cases_from_sources(
+    env_source: &str,
+    flp_source: &str,
+    env_path: &Path,
+    flp_path: &Path,
+    mode_solver: ModeSolver,
+) -> Result<Vec<Case>, DiagnosticReport> {
+    for (source, path) in [(env_source, env_path), (flp_source, flp_path)] {
+        check_input_size(source, path)?;
+    }
+    parse_frequency_cases(
+        env_source,
+        flp_source,
         env_path,
         flp_path,
         mode_solver,
@@ -270,7 +300,6 @@ fn parse_frequency_cases(
 }
 
 fn read_file(path: &Path) -> Result<String, DiagnosticReport> {
-    const MAX_INPUT_BYTES: u64 = 1_048_576;
     let mut source = String::new();
     File::open(path)
         .and_then(|file| file.take(MAX_INPUT_BYTES + 1).read_to_string(&mut source))
@@ -284,6 +313,11 @@ fn read_file(path: &Path) -> Result<String, DiagnosticReport> {
                 1,
             )
         })?;
+    check_input_size(&source, path)?;
+    Ok(source)
+}
+
+fn check_input_size(source: &str, path: &Path) -> Result<(), DiagnosticReport> {
     if source.len() as u64 > MAX_INPUT_BYTES {
         return Err(one(
             "KR0201",
@@ -294,7 +328,7 @@ fn read_file(path: &Path) -> Result<String, DiagnosticReport> {
             1,
         ));
     }
-    Ok(source)
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -1000,6 +1034,41 @@ fn one(
 mod tests {
     use super::{parse_case, parse_environment, parse_field, parse_frequency_cases, read_file};
     use std::path::Path;
+
+    #[test]
+    fn frequency_source_snapshots_match_files_and_enforce_size_limits() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/PekerisBroadband");
+        let env = root.with_extension("env");
+        let flp = root.with_extension("flp");
+        let env_source = read_file(&env).unwrap();
+        let flp_source = read_file(&flp).unwrap();
+        let parse = |source: &str| {
+            super::load_frequency_cases_from_sources(
+                source,
+                &flp_source,
+                Path::new("snapshot.env"),
+                Path::new("snapshot.flp"),
+                crate::ModeSolver::Kraken,
+            )
+        };
+        assert_eq!(
+            parse(&env_source).unwrap(),
+            super::load_frequency_cases(&env, &flp, crate::ModeSolver::Kraken).unwrap()
+        );
+        let report =
+            parse(&" ".repeat(usize::try_from(super::MAX_INPUT_BYTES + 1).unwrap())).unwrap_err();
+        assert_eq!(report.diagnostics()[0].path, Path::new("snapshot.env"));
+        assert!(report.diagnostics()[0].message.contains("1 MiB"));
+        let report = super::load_frequency_cases_from_sources(
+            &env_source,
+            &" ".repeat(usize::try_from(super::MAX_INPUT_BYTES + 1).unwrap()),
+            &env,
+            &flp,
+            crate::ModeSolver::Kraken,
+        )
+        .unwrap_err();
+        assert_eq!(report.diagnostics()[0].path, flp);
+    }
 
     #[test]
     #[allow(clippy::float_cmp)]

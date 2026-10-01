@@ -1,4 +1,6 @@
-//! Shared HDF5 result writer used by the CLI and HTTP service.
+//! BELLHOP and KRAKEN HDF5 adapters with separate, versioned schemas.
+
+pub mod kraken;
 
 use std::path::Path;
 use std::str::FromStr;

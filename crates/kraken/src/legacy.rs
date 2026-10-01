@@ -39,19 +39,28 @@ pub fn load_case(
 /// # Errors
 ///
 /// Returns structured input diagnostics for unsupported configurations.
+#[allow(clippy::missing_panics_doc)] // parser guarantees exactly one case
 pub fn load_complex_case(
     env_path: impl AsRef<Path>,
     flp_path: impl AsRef<Path>,
 ) -> Result<Case, DiagnosticReport> {
     let env_path = env_path.as_ref();
     let flp_path = flp_path.as_ref();
-    parse_case_with_solver(
-        &read_file(env_path)?,
-        &read_file(flp_path)?,
+    let env = read_file(env_path)?;
+    let flp = read_file(flp_path)?;
+    let table = bottom_table_extension(&env, env_path, ModeSolver::Krakenc)?
+        .map(|ext| read_file(&env_path.with_extension(ext)))
+        .transpose()?;
+    parse_frequency_cases_with_bottom_table(
+        &env,
+        &flp,
         env_path,
         flp_path,
         ModeSolver::Krakenc,
+        true,
+        table.as_deref(),
     )
+    .map(|mut cases| cases.pop().unwrap())
 }
 
 /// Load one validated case per frequency, in legacy input order.
@@ -69,12 +78,18 @@ pub fn load_frequency_cases(
 ) -> Result<Vec<Case>, DiagnosticReport> {
     let env_path = env_path.as_ref();
     let flp_path = flp_path.as_ref();
-    load_frequency_cases_from_sources(
-        &read_file(env_path)?,
-        &read_file(flp_path)?,
+    let env = read_file(env_path)?;
+    let flp = read_file(flp_path)?;
+    let table = bottom_table_extension(&env, env_path, mode_solver)?
+        .map(|ext| read_file(&env_path.with_extension(ext)))
+        .transpose()?;
+    load_frequency_cases_with_bottom_table(
+        &env,
+        &flp,
         env_path,
         flp_path,
         mode_solver,
+        table.as_deref(),
     )
 }
 
@@ -139,7 +154,6 @@ fn parse_case_with_solver(
     .map(|mut cases| cases.pop().unwrap())
 }
 
-#[allow(clippy::float_cmp, clippy::too_many_lines)]
 fn parse_frequency_cases(
     env_source: &str,
     flp_source: &str,
@@ -148,7 +162,101 @@ fn parse_frequency_cases(
     mode_solver: ModeSolver,
     single_frequency: bool,
 ) -> Result<Vec<Case>, DiagnosticReport> {
+    parse_frequency_cases_with_bottom_table(
+        env_source,
+        flp_source,
+        env_path,
+        flp_path,
+        mode_solver,
+        single_frequency,
+        None,
+    )
+}
+
+/// Return the same-stem bottom resource required by this environment.
+/// # Errors
+/// Returns input-size and environment parse diagnostics.
+pub fn bottom_table_extension(
+    source: &str,
+    path: &Path,
+    solver: ModeSolver,
+) -> Result<Option<&'static str>, DiagnosticReport> {
+    check_input_size(source, path)?;
+    let env = parse_environment_with_solver(source, path, solver)?;
+    Ok(match env.bottom_boundary {
+        BottomBoundary::Reflection(_) => Some("brc"),
+        BottomBoundary::Impedance { .. } => Some("irc"),
+        _ => None,
+    })
+}
+
+/// Parse exact environment, FIELD and optional bottom-table snapshots.
+/// # Errors
+/// Returns structured input-size, resource, parse and validation diagnostics.
+pub fn load_frequency_cases_with_bottom_table(
+    env_source: &str,
+    flp_source: &str,
+    env_path: &Path,
+    flp_path: &Path,
+    mode_solver: ModeSolver,
+    bottom_table: Option<&str>,
+) -> Result<Vec<Case>, DiagnosticReport> {
+    for (source, path) in [(env_source, env_path), (flp_source, flp_path)] {
+        check_input_size(source, path)?;
+    }
+    parse_frequency_cases_with_bottom_table(
+        env_source,
+        flp_source,
+        env_path,
+        flp_path,
+        mode_solver,
+        false,
+        bottom_table,
+    )
+}
+
+#[allow(clippy::float_cmp, clippy::too_many_lines)]
+fn parse_frequency_cases_with_bottom_table(
+    env_source: &str,
+    flp_source: &str,
+    env_path: &Path,
+    flp_path: &Path,
+    mode_solver: ModeSolver,
+    single_frequency: bool,
+    bottom_table: Option<&str>,
+) -> Result<Vec<Case>, DiagnosticReport> {
     let mut environment = parse_environment_with_solver(env_source, env_path, mode_solver)?;
+    if environment.bottom_boundary.is_tabulated() {
+        let extension = if matches!(environment.bottom_boundary, BottomBoundary::Reflection(_)) {
+            "brc"
+        } else {
+            "irc"
+        };
+        let path = env_path.with_extension(extension);
+        let source = bottom_table.ok_or_else(|| {
+            one(
+                "KR0001",
+                "required bottom table snapshot is missing",
+                "bottom_boundary",
+                &path,
+                1,
+                1,
+            )
+        })?;
+        check_input_size(source, &path)?;
+        environment.bottom_boundary = parse_bottom_table(source, &path, extension)?;
+        crate::reflection::validate_table(&environment.bottom_boundary, environment.frequency_hz)
+            .map_err(|message| one("KR0201", message, "bottom_boundary", &path, 1, 1))?;
+    } else if bottom_table.is_some() {
+        return Err(one(
+            "KR0202",
+            "unexpected bottom table",
+            "bottom_boundary",
+            env_path,
+            1,
+            1,
+        ));
+    }
     if single_frequency && environment.frequencies_hz.len() != 1 {
         let (line, column) = environment.locations["frequencies_hz"];
         return Err(one(
@@ -183,10 +291,10 @@ fn parse_frequency_cases(
     mode_sample_depths_m.sort_by(f64::total_cmp);
     mode_sample_depths_m.dedup_by(|left, right| *left == *right);
 
-    let bottom_location = if environment.bottom_boundary == BottomBoundary::Rigid {
-        "bottom_options"
-    } else {
+    let bottom_location = if environment.bottom_boundary == BottomBoundary::FluidHalfSpace {
         "bottom_half_space"
+    } else {
+        "bottom_options"
     };
     let env_locations = environment.locations;
     let field_locations = field.locations;
@@ -216,7 +324,13 @@ fn parse_frequency_cases(
         receiver_ranges_m: field.receiver_ranges_m,
         receiver_offsets_m: field.receiver_offsets_m,
     };
-    let values = definition.sound_speed_profile.len()
+    let table_values = match &definition.bottom_boundary {
+        BottomBoundary::Reflection(points) => points.len(),
+        BottomBoundary::Impedance { points, .. } => points.len(),
+        _ => 0,
+    };
+    let values = table_values
+        + definition.sound_speed_profile.len()
         + definition.mode_sample_depths_m.len()
         + definition.source_depths_m.len()
         + definition.receiver_depths_m.len()
@@ -260,7 +374,8 @@ fn parse_frequency_cases(
                             "sound_speed_profile" | "water_density_g_cm3" => {
                                 (&env_locations, env_path, "sound_speed_profile")
                             }
-                            "bottom_sound_speed_mps"
+                            "bottom_boundary"
+                            | "bottom_sound_speed_mps"
                             | "bottom_density_g_cm3"
                             | "bottom_attenuation_db_per_wavelength" => {
                                 (&env_locations, env_path, bottom_location)
@@ -769,20 +884,33 @@ fn parse_environment_with_solver(
 
     let bottom_option = reader.record("bottom_options")?;
     if bottom_option.tokens.len() != 2
-        || !matches!(bottom_option.tokens[0].text.as_str(), "A" | "R")
+        || !matches!(bottom_option.tokens[0].text.as_str(), "A" | "R" | "F" | "P")
+        || (mode_solver == ModeSolver::Kraken
+            && matches!(bottom_option.tokens[0].text.as_str(), "F" | "P"))
         || number(&bottom_option.tokens[1], path, "bottom_roughness")? != 0.0
         || (bottom_option.tokens[0].text == "R" && option(2) != b'N')
     {
         return Err(reader.record_error(
             &bottom_option,
             "bottom_options",
-            "requires a smooth acoustic fluid half-space or rigid bottom without loss units",
+            "requires smooth A/R bottom (R without loss units), or KRAKENC F/P table bottom",
         ));
     }
-    let bottom_boundary = if bottom_option.tokens[0].text == "R" {
-        BottomBoundary::Rigid
-    } else {
-        BottomBoundary::FluidHalfSpace
+    if matches!(bottom_option.tokens[0].text.as_str(), "F" | "P") && option(4) == b'.' {
+        return Err(reader.record_error(
+            &bottom_option,
+            "bottom_options",
+            "tabulated bottoms require blank restart option (no random restarts)",
+        ));
+    }
+    let bottom_boundary = match bottom_option.tokens[0].text.as_str() {
+        "R" => BottomBoundary::Rigid,
+        "F" => BottomBoundary::Reflection(Vec::new()),
+        "P" => BottomBoundary::Impedance {
+            frequency_hz,
+            points: Vec::new(),
+        },
+        _ => BottomBoundary::FluidHalfSpace,
     };
     let mut bottom = [0.0; 6];
     if bottom_boundary == BottomBoundary::FluidHalfSpace {
@@ -946,6 +1074,113 @@ fn read_vector_values(
     Ok(values)
 }
 
+fn parse_bottom_table(
+    source: &str,
+    path: &Path,
+    extension: &str,
+) -> Result<BottomBoundary, DiagnosticReport> {
+    if extension == "brc" {
+        let mut reader = Reader::new(source, path)?;
+        let count = reader.count("bottom_boundary.count")?;
+        let mut points = Vec::with_capacity(count);
+        for _ in 0..count {
+            let values = reader.numbers("bottom_boundary", 3)?;
+            points.push(crate::ReflectionPoint {
+                angle_degrees: values[0],
+                magnitude: values[1],
+                phase_radians: values[2].to_radians(),
+            });
+        }
+        reader.finish()?;
+        return Ok(BottomBoundary::Reflection(points));
+    }
+    let mut lines = source.lines();
+    let header = lines.next().unwrap_or("");
+    let mut reader = Reader::new(header, path)?;
+    let record = reader.record("bottom_boundary.frequency_hz")?;
+    if record.tokens.len() != 2 || !matches!(header.trim_start().chars().next(), Some('\'' | '"')) {
+        return Err(reader.record_error(
+            &record,
+            "bottom_boundary",
+            "IRC header requires quoted title and frequency",
+        ));
+    }
+    let frequency_hz = number(&record.tokens[1], path, "bottom_boundary.frequency_hz")?;
+    let count_line = lines.next().unwrap_or("");
+    let count = count_line
+        .trim()
+        .parse::<usize>()
+        .ok()
+        .filter(|n| (2..=MAX_VECTOR_LENGTH).contains(n))
+        .ok_or_else(|| {
+            one(
+                "KR0102",
+                "IRC requires 2..=100000 rows",
+                "bottom_boundary",
+                path,
+                2,
+                1,
+            )
+        })?;
+    let mut points = Vec::with_capacity(count);
+    for index in 0..count {
+        let line = lines.next().unwrap_or("");
+        let fail = || {
+            one(
+                "KR0102",
+                "expected IRC fixed-width (5G15.7,I5) row",
+                "bottom_boundary",
+                path,
+                index + 3,
+                1,
+            )
+        };
+        if !line.is_ascii() || line.len() < 80 || !line[80..].trim().is_empty() {
+            return Err(fail());
+        }
+        let mut values = [0.0; 5];
+        for (i, value) in values.iter_mut().enumerate() {
+            let mut text = line[i * 15..(i + 1) * 15].trim().to_owned();
+            // G15.7 omits E when a three-digit exponent fills the field.
+            if !text.contains(['e', 'E', 'd', 'D'])
+                && let Some((index, _)) = text
+                    .char_indices()
+                    .skip(1)
+                    .find(|(_, ch)| matches!(ch, '+' | '-'))
+            {
+                text.insert(index, 'E');
+            }
+            let token = Token {
+                text,
+                line: index + 3,
+                column: i * 15 + 1,
+            };
+            *value = number(&token, path, "bottom_boundary")?;
+        }
+        let power = line[75..80].trim().parse::<i32>().map_err(|_| fail())?;
+        points.push(crate::ImpedancePoint {
+            wavenumber_squared: values[0],
+            f: num_complex::Complex64::new(values[1], values[2]),
+            g: num_complex::Complex64::new(values[3], values[4]),
+            power,
+        });
+    }
+    if lines.any(|line| !line.trim().is_empty()) {
+        return Err(one(
+            "KR0102",
+            "unexpected trailing IRC data",
+            "bottom_boundary",
+            path,
+            count + 3,
+            1,
+        ));
+    }
+    Ok(BottomBoundary::Impedance {
+        frequency_hz,
+        points,
+    })
+}
+
 struct Field {
     mode_limit: usize,
     source_geometry: SourceGeometry,
@@ -1033,6 +1268,28 @@ fn one(
 #[cfg(test)]
 mod tests {
     use super::{parse_case, parse_environment, parse_field, parse_frequency_cases, read_file};
+
+    #[test]
+    fn irc_fixed_width_accepts_d_and_letterless_exponents_without_splitting_fields() {
+        let row = |x: &str| {
+            format!(
+                "{x:>15}{:>15}{:>15}{:>15}{:>15}{:>5}\n",
+                "-.1234567-100", "0.0", "1.0D+00", "0.0", 0
+            )
+        };
+        let source = format!("'fixed width' 50.0\n2\n{}{}", row("1.0"), row("2.0"));
+        let crate::BottomBoundary::Impedance { points, .. } =
+            super::parse_bottom_table(&source, std::path::Path::new("fixed.irc"), "irc").unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(points[0].f.re.to_bits(), (-0.123_456_7e-100_f64).to_bits());
+        assert_eq!(points[1].g.re.to_bits(), 1.0_f64.to_bits());
+        let invalid = source.replace("1.0D+00", "NaN");
+        assert!(
+            super::parse_bottom_table(&invalid, std::path::Path::new("fixed.irc"), "irc").is_err()
+        );
+    }
     use std::path::Path;
 
     #[test]

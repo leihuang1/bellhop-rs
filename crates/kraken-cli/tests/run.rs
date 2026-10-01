@@ -63,6 +63,10 @@ fn cli_round_trips_single_and_multifrequency_results() {
         ("PekerisComplexBlank", "krakenc"),
         ("PekerisComplexRefined", "krakenc"),
         ("MunkLeakyPartialC", "krakenc"),
+        ("TabRefBrcN", "krakenc"),
+        ("TabRefBrcC", "krakenc"),
+        ("TabRefIrcN", "krakenc"),
+        ("TabRefIrcC", "krakenc"),
         ("PekerisBroadband", "kraken"),
         ("PekerisComplexBroadband", "krakenc"),
     ] {
@@ -143,8 +147,18 @@ fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
             .len(),
         cases.len()
     );
-    for (name, path) in [("env", env), ("flp", flp)] {
-        let bytes = fs::read(path).unwrap();
+    let mut inputs = vec![("env", env.to_path_buf()), ("flp", flp.to_path_buf())];
+    match &cases[0].bottom_boundary {
+        kraken::BottomBoundary::Reflection(_) => inputs.push(("brc", env.with_extension("brc"))),
+        kraken::BottomBoundary::Impedance { .. } => inputs.push(("irc", env.with_extension("irc"))),
+        _ => {}
+    }
+    assert_eq!(
+        file.group("inputs").unwrap().member_names().unwrap().len(),
+        inputs.len()
+    );
+    for (name, path) in inputs {
+        let bytes = fs::read(&path).unwrap();
         let group = file.group(&format!("inputs/{name}")).unwrap();
         assert_eq!(attribute(&group, "filename"), path.to_string_lossy());
         assert_eq!(
@@ -211,6 +225,15 @@ fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
             match case.source_geometry {
                 kraken::SourceGeometry::Line => "line",
                 kraken::SourceGeometry::Point => "point",
+            }
+        );
+        assert_eq!(
+            attribute(&group, "bottom_boundary"),
+            match &case.bottom_boundary {
+                kraken::BottomBoundary::FluidHalfSpace => "A",
+                kraken::BottomBoundary::Rigid => "R",
+                kraken::BottomBoundary::Reflection(_) => "F",
+                kraken::BottomBoundary::Impedance { .. } => "P",
             }
         );
         assert_modes(&group.group("modes").unwrap(), &expected);
@@ -350,6 +373,73 @@ fn assert_field(group: &Group, case: &Case, expected: &SimulationResult) {
     }
 }
 
+#[test]
+fn cli_protects_consumed_tables_and_preserves_outputs_on_table_errors() {
+    let root = directory("tables");
+    for (name, extension) in [("TabRefBrcC", "brc"), ("TabRefIrcC", "irc")] {
+        let env = root.join(name).with_extension("env");
+        let table = env.with_extension(extension);
+        for ext in ["env", "flp", extension] {
+            fs::copy(fixture(name).with_extension(ext), env.with_extension(ext)).unwrap();
+        }
+        let bytes = fs::read(&table).unwrap();
+        assert_failure(
+            &run(&env, &table, "krakenc", &["--overwrite"]),
+            4,
+            &table,
+            &bytes,
+        );
+        #[cfg(unix)]
+        {
+            let alias = root.join(format!("{name}-alias.h5"));
+            std::os::unix::fs::symlink(&table, &alias).unwrap();
+            assert_failure(
+                &run(&env, &alias, "krakenc", &["--overwrite"]),
+                4,
+                &alias,
+                &bytes,
+            );
+        }
+        let output = root.join(name).with_extension("h5");
+        let old = b"old complete output";
+        fs::write(&output, old).unwrap();
+        for bad in [b"0\n".to_vec(), vec![0xff], vec![b' '; 1_048_577]] {
+            fs::write(&table, bad).unwrap();
+            assert_failure(
+                &run(&env, &output, "krakenc", &["--overwrite"]),
+                2,
+                &output,
+                old,
+            );
+        }
+        fs::remove_file(&table).unwrap();
+        assert_failure(
+            &run(&env, &output, "krakenc", &["--overwrite"]),
+            2,
+            &output,
+            old,
+        );
+        if extension == "brc" {
+            // Valid finite rows, singular F impedance: failure after HDF5 creation.
+            fs::write(&table, "2\n0.0 1.0 0.0\n90.0 1.0 0.0\n").unwrap();
+            assert_failure(
+                &run(&env, &output, "krakenc", &["--overwrite"]),
+                3,
+                &output,
+                old,
+            );
+        }
+        fs::write(&table, &bytes).unwrap();
+        assert!(
+            run(&env, &output, "krakenc", &["--overwrite"])
+                .status
+                .success()
+        );
+        assert_product(&output, &env, &env.with_extension("flp"), "krakenc");
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn assert_failure(process: &Output, code: i32, output: &Path, old: &[u8]) {
     assert_eq!(
         process.status.code(),
@@ -358,7 +448,9 @@ fn assert_failure(process: &Output, code: i32, output: &Path, old: &[u8]) {
         String::from_utf8_lossy(&process.stderr)
     );
     assert_eq!(fs::read(output).unwrap(), old);
-    assert!(!output.with_extension("h5.tmp").exists());
+    let mut scratch = output.as_os_str().to_os_string();
+    scratch.push(".tmp");
+    assert!(!PathBuf::from(scratch).exists());
 }
 
 #[test]

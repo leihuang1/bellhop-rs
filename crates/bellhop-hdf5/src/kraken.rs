@@ -84,15 +84,35 @@ pub fn run_legacy(
     }
     let env_source = read_source(env_path)?;
     let flp_source = read_source(flp_path)?;
-    let cases = kraken::legacy::load_frequency_cases_from_sources(
+    let bottom_table = kraken::legacy::bottom_table_extension(&env_source, env_path, solver)
+        .map_err(|report| RunError::Input(report.to_string()))?
+        .map(|extension| {
+            let path = env_path.with_extension(extension);
+            let source = read_source(&path)?;
+            Ok::<_, RunError>((extension, path, source))
+        })
+        .transpose()?;
+    let cases = kraken::legacy::load_frequency_cases_with_bottom_table(
         &env_source,
         &flp_source,
         env_path,
         flp_path,
         solver,
+        bottom_table.as_ref().map(|(_, _, source)| source.as_str()),
     )
     .map_err(|report| RunError::Input(report.to_string()))?;
-    protect_inputs(output_path, &[env_path, flp_path]).map_err(RunError::Output)?;
+    let mut inputs = vec![
+        ("env", env_path, env_source.as_str()),
+        ("flp", flp_path, flp_source.as_str()),
+    ];
+    if let Some((extension, path, source)) = &bottom_table {
+        inputs.push((extension, path.as_path(), source.as_str()));
+    }
+    protect_inputs(
+        output_path,
+        &inputs.iter().map(|(_, path, _)| *path).collect::<Vec<_>>(),
+    )
+    .map_err(RunError::Output)?;
     match fs::symlink_metadata(output_path) {
         Ok(_) if !overwrite => {
             return Err(RunError::Output(format!(
@@ -136,16 +156,7 @@ pub fn run_legacy(
             payload: 0,
             maximum: max_output_bytes,
         };
-        write_header(
-            &file,
-            &cases,
-            [
-                ("env", env_path, env_source.as_str()),
-                ("flp", flp_path, flp_source.as_str()),
-            ],
-            &mut budget,
-        )
-        .map_err(RunError::Output)?;
+        write_header(&file, &cases, &inputs, &mut budget).map_err(RunError::Output)?;
         check_file(&file, &cleanup.0, max_output_bytes).map_err(RunError::Output)?;
         let frequencies = file
             .create_group("frequencies")
@@ -277,7 +288,7 @@ fn check_file_size(path: &Path, maximum: u64) -> Result<(), String> {
 fn write_header(
     file: &File,
     cases: &[Case],
-    inputs: [(&str, &Path, &str); 2],
+    inputs: &[(&str, &Path, &str)],
     budget: &mut Budget,
 ) -> Result<(), String> {
     write_scalar_attribute(file, "schema_version", &SCHEMA_VERSION)?;
@@ -338,6 +349,16 @@ fn write_frequency(
     budget: &mut Budget,
 ) -> Result<(), String> {
     write_scalar_attribute(group, "frequency_hz", &result.modes.frequency_hz)?;
+    write_string_attribute(
+        group,
+        "bottom_boundary",
+        match &case.bottom_boundary {
+            kraken::BottomBoundary::FluidHalfSpace => "A",
+            kraken::BottomBoundary::Rigid => "R",
+            kraken::BottomBoundary::Reflection(_) => "F",
+            kraken::BottomBoundary::Impedance { .. } => "P",
+        },
+    )?;
     write_scalar_attribute(
         group,
         "mesh_reference_frequency_hz",

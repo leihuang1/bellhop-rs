@@ -11,7 +11,10 @@ KRAKENC slice computes trapped and leaky modes and coherent line-/point-source
 FIELD for lossless `N/C` water, vacuum surface and fluid bottom with optional
 `W` loss and up to five Richardson-extrapolated meshes. Unmodified
 `MunkKleaky`, `MunkKwb`, `MunkKbb`, `sductK` and `calibK` `.env/.flp` pairs
-pass end-to-end differential. Discrete multi-frequency KRAKEN/KRAKENC cases
+pass end-to-end differential. Single-frequency, RMax=0 KRAKENC bottom F/BRC
+and P/IRC also pass the original TabRefCoef geo/brc/irc workflows, including
+FIELD endpoint extension and CLI/HDF5 auxiliary-input provenance.
+Discrete multi-frequency KRAKEN/KRAKENC fluid-bottom cases
 are also supported; unmodified `tests/BroadBand/MunkK.env/.flp` passes at 50
 and 500 Hz. The `kraken` CLI now runs supported legacy pairs and writes
 [KRAKEN HDF5 schema v1](kraken-output-format.md), with sequential frequency
@@ -48,8 +51,11 @@ The KRAKEN `load_case`/`solve` path currently accepts a narrow legacy
   and rough boundaries are not supported;
 - a coherent, omnidirectional line (`X`) or point (`R`) source (`O`, `C`),
   with one range-independent FIELD profile at 0 km;
-- finite, in-water source/receiver depths, with FIELD depths covered by the
-  mode-sampling depths in `.env`.
+- finite, in-water source/receiver depths. FIELD normally interpolates the
+  `.env` modal samples; it may extend either sampled endpoint by at most
+  `1500 / frequency_hz` metres using the nearest two complex32 samples.
+  It does not insert a zero-depth sample or clamp to an endpoint. Single-sample
+  mode grids cannot extend, and depths outside the water remain rejected.
 
 The solver uses a real acoustic finite-difference mesh with Sturm mode counts,
 inverse iteration for mode shapes and group speeds on the first mesh, and up to
@@ -152,6 +158,67 @@ checks committed `.mod/.shd/.prt` goldens and newly generated pinned Fortran
 output in CI; provenance is recorded
 [with the goldens](../crates/kraken/tests/fixtures/golden/README.md).
 
+### Tabulated KRAKENC bottoms
+
+Bottom `F` consumes the same-stem `.brc`; `P` consumes `.irc`. This slice
+requires **one frequency, RMax=0, lossless constant-density N/C single water
+layer, vacuum top, smooth bottom and blank restart option**. The `B` frequency
+option (even with one value), table mesh refinement, random restarts, real
+KRAKEN F/P, top TRC and elastic/multilayer propagation are rejected or remain
+outside this slice. There is no half-space record/material for F/P; direct
+`CaseDefinition` half-space speed, density and attenuation must be zero.
+
+Both formats require 2–100,000 ordered entries, bounded by the 1 MiB UTF-8
+input limit. BRC has a count followed by one `angle magnitude phase_degrees`
+record per point: finite increasing angles in 0..90 degrees, finite
+nonnegative magnitudes, and finite **already unwrapped** phases. Interpolation
+is linear in magnitude/phase, not complex reflection. The grazing angle uses
+the real parts of complex kx/kz and reference f32 bracket selection; reflection
+is zero outside the angle interval. BRC contains no frequency field; the caller
+must supply a table appropriate to the single solve frequency.
+
+IRC has a quoted title/frequency header, count and ASCII fixed-width
+`(5G15.7,I5)` rows: real k², complex f, complex g, decimal scaling power.
+E/D and letterless three-digit exponents are supported, not arbitrary
+whitespace-delimited rewrites. The header frequency must exactly equal the
+solve frequency. Real k² is finite, nonnegative and strictly increasing;
+f/g are finite, powers lie in -1000..1000, and every adjacent two/three-point
+window spans at most 100 powers. Brackets use real k²; up to three rescaled
+points form a polynomial evaluated at complex k². Outside the real domain,
+the corresponding endpoint f/g/power is retained.
+
+Shooting, inverse iteration and normalization share the actual `(f,g,power)`
+boundary; no fictitious half-space is substituted. F/P retains the f/g
+normalization derivative but has no A-half-space group-speed contribution.
+Critical coefficient/division and real-component grouping retain the pinned
+GNU Fortran `-ffast-math` order: single-ulp differences can select a different
+IRC secant root. Root work still uses the existing 20,000 roots / 300M operations
+ceilings; the water-only root estimate is not a bound for table boundaries.
+Singular/nonfinite boundary evaluations or normalization return diagnostics.
+Reaching a lower spectral endpoint is not proof of every mathematical root.
+
+`tools/reference/prepare-tabref.sh` copies unmodified upstream inputs and runs
+**source-rebuilt pinned BOUNCE** three times to generate tables, then KRAKENC
+and FIELD. The upstream directory contains no table files: these are generated
+reference resources, not upstream original `.brc/.irc`. Tables and `.mod/.shd`
+are identical across runs; Rust and actual CLI-HDF5 readback compare all modes,
+shapes, speeds, attenuation and pressures at unchanged tolerances:
+
+| Original TabRefCoef pair | Modes | Complex FIELD pressures |
+|---|---:|---:|
+| `neggradC_geo.env/.flp` | 56 | 50,601 |
+| `neggradC_brc.env/.flp` + generated BRC | 54 | 50,601 |
+| `neggradC_irc.env/.flp` + generated IRC | 42 | 50,601 |
+
+Their `.env` samples 1..100 m while original `.flp` requests 0..100 m; neither
+input is modified. BRC/IRC/geo results differ and are checked against their
+own reference, not forced to agree. Four small **derived** 50 Hz N/C cases
+with **constructed** three-point tables additionally cover line-/point-source
+FIELD and nonzero IRC powers in committed goldens and fresh CI. Hashes and
+source/compiler records are [with the goldens](../crates/kraken/tests/fixtures/golden/README.md).
+Rust BOUNCE generation remains excluded. CLI schema-v1 additive metadata records
+the exact consumed table snapshot alongside `.env/.flp`.
+
 ### Multiple frequencies
 
 `legacy::load_frequency_cases(env, flp, ModeSolver)` returns a `Vec<Case>` in
@@ -197,9 +264,9 @@ are not committed and do not replace the different single-frequency
   Omitted trailing material values retain the previous point's values (Fortran
   defaults on the first). `/` ends that
   record, **not** the SSP; the interface depth ends the SSP. The acoustic bottom
-  half-space record may similarly inherit omitted trailing values; a rigid
-  bottom has **no** half-space record. In a direct `CaseDefinition`, rigid bottom
-  sound speed, density, and loss must all be zero (absent material).
+  half-space record may similarly inherit omitted trailing values; a rigid or
+  tabulated bottom has **no** half-space record. In a direct `CaseDefinition`,
+  its bottom sound speed, density, and loss must all be zero (absent material).
 - Fortran null slots and repetition syntax remain unsupported and are rejected;
   this is not a general Fortran list-directed reader. All parsed numbers must
   be finite, SSP depths strictly increase from zero to the interface, and
@@ -286,7 +353,7 @@ feature coverage:
 | Complex mesh extrapolation | `tests/calib/calibK.env` + `.flp` |
 | Multi-frequency | `tests/BroadBand/MunkK` |
 | Adiabatic and coupled FIELD | `tests/Gulf/gulf_ad.flp`, `gulf_cm.flp` |
-| Reflection inputs | `tests/TabRefCoef/neggradK_*` |
+| Reflection inputs (KRAKENC) | `tests/TabRefCoef/neggradC_*` + BOUNCE-generated tables |
 
 Acceptance requires differential coverage for modal wavenumbers and
 attenuation, normalized/aligned mode shapes, and complex pressure-field samples.
@@ -294,9 +361,10 @@ Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
 the pinned reference workflow numerically compares all seventeen constructed
 single-frequency KRAKEN fixtures, ten derived single-frequency KRAKENC mode
-fixtures, four derived single-frequency KRAKENC FIELD fixtures, two broadband
-Pekeris derivatives, and unmodified upstream MunkK, MunkKleaky, MunkKwb,
-MunkKbb, sductK, calibK and BroadBand/MunkK modes and FIELD. Original
+fixtures, four derived single-frequency KRAKENC FIELD fixtures, four derived
+table modes/FIELD fixtures, two broadband Pekeris derivatives, and unmodified
+upstream MunkK, MunkKleaky, MunkKwb, MunkKbb, sductK, calibK, BroadBand/MunkK
+and all three neggradC geo/brc/irc modes and FIELD. Original
 `.mod/.shd` output is not committed.
 
 ## Repository shape

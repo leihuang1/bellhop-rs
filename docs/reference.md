@@ -57,11 +57,26 @@ printed/binary wavenumbers, group speeds and every pressure; a later-frequency
 corruption regression ensures no frequency is skipped. These are frequency-
 domain results, not a wideband time-domain acceptance.
 
+TabRefCoef acceptance adds four **derived** 50 Hz N/C single-water cases with
+**constructed** BRC/IRC tables and committed `.mod/.prt/.shd`. Original
+`neggradC_geo`, `neggradC_brc`, `neggradC_irc` `.env/.flp` remain unchanged:
+56/54/42 modes and 50,601 pressures each, including FIELD at 0 m outside the
+1..100 m modal sample interval. The upstream directory contains no tables.
+`tools/reference/prepare-tabref.sh` uses source-rebuilt pinned BOUNCE (the bundled
+executable/object are removed) to generate `.brc/.irc` from original `neggradB.env`,
+then runs KRAKENC/FIELD three times. Tables and `.mod/.shd` must be byte-identical;
+input/resource/output hashes are retained. BRC/IRC/geo are compared to their own
+reference, not assumed equivalent. Pinned GNU real-component grouping prevents
+IRC secant from selecting a different subset of roots; this is not a proof of
+mathematical root completeness. Table multi-frequency/refinement and Rust BOUNCE
+remain excluded.
+
 The [KRAKEN CLI/HDF5 adapter](kraken-output-format.md) is independently checked
 through its actual serialized output: `KRAKEN_HDF5_RESULT` makes the same test-only
 comparator read `.h5` modes and FIELD instead of recomputing the in-memory
 result. Fresh CI exercises both Pekeris broadband derivatives, original MunkK,
-all five original KRAKENC pairs and original BroadBand/MunkK through this path,
+all five original fluid KRAKENC pairs, original BroadBand/MunkK, four table
+derivatives and the three original TabRefCoef workflows through this path,
 with every frequency/sample and unchanged tolerances. Schema/metadata/units,
 exact Rust-value round-trips and file/quota failure protections also run without
 Docker. Existing BELLHOP schema-v3 tests remain unchanged; Rust `.h5` output is

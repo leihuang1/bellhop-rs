@@ -52,6 +52,9 @@ lossless `N/C` water over a fluid bottom with optional `W` loss and Richardson
 mesh extrapolation, covering trapped and leaky spectral intervals. Unmodified
 MunkKleaky, MunkKwb, MunkKbb, sductK and refined calibK `.env/.flp` pairs are
 accepted end to end (1,077 modes and 201,201 complex pressures for sductK).
+Single-frequency, RMax=0 KRAKENC F/BRC and P/IRC bottoms also accept original
+TabRefCoef geo/brc/irc inputs with generated reference tables, including all
+151,803 pressures; auxiliary-file snapshots are recorded in CLI/HDF5 provenance.
 `legacy::load_frequency_cases` supports discrete multi-frequency KRAKEN/KRAKENC
 runs; original `BroadBand/MunkK` passes at both 50 and 500 Hz (102/1,023 modes,
 1,003,002 total complex pressures). This is not a time-domain response. Its
@@ -63,8 +66,8 @@ cargo run --release -p kraken-cli -- run crates/kraken/tests/fixtures/PekerisBro
 cargo run --release -p kraken-cli -- run crates/kraken/tests/fixtures/PekerisComplexBroadband.env --solver krakenc --output complex.h5
 ```
 
-The `kraken` binary reads `.env` plus the same-stem `.flp` (or `--flp PATH`)
-and writes [KRAKEN HDF5 schema v1](docs/kraken-output-format.md). Frequencies
+The `kraken` binary reads `.env` plus the same-stem `.flp` (or `--flp PATH`),
+and the selected `.brc/.irc` for KRAKENC table bottoms, then writes [KRAKEN HDF5 schema v1](docs/kraken-output-format.md). Frequencies
 are solved and written sequentially in input order, including duplicates;
 existing outputs require `--overwrite`. The default cumulative output quota is
 256 MiB (`--max-output-bytes`). This adapter does **not** expand the numerical

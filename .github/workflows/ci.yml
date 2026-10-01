@@ -56,7 +56,7 @@ jobs:
         run: tools/reference/run-kraken-case.sh kraken target/reference/cases/MunkK.env
       - name: Fluid KRAKENC modes and FIELD numerical differential
         run: |
-          for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexRefined PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC; do
+          for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexRefined PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC TabRefBrcN TabRefBrcC TabRefIrcN TabRefIrcC; do
             tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
             KRAKEN_COMPLEX_CASE="$case" \
             KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -139,6 +139,30 @@ jobs:
           KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK" \
             cargo test --release -p kraken --test differential_reference \
               multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+      - name: TabRefCoef generated resources, original FIELD and CLI HDF5 differential
+        run: |
+          tools/reference/prepare-tabref.sh
+          for case in TabRefBrcN TabRefBrcC TabRefIrcN TabRefIrcC; do
+            output="$PWD/target/reference/$case-krakenc/$case.h5"
+            target/release/kraken run "crates/kraken/tests/fixtures/$case.env" --solver krakenc --output "$output"
+            KRAKEN_HDF5_RESULT="$output" \
+            KRAKEN_COMPLEX_CASE="$case" \
+            KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
+              cargo test --release -p kraken --test differential_reference \
+                complex_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+          done
+          for case in neggradC_geo neggradC_brc neggradC_irc; do
+            env="$PWD/target/reference/TabRefCoef/run1/$case.env"
+            root="$PWD/target/reference/TabRefCoef/run1/$case"
+            KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
+              cargo test --release -p kraken --test differential_reference \
+                complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+            target/release/kraken run "$env" --solver krakenc --output "$root.h5"
+            KRAKEN_HDF5_RESULT="$root.h5" \
+            KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
+              cargo test --release -p kraken --test differential_reference \
+                complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+          done
       - name: Critical boundary/interface rays
         run: tools/reference/check-critical-rays.sh
       - name: Official full-grid coherent field (MunkB_Coh)

@@ -4,8 +4,8 @@ The numerical reference is Acoustics Toolbox `v2023.5`, commit
 `475108519289c6fb488b58980c644ea14eccc604`, using the pinned Linux x86-64 GNU
 Fortran 12.2 environment described in [`reference.md`](reference.md).
 
-**Status:** `crates/kraken` supports range-independent, single-fluid-layer
-trapped or confined modes with water and fluid-half-space attenuation,
+**Status:** `crates/kraken` supports range-independent, layered-fluid
+trapped or confined modes with material/volume and fluid-half-space attenuation,
 and coherent line- or point-source FIELD. KRAKENC computes trapped and leaky
 modes and coherent FIELD for complex `N/C/P/S` or lossless fixed-Munk-A water.
 Both backends accept smooth V/R/A top and bottom combinations, with bounded
@@ -21,7 +21,9 @@ and 500 Hz through **KRAKEN**. KRAKENC 500 Hz still exceeds its 300M root-work
 limit and is not accepted. The `kraken` CLI now runs supported legacy pairs and writes
 [KRAKEN HDF5 schema v1](kraken-output-format.md), with sequential frequency
 output and atomic publication. JSON/HTTP remain unimplemented. This is not
-the full matrix below; unsupported inputs are rejected.
+the full matrix below; unsupported physics is rejected. Numerical parity is
+verified for the complete workflows below, not promised for every arbitrary
+branch-sensitive secant spectrum.
 
 ## Products
 
@@ -41,11 +43,12 @@ separate product and acceptance contract.
 The KRAKEN `load_case`/`solve` path currently accepts a narrow legacy
 `.env`/`.flp` subset:
 
-- one frequency and one constant-density fluid water layer using
-  `N` (N²-linear), `C` (sound-speed-linear), `P` (monotone PCHIP), `S`
-  (not-a-knot cubic spline), or `A` (the fixed 5000 m analytic Munk profile
-  from upstream `misc/munk.f90`); depth-varying sound speed is supported,
-  but density gradients and additional layers are not;
+- one frequency and 1..500 contiguous fluid layers using shared
+  `N` (N²-linear), `C` (sound-speed-linear), `P` (monotone PCHIP), or `S`
+  (not-a-knot cubic spline) interpolation; each layer has constant density,
+  its own SSP/loss nodes and mesh, with material jumps at interfaces.
+  `A` (the fixed 5000 m analytic Munk profile from upstream `misc/munk.f90`)
+  remains single-layer and lossless. Density gradients and shear are rejected;
 - smooth vacuum (`V`), rigid (`R`) or acoustic fluid half-space (`A`) at either
   end. A boundaries carry material/volume attenuation; V/R have no half-space
   record or material properties. Real KRAKEN requires cHigh no larger than
@@ -168,7 +171,8 @@ Complex N/C/P/S water and additional loss units are added by the material
 checkpoint below; analytic A remains lossless. The half-space slice retains
 vacuum top, constant density and A bottom, blank/dotted restarts, bounded Richardson refinement and
 ordered discrete frequencies. F/P table boundaries remain **N/C only**;
-density gradients and extra layers remain excluded. Smooth complex rigid
+density gradients remain excluded; fluid stacks are added by the layered
+checkpoint below, while analytic A and table paths remain single-layer. Smooth complex rigid
 boundaries are covered by the boundary checkpoint below.
 Spline positivity and coefficient-overflow checks still run at `CaseDefinition`
 validation. Both mode backends share analytic mesh sampling: the f32 step from
@@ -251,6 +255,80 @@ leaky modes, refinement and repeated frequencies. These are **not** acceptance
 of original upstream VolAtt input pairs. Fresh CI is configured to check the
 same 27 workflows through the API and actual HDF5 output.
 
+### Finite fluid stacks
+
+`CaseDefinition` keeps its existing water fields as the first layer and adds
+`additional_fluid_layers: Vec<FluidLayer>` in depth order. Each additional layer
+has absolute SSP depths from the previous interface to `bottom_depth_m`,
+constant `density_g_cm3`, nominal `mesh_points`, and empty or per-node
+`attenuation_db_per_wavelength` at the solve frequency. `total_depth_m()` is
+the whole finite stack depth; source/receiver/modal depths may cross interfaces.
+Legacy multi-medium input maps into the same model, preserves trailing-value
+inheritance across records/media, converts loss separately at every layer/node/
+frequency, and locates diagnostics in the offending medium. Layer-specific m
+power laws and shared T/F/B volume loss use the existing conversion path.
+
+Profiles interpolate independently; P/S never bridge a material discontinuity.
+Each layer contributes its own h and density to the acoustic matrix, shooting,
+normalization, group speed and attenuation integrals. Interface pressure and
+P'/density are continuous; this is not a concatenated uniform mesh or an
+averaged density. Two material coefficients share one pressure unknown.
+KRAKEN uses tridiagonal inertia counts for the stack; KRAKENC transfers the
+complex boundary state through all layers and deflates every searched root.
+The second complex mesh retains the high/previous-root scan; Neville seeds
+start on the third mesh, using raw old roots rather than Richardson output.
+Shapes/group speeds stay first-mesh, with reference f32 mesh/sample rounding.
+
+Smooth V/R/A boundaries, trapped KRAKEN, trapped/leaky KRAKENC, repeated
+frequencies, up to five refinement meshes and coherent line-/point-source FIELD
+extend to fluid stacks. Analytic Munk A, F/P bottoms and top TRC **remain
+single-layer**; no new table/analytic combination is enabled. Density variation
+inside a layer, shear/elasticity, roughness and multiple FIELD profiles remain
+unsupported. At most 500 finite layers, 100,000 total SSP nodes and 100,000
+total loss values are retained. Mesh intervals, shape values, copied frequency
+inputs and numerical work use the previous ceilings **for the entire stack**.
+HDF5 v1 adds ordered finite-layer metadata without changing datasets or BELLHOP v3.
+
+Twenty-one explicitly derived pairs pass 41 full API/actual-CLI-HDF5 workflows:
+50 frequency blocks, 530 modes and 4,902 pressures, with byte-identical `.mod/.shd`
+in three pinned runs. N/C/P/S, unequal meshes, density/speed/loss jumps, all nine
+V/R/A combinations, fractional interfaces and interface-side samples are covered.
+Power-law and leaky PCHIP derivatives keep 75/50/62.5/50 Hz and meshes 1/2/4;
+a 500 Hz biological case samples overlapping volume loss on both sides of an
+interface. Local maximum pressure error is 2.64e-9; tolerances are unchanged.
+All media records/frequencies are checked, including a last-medium corruption
+regression; ordinary tests also check metadata, shared budgets and output failure.
+
+**Original `double` is not accepted.** The byte-identical TLslices environment
+and official shared `fieldbat.flp` (selected by upstream `runtests.m`) are retained
+as `OriginalLayeredDouble`. Pinned KRAKEN changes 43 to 42 modes on meshes 1/2;
+both Rust backends reject changing mode counts. `LayeredDoubleRefined` explicitly
+doubles NG to 200/400/400, with 42 modes/501 pressures per engine. Likewise
+`LayeredNormalization` removes the original `normal.env` bottom's shear speed
+and is labelled derived; original normal/flused/elsed require elastic support.
+Gulf's multi-profile environment is left for the later FIELD stage.
+
+The three-layer accepted refined fixture uses cHigh=1700 (all four reference
+modes); its separate RMax=0 wide fixture uses cHigh=1800 (all five modes).
+A cHigh=1800, RMax=1000 km experiment is **not accepted**: pinned KRAKENC searches
+5 then 4 roots, while Rust retains 5. It remains a known branch-sensitive
+refinement-parity gap, not an input rejected by the current Rust guard. No
+reference is trimmed or re-labelled; narrowed and base-mesh inputs have their
+own complete reference outputs. Stable mode counts and triplicate binaries do
+not prove mathematical root completeness for arbitrary secant spectra.
+[Targeted diagnosis](kraken-layered-refinement-gap.md) localizes this gap to the
+second-mesh deflated secant trajectory: perturbing only the pinned fifth search
+seed by ±256 ULP changes its final count from four to five. Altered-reference
+outputs match Rust but are diagnostic evidence, **not** fixed-oracle acceptance.
+Following scope review, this documented workflow is a **non-blocking release
+exception**, still outside numerical acceptance. The 41 accepted workflows keep
+full fixed-oracle comparisons; no blanket waiver applies to other failures.
+A runnable, explicitly ignored failing regression preserves the unresolved gap.
+The affected calculation can still return five modes and CLI exit 0 without a
+warning: successful execution/HDF5 publication is not a parity certificate.
+The fifth mode may materially affect coherent FIELD; exact legacy reproduction
+must exclude this workflow and independently validate other unverified inputs.
+
 ### Smooth boundaries and top reflection tables
 
 Both backends accept all nine smooth top/bottom V/R/A combinations. Public
@@ -269,8 +347,8 @@ refinement and boundary loss, a constant rigid-rigid lossy plane mode (NG=68),
 and a radiating 343 m/s air top (KRAKENC only): 21 API/CLI-HDF5 workflows.
 The automatic NG=17 rigid-plane variant changes its searched mode count between
 meshes and is explicitly rejected, not trimmed to the first mesh. Complex
-refinement seeds each root from raw previous meshes (Neville interpolation in
-h²), independently of Richardson output rows; this prevents third-mesh root
+refinement seeds each root from the third mesh onward using raw previous meshes
+(Neville interpolation in h²), independently of Richardson output rows; this prevents third-mesh root
 skipping with the top A/vacuum-bottom case. Shapes/group speeds remain first-mesh.
 
 Top F consumes a bounded same-stem `.trc` in the same count/angle/magnitude/
@@ -403,11 +481,12 @@ are not committed and do not replace the different single-frequency
   its bottom sound speed, density, and loss must all be zero (absent material).
 - Fortran null slots and repetition syntax remain unsupported and are rejected;
   this is not a general Fortran list-directed reader. All parsed numbers must
-  be finite, SSP depths strictly increase from zero to the interface, and
+  be finite, SSP depths strictly increase between each layer's interfaces, and
   semantic diagnostics retain input-file records.
 - Each input file is capped at 1 MiB; vectors at 100,000 entries; frequency
-  count at 1,000; cloned frequency-case input vectors at 5,000,000 values.
-  Per frequency: mesh at 1,000,000 grid intervals; roots at 20,000 modes;
+  count at 1,000; finite fluid layers at 500; total SSP nodes and loss values
+  each at 100,000; cloned frequency-case input vectors at 5,000,000 values.
+  Per frequency, across all layers combined: mesh at 1,000,000 grid intervals; roots at 20,000 modes;
   mode shapes at 5,000,000 values; all KRAKEN mesh searches at 2,500,000,000
   conservative operations and KRAKENC at 300,000,000 counted operations;
   pressure grids at 1,000,000 samples and 550,000,000 modal contributions.
@@ -476,7 +555,7 @@ is out of scope, as are BOUNCE table generation and ray-arrival products.
 
 ## Incremental implementation and acceptance
 
-The supported single-fluid slices compare modes and range-independent coherent
+The supported fluid slices compare modes and range-independent coherent
 fields against pinned Fortran. Further representative v2023.5 cases provide
 feature coverage:
 
@@ -502,8 +581,8 @@ upstream MunkK, MunkKleaky, MunkKwb, MunkKbb, sductK, calibK, BroadBand/MunkK
 and all three neggradC geo/brc/irc modes and FIELD. Unmodified MunkS and
 MunkAnalytic environments are additionally checked through KRAKENC with
 separately derived FIELD geometry. The 27 derived water-material workflows
-above, plus 24 derived smooth-boundary/TRC workflows, also have committed
-goldens and configured API/CLI-HDF5 fresh comparisons.
+above, plus 24 derived smooth-boundary/TRC workflows and 41 derived layered-fluid
+workflows, also have committed goldens and configured API/CLI-HDF5 fresh comparisons.
 Original `.mod/.shd` output is not committed.
 
 ## Repository shape

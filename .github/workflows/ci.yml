@@ -139,6 +139,29 @@ jobs:
                   multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
             done
           done
+      - name: Layered fluid modes, FIELD and actual CLI HDF5 differential
+        run: |
+          cargo build --release -p kraken-cli
+          for engine in kraken krakenc; do
+            for case in LayeredFluidN LayeredFluidC LayeredFluidP LayeredFluidS LayeredBoundaryVV LayeredBoundaryVR LayeredBoundaryRV LayeredBoundaryRR LayeredBoundaryRA LayeredBoundaryAV LayeredBoundaryAR LayeredBoundaryAA LayeredFluidThree LayeredFluidThreeWide LayeredFluidPlane LayeredFluidPower LayeredFluidBio LayeredFluidLeaky LayeredDoubleRefined LayeredNormalization LayeredFluidFractional; do
+              if [ "$case" = LayeredFluidLeaky ] && [ "$engine" = kraken ]; then continue; fi
+              env="$PWD/crates/kraken/tests/fixtures/$case.env"
+              reference="$PWD/target/reference/$case-$engine/$case"
+              tools/reference/run-kraken-case.sh "$engine" "$env"
+              KRAKEN_FREQUENCY_SOLVER="$engine" KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
+                cargo test --release -p kraken --test differential_reference \
+                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+              target/release/kraken run "$env" --solver "$engine" --output "$reference.h5"
+              KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_FREQUENCY_SOLVER="$engine" \
+              KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
+                cargo test --release -p kraken --test differential_reference \
+                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+            done
+            # Fortran smoke is not Rust acceptance: retain the original coarse input as a failure.
+            tools/reference/run-kraken-case.sh "$engine" crates/kraken/tests/fixtures/OriginalLayeredDouble.env
+          done
+          cargo test --release -p kraken-cli --test run \
+            layered_failures_preserve_output_and_remove_scratch -- --exact --nocapture
       - name: KRAKEN CLI HDF5 numerical differential
         run: |
           cargo build --release -p kraken-cli

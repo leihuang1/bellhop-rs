@@ -1,0 +1,138 @@
+ _________________________________________________
+
+ KRAKENC-Derived LayeredFluidPower: finite fluid interfaces
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   2
+
+
+     N2-Linear approximation to SSP
+     Attenuation units: dB/m with a power law and transition frequency
+     VACUUM
+
+( # mesh points =   101  RMS roughness =   0.00     beta =   1.50     fT =   60.00     )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1500.00      0.00     1.00       0.0007    0.0000
+     31.00      1520.00      0.00     1.00       0.0005    0.0000
+     70.00      1510.00      0.00     1.00       0.0003    0.0000
+
+( # mesh points =    83  RMS roughness =   0.00     beta =  0.750     fT =   70.00     )
+
+     70.00      1450.00      0.00     1.60       0.0012    0.0000
+     89.00      1480.00      0.00     1.60       0.0010    0.0000
+    140.00      1460.00      0.00     1.60       0.0009    0.0000
+
+                      ( RMS roughness =   0.00     beta =   1.25     fT =   55.0     )
+     ACOUSTO-ELASTIC half-space
+    140.00      1800.00      0.00     2.00       0.0069    0.0000
+
+ cLow =   1400.0     m/s      cHigh =   1800.0     m/s
+ RMax =   1000.0     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            3
+    Source   z-coordinates, Sz (m)
+                 31.0000       70.0000       105.000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            7
+    Receiver z-coordinates, Rz (m)
+                 0.00000       69.9900       70.0000       70.0100
+   105.000       139.990       140.000
+
+ __________________________________________________________________________
+
+
+    Number of frequencies =           4
+    Frequencies (Hz)
+   75.0000       50.0000       62.5000       50.0000
+ __________________________________________________________________________
+
+ Frequency =   75.00     Hz
+
+ Mesh multiplier   CPU seconds
+ Max. number of restarts in root finder, MaxTries =            1
+        1            0.405E-02s
+ Max. number of restarts in root finder, MaxTries =            1
+        2            0.113E-02s
+ Max. number of restarts in root finder, MaxTries =            1
+        4            0.368E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.3182434145     -0.16E-03   1480.749881       1465.64
+    2  0.3135583225     -0.15E-03   1502.874790       1457.61
+    3  0.3083199675     -0.11E-03   1528.408626       1480.06
+    4  0.3041750968     -0.13E-03   1549.235631       1446.29
+    5  0.2974546169     -0.15E-03   1584.237969       1411.09
+    6  0.2892296182     -0.15E-03   1629.289908       1380.96
+    7  0.2784296935     -0.19E-03   1692.487939       1328.26
+    8  0.2669478051     -0.22E-03   1765.284782       1295.91
+ __________________________________________________________________________
+
+ Frequency =   50.00     Hz
+
+ Mesh multiplier   CPU seconds
+ Max. number of restarts in root finder, MaxTries =            1
+        1            0.970E-03s
+ Max. number of restarts in root finder, MaxTries =            1
+        2            0.711E-03s
+ Max. number of restarts in root finder, MaxTries =            1
+        4            0.291E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2110272915     -0.11E-03   1488.713915       1464.65
+    2  0.2062147290     -0.86E-04   1523.456966       1468.41
+    3  0.2009089790     -0.99E-04   1563.689522       1435.94
+    4  0.1939014453     -0.11E-03   1620.200741       1392.86
+    5  0.1829582610     -0.15E-03   1717.108939       1322.75
+ __________________________________________________________________________
+
+ Frequency =   62.50     Hz
+
+ Mesh multiplier   CPU seconds
+ Max. number of restarts in root finder, MaxTries =            1
+        1            0.107E-02s
+ Max. number of restarts in root finder, MaxTries =            1
+        2            0.107E-02s
+ Max. number of restarts in root finder, MaxTries =            1
+        4            0.347E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2646451786     -0.13E-03   1483.870153       1465.04
+    2  0.2597707010     -0.12E-03   1511.714293       1463.41
+    3  0.2550258175     -0.11E-03   1539.840497       1464.78
+    4  0.2495377121     -0.12E-03   1573.706348       1427.13
+    5  0.2411266212     -0.14E-03   1628.601105       1375.45
+    6  0.2314735173     -0.15E-03   1696.518402       1335.87
+    7  0.2184910924     -0.39E-03   1797.323073       1331.66
+ __________________________________________________________________________
+
+ Frequency =   50.00     Hz
+
+ Mesh multiplier   CPU seconds
+ Max. number of restarts in root finder, MaxTries =            1
+        1            0.855E-03s
+ Max. number of restarts in root finder, MaxTries =            1
+        2            0.658E-03s
+ Max. number of restarts in root finder, MaxTries =            1
+        4            0.237E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2110272915     -0.11E-03   1488.713915       1464.65
+    2  0.2062147290     -0.86E-04   1523.456966       1468.41
+    3  0.2009089790     -0.99E-04   1563.689522       1435.94
+    4  0.1939014453     -0.11E-03   1620.200741       1392.86
+    5  0.1829582610     -0.15E-03   1717.108939       1322.75
+ _________________________________________________
+
+ End of environmental file

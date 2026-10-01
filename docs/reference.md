@@ -136,6 +136,26 @@ scaling, simple-Gaussian beams, and Cartesian/ray-centered Cerveny beams.
 Dedicated reflection goldens cover acousto-elastic, grain-size, and `.irc`
 impedance-table amplitude and phase.
 
+Layered-fluid acceptance adds twenty-one **derived** pairs, twenty through both
+engines and a leaky broadband pair through KRAKENC: 41 workflows, 50 frequency
+blocks, 530 modes and 4,902 pressures. Each `.mod/.shd` is byte-identical in
+three pinned runs. The comparator traverses every fluid medium record and every
+frequency/mode/FIELD sample, through both API and actual CLI-HDF5; local maximum
+pressure error is 2.64e-9 at unchanged tolerances. Offline goldens and layer
+metadata/budget/failure regressions run without Docker.
+
+`OriginalLayeredDouble.env` is byte-identical to upstream `tests/TLslices/double.env`;
+its `.flp` is the official shared `fieldbat.flp` selected by upstream `runtests.m`.
+Pinned KRAKEN changes from 43 to 42 modes on meshes 1/2; both Rust backends
+reject mode-count changes instead of clipping. `LayeredDoubleRefined` doubles
+NG to 200/400/400 and passes 42 modes/501 pressures per engine; it is derived,
+not acceptance of original `double`. `LayeredNormalization` removes shear only
+from the original `normal.env` bottom and is also explicitly derived. Original
+`normal/flused/elsed` need elastic support; Gulf's sequence needs multi-profile
+FIELD. None is claimed as accepted by the fluid-stack stage. The wider-spectrum
+three-layer experiment described in the compatibility/golden provenance remains
+unaccepted; a matched subset is not advertised as full original acceptance.
+
 ## Pinned Linux x86-64 oracle
 
 `tools/reference` provides the reproducible differential environment:

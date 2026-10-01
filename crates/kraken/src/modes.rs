@@ -2,7 +2,7 @@
 // Kraken/InverseIterationMod.f90, Copyright (C) 2009 Michael B. Porter.
 // GPL-3.0-or-later; see LICENSE. Distributed without warranty.
 //!
-//! Real, single-fluid finite-difference path from KRAKEN v2023.5.
+//! Real, layered-fluid finite-difference path from KRAKEN v2023.5.
 //! Sturm counts isolate modes; inverse iteration samples the first mesh;
 //! Richardson extrapolation refines eigenvalues only, as in the reference.
 use crate::profile::Profile;
@@ -41,7 +41,9 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     } else {
         (0.0, Complex64::new(0.0, 0.0))
     };
-    let profile = Profile::new(case)?;
+    let profiles = crate::layers::iter(case)
+        .map(|layer| Profile::new_layer(case, layer))
+        .collect::<Result<Vec<_>, _>>()?;
     if !omega.is_finite()
         || !bottom_k2.is_finite()
         || !bottom_complex_k2.re.is_finite()
@@ -58,8 +60,8 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let mut work = 0_usize;
     for set in 0..5 {
         let multiplier = 1 << set;
-        let n = case.mesh_points_at(multiplier)?;
-        let mesh = Mesh::new(case, &profile, n, omega, bottom_k2, bottom_complex_k2)?;
+        let layers = crate::layers::mesh_layers(case, multiplier)?;
+        let mesh = Mesh::new(case, &profiles, layers, omega, bottom_k2, bottom_complex_k2)?;
         let roots = mesh.roots(&mut work)?;
         if set == 0 {
             modes = roots
@@ -69,7 +71,11 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         } else if roots.len() != modes.len() {
             return Err(error(
                 "KR0303",
-                "mode count changed during mesh refinement; move spectral limits away from roots",
+                format!(
+                    "mode count changed during mesh refinement ({} -> {} at multiplier {multiplier}); move spectral limits away from roots",
+                    modes.len(),
+                    roots.len()
+                ),
                 "phase_speed_limits",
             ));
         }
@@ -130,6 +136,7 @@ struct Mesh<'a> {
     surface_complex_k2: Complex64,
     b1: Vec<f64>,
     b1c: Vec<f64>,
+    layers: Vec<crate::layers::MeshLayer>,
     min_speed: f64,
 }
 
@@ -137,35 +144,35 @@ impl<'a> Mesh<'a> {
     #[allow(clippy::cast_precision_loss)]
     fn new(
         case: &'a Case,
-        profile: &Profile<'_>,
-        n: usize,
+        profiles: &[Profile<'_>],
+        layers: Vec<crate::layers::MeshLayer>,
         omega: f64,
         bottom_k2: f64,
         bottom_complex_k2: Complex64,
     ) -> Result<Self, DiagnosticReport> {
-        let h = case.water_depth_m / n as f64;
+        let h = layers[0].h;
         let mut min_speed = f64::INFINITY;
         let mut invalid_speed = false;
-        let water_loss = case
-            .water_attenuation_db_per_wavelength
-            .iter()
-            .any(|&a| a != 0.0);
-        let mut b1c = Vec::with_capacity(n + 1);
-        let b1: Vec<_> = (0..=n)
-            .map(|i| {
-                let speed = profile.mesh_complex_speed(i, n);
+        let mut b1c = Vec::new();
+        let mut b1 = Vec::new();
+        for ((layer, profile), material) in
+            layers.iter().zip(profiles).zip(crate::layers::iter(case))
+        {
+            let water_loss = material.loss.iter().any(|&a| a != 0.0);
+            for i in 0..=layer.intervals {
+                let speed = profile.mesh_complex_speed(i, layer.intervals);
                 invalid_speed |= !speed.re.is_finite() || speed.re <= 0.0 || !speed.im.is_finite();
                 min_speed = min_speed.min(speed.re);
                 if water_loss {
                     let k2 = Complex64::new(omega * omega, 0.0) / speed.powi(2);
                     b1c.push(k2.im);
-                    -2.0 + h * h * k2.re
+                    b1.push(-2.0 + layer.h * layer.h * k2.re);
                 } else {
                     b1c.push(0.0);
-                    -2.0 + h * h * (omega * omega / (speed.re * speed.re))
+                    b1.push(-2.0 + layer.h * layer.h * (omega * omega / (speed.re * speed.re)));
                 }
-            })
-            .collect();
+            }
+        }
         if invalid_speed {
             return Err(error(
                 "KR0302",
@@ -214,6 +221,7 @@ impl<'a> Mesh<'a> {
             surface_complex_k2,
             b1,
             b1c,
+            layers,
             min_speed,
         })
     }
@@ -248,8 +256,70 @@ impl<'a> Mesh<'a> {
         }
     }
 
+    fn layer_diagonal(&self, x: f64, medium: usize, i: usize) -> f64 {
+        let layer = &self.layers[medium];
+        let diagonal = (self.b1[layer.coefficient_start + i] - layer.h * layer.h * x)
+            / (layer.h * layer.density);
+        if medium == 0 && i == 0 {
+            diagonal * 0.5
+                - if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+                    self.surface_gamma(x).re / self.case.surface_density_g_cm3
+                } else {
+                    0.0
+                }
+        } else if i == layer.intervals {
+            if let Some(next) = self.layers.get(medium + 1) {
+                diagonal.midpoint(
+                    (self.b1[next.coefficient_start] - next.h * next.h * x)
+                        / (next.h * next.density),
+                )
+            } else {
+                diagonal * 0.5
+                    - if self.case.bottom_boundary == BottomBoundary::FluidHalfSpace {
+                        self.bottom_gamma(x).re / self.case.bottom_density_g_cm3
+                    } else {
+                        0.0
+                    }
+            }
+        } else {
+            diagonal
+        }
+    }
+
     // Inertia of the symmetric tridiagonal acoustic operator A(x): number of roots above x.
     fn count(&self, x: f64) -> usize {
+        if self.layers.len() > 1 {
+            let mut pivot: f64 = 0.0;
+            let mut count = 0;
+            let mut first = true;
+            for (medium, layer) in self.layers.iter().enumerate() {
+                let start = usize::from(
+                    medium > 0 || self.case.surface_boundary == SurfaceBoundary::Vacuum,
+                );
+                let end = layer.intervals + 1
+                    - usize::from(
+                        medium + 1 == self.layers.len()
+                            && self.case.bottom_boundary == BottomBoundary::Vacuum,
+                    );
+                for i in start..end {
+                    let diagonal = self.layer_diagonal(x, medium, i);
+                    let e = 1.0 / (layer.h * layer.density);
+                    pivot = if first {
+                        diagonal
+                    } else {
+                        diagonal - e * e / pivot
+                    };
+                    first = false;
+                    if pivot.abs() < 1e-30 {
+                        pivot = -1e-30;
+                    }
+                    if pivot > 0.0 {
+                        count += 1;
+                    }
+                }
+            }
+            return count;
+        }
         let shift = self.h * self.h * x;
         let first = usize::from(self.case.surface_boundary == SurfaceBoundary::Vacuum);
         let end = self.b1.len() - usize::from(self.case.bottom_boundary == BottomBoundary::Vacuum);
@@ -282,10 +352,8 @@ impl<'a> Mesh<'a> {
         if self.case.surface_boundary == SurfaceBoundary::Rigid
             && self.case.bottom_boundary == BottomBoundary::Rigid
             && self.case.c_low_mps <= self.min_speed
-            && self
-                .case
-                .sound_speed_profile
-                .iter()
+            && crate::layers::iter(self.case)
+                .flat_map(|layer| layer.points)
                 .all(|point| point.sound_speed_mps == self.min_speed)
         {
             // The constant-profile plane eigenvalue can round just above omega²/c²
@@ -364,33 +432,56 @@ impl<'a> Mesh<'a> {
         clippy::too_many_lines
     )]
     fn mode(&self, x: f64) -> Result<NormalMode, DiagnosticReport> {
-        let n = self.b1.len();
+        let last = self.layers.last().unwrap();
+        let n = last.node_start + last.intervals + 1;
         let h_rho = self.h * self.case.water_density_g_cm3;
         let shift = self.h * self.h * x;
-        let mut d: Vec<_> = self.b1.iter().map(|b| (b - shift) / h_rho).collect();
-        let mut e = vec![1.0 / h_rho; n + 1];
+        let mut d = Vec::with_capacity(n);
+        let mut e = vec![0.0; n + 1];
+        for (medium, layer) in self.layers.iter().enumerate() {
+            for i in usize::from(medium > 0)..=layer.intervals {
+                d.push(if self.layers.len() == 1 {
+                    (self.b1[i] - shift) / h_rho
+                } else {
+                    self.layer_diagonal(x, medium, i)
+                });
+                if i > 0 {
+                    e[layer.node_start + i] = 1.0 / (layer.h * layer.density);
+                }
+            }
+        }
+        e[n] = 1.0 / (last.h * last.density);
         if self.case.surface_boundary == SurfaceBoundary::Vacuum {
             d[0] = 1.0;
             e[1] = 0.0;
-        } else {
+        } else if self.layers.len() == 1 {
             d[0] = self.surface_diagonal(x) / h_rho;
         }
         if self.case.bottom_boundary == BottomBoundary::Vacuum {
             d[n - 1] = 1.0;
             e[n - 1] = 0.0;
-        } else {
+        } else if self.layers.len() == 1 {
             d[n - 1] = self.bottom_diagonal(x) / h_rho;
         }
         let mut phi = inverse_iteration(&d, &e)?;
         let mut norm = 0.0;
         let mut slow = 0.0;
         let mut volume_loss = 0.0;
-        for (i, &value) in phi.iter().enumerate() {
-            let weight = if i == 0 || i + 1 == n { 0.5 } else { 1.0 };
-            let mass = weight * self.h * value * value / self.case.water_density_g_cm3;
-            norm += mass;
-            volume_loss += mass * self.b1c[i];
-            slow += mass * (self.b1[i] + 2.0) / (self.omega * self.omega * self.h * self.h);
+        for layer in &self.layers {
+            for i in 0..=layer.intervals {
+                let value = phi[layer.node_start + i];
+                let coefficient = layer.coefficient_start + i;
+                let weight = if i == 0 || i == layer.intervals {
+                    0.5
+                } else {
+                    1.0
+                };
+                let mass = weight * layer.h * value * value / layer.density;
+                norm += mass;
+                volume_loss += mass * self.b1c[coefficient];
+                slow += mass * (self.b1[coefficient] + 2.0)
+                    / (self.omega * self.omega * layer.h * layer.h);
+            }
         }
         if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
             let gamma = (x - self.surface_complex_k2.re).sqrt();
@@ -421,9 +512,14 @@ impl<'a> Mesh<'a> {
         if norm <= 0.0 || !norm.is_finite() || !slow.is_finite() {
             return Err(error("KR0303", "invalid mode normalization", "modes"));
         }
-        let turning = (1..n)
-            .find(|&i| self.b1[i] - shift + 2.0 > 0.0)
-            .unwrap_or(n - 2);
+        let turning = self
+            .layers
+            .iter()
+            .flat_map(|layer| (1..=layer.intervals).map(move |i| (layer, i)))
+            .find(|(layer, i)| {
+                self.b1[layer.coefficient_start + i] - layer.h * layer.h * x + 2.0 > 0.0
+            })
+            .map_or(n - 2, |(layer, i)| layer.node_start + i);
         let scale = if phi[turning] < 0.0 {
             -norm.sqrt().recip()
         } else {
@@ -433,7 +529,7 @@ impl<'a> Mesh<'a> {
             *value *= scale;
         }
         // Vector.f90 stores a single-precision mesh and interpolates into complex32 .mod samples.
-        let grid_depths: Vec<_> = (0..n).map(|i| (i as f64 * self.h) as f32).collect();
+        let grid_depths = crate::layers::grid(&self.layers);
         let eigenfunction = self
             .case
             .mode_sample_depths_m

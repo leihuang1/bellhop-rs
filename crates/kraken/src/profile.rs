@@ -8,6 +8,7 @@ use std::f64::consts::PI;
 
 pub(super) struct Profile<'a> {
     case: &'a CaseDefinition,
+    layer: crate::layers::Layer<'a>,
     minimum_speed: f64,
     // Local polynomial coefficients, c0 + t * (c1 + t * (c2 + t * c3)).
     cubic: Vec<[f64; 4]>,
@@ -17,7 +18,14 @@ pub(super) struct Profile<'a> {
 
 impl<'a> Profile<'a> {
     pub(super) fn new(case: &'a CaseDefinition) -> Result<Self, DiagnosticReport> {
-        let points = &case.sound_speed_profile;
+        Self::new_layer(case, crate::layers::iter(case).next().unwrap())
+    }
+
+    pub(super) fn new_layer(
+        case: &'a CaseDefinition,
+        layer: crate::layers::Layer<'a>,
+    ) -> Result<Self, DiagnosticReport> {
+        let points = layer.points;
         let mut minimum_speed = if case.interpolation == Interpolation::AnalyticMunk {
             1500.0
         } else {
@@ -52,14 +60,10 @@ impl<'a> Profile<'a> {
                 ));
             }
         }
-        let imaginary_speeds: Vec<_> = if case
-            .water_attenuation_db_per_wavelength
-            .iter()
-            .any(|&a| a != 0.0)
-        {
+        let imaginary_speeds: Vec<_> = if layer.loss.iter().any(|&a| a != 0.0) {
             points
                 .iter()
-                .zip(&case.water_attenuation_db_per_wavelength)
+                .zip(layer.loss)
                 .map(|(p, &a)| a * p.sound_speed_mps / (8.685_889_6 * 2.0 * PI))
                 .collect()
         } else {
@@ -90,6 +94,7 @@ impl<'a> Profile<'a> {
         }
         Ok(Self {
             case,
+            layer,
             minimum_speed,
             cubic,
             imaginary_speeds,
@@ -108,13 +113,13 @@ impl<'a> Profile<'a> {
         let step = if analytic {
             f64::from(5000.0_f32 / intervals as f32)
         } else {
-            self.case.water_depth_m / intervals as f64
+            (self.layer.bottom - self.layer.top) / intervals as f64
         };
-        let depth = index as f64 * step;
+        let depth = self.layer.top + index as f64 * step;
         self.speed(if analytic {
             depth
         } else {
-            depth.min(self.case.water_depth_m)
+            depth.min(self.layer.bottom)
         })
     }
 
@@ -124,13 +129,14 @@ impl<'a> Profile<'a> {
             return Complex64::new(self.mesh_speed(index, intervals), 0.0);
         }
         self.complex_speed(
-            (index as f64 * (self.case.water_depth_m / intervals as f64))
-                .min(self.case.water_depth_m),
+            (self.layer.top
+                + index as f64 * ((self.layer.bottom - self.layer.top) / intervals as f64))
+                .min(self.layer.bottom),
         )
     }
 
     fn complex_speed(&self, depth: f64) -> Complex64 {
-        let points = &self.case.sound_speed_profile;
+        let points = self.layer.points;
         let upper = points
             .partition_point(|p| p.depth_m < depth)
             .clamp(1, points.len() - 1);
@@ -161,7 +167,7 @@ impl<'a> Profile<'a> {
             // munk.f90 declares eps as f64 but initializes it from an f32 literal.
             return 1500.0 * (1.0 + f64::from(0.00737_f32) * (x - 1.0 + (-x).exp()));
         }
-        let points = &self.case.sound_speed_profile;
+        let points = self.layer.points;
         let upper = points
             .partition_point(|p| p.depth_m < depth)
             .clamp(1, points.len() - 1);

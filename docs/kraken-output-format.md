@@ -19,6 +19,11 @@ The installed binary is `kraken`; `cargo install --path crates/kraken-cli`
 builds it using the existing static HDF5 dependency.
 
 - `--solver kraken|krakenc` defaults to `kraken`; the engine is not guessed.
+- Both backends accept 1..500 contiguous constant-density fluid layers with
+  independent meshes, N/C/P/S interpolation and material/volume attenuation.
+  Density/speed/loss may jump at interfaces; density gradients and shear remain
+  unsupported. Analytic Munk and F/P/TRC table combinations remain single-layer.
+  Mesh/profile/shape/work budgets are totals for the stack, not per layer.
 - Both backends accept smooth V/R/A boundaries; real KRAKEN stays trapped
   at each A half-space. KRAKENC supports complex N/C/P/S or lossless fixed-Munk-A,
   with N/M/m/F/W/Q/L material units, optional T/F/B volume loss, and the existing
@@ -44,6 +49,13 @@ builds it using the existing static HDF5 dependency.
 - Exit codes: `0` success, `2` input/argument failure, `3` numerical failure,
   `4` output/quota/I/O failure. Numerical errors identify the zero-based
   frequency index and Hz value. Unsupported physics is rejected, not approximated.
+
+Exit 0 and successful HDF5 publication certify completion, not fixed-oracle
+parity for arbitrary inputs. The documented
+[wide three-layer refinement exception](kraken-layered-refinement-gap.md) can
+return five modes versus the pinned reference's four without a warning or a
+parity-certification attribute. It remains outside numerical acceptance; this
+release-scope exception does not change the solver or add a runtime guard.
 
 Rust adapters may call `bellhop_hdf5::kraken::run_legacy` with input/output
 paths, engine, overwrite policy and byte quota. The numerical `kraken` crate
@@ -122,12 +134,20 @@ Each `/frequencies/i` group has attributes:
 - `frequency_hz`: float64 actual solve frequency;
 - `mesh_reference_frequency_hz`: float64 nominal frequency; for a non-broadband
   input this equals the actual frequency;
-- `requested_mesh_points`: uint64 nominal NG, including `0` for automatic;
+- `requested_mesh_points`: uint64 nominal NG for the first fluid layer, including `0` for automatic;
+- `finite_fluid_layer_count`: uint64 number of finite fluid layers (additive v1 metadata);
 - `max_range_m`: float64 extrapolation control;
 - `field_mode_limit`: uint64 requested FIELD cap (not the total stored mode count);
 - `source_geometry`: UTF-8 `line` or `point`;
 - `surface_boundary`: UTF-8 `V`, `R`, `A` or `F` (additive v1 metadata);
 - `bottom_boundary`: UTF-8 `V`, `A`, `R`, `F` or `P` (additive v1 metadata).
+
+Each frequency also has `/frequencies/i/media/0`, `/1`, ... in depth order.
+Each layer group carries float64 `top_depth_m`, `bottom_depth_m`, `density_g_cm3`
+and uint64 `requested_mesh_points`. These are finite layers, not the A half-spaces;
+nominal NG is not the refined/solve-frequency mesh. All depths are absolute.
+Older v1 files may omit these additive groups/attributes; datasets and schema
+identity are unchanged. Modal samples and FIELD depths may span the whole stack.
 
 ## Modes
 
@@ -188,7 +208,11 @@ pressures), plus four small table derivatives and all three original TabRefCoef
 geo/brc/irc workflows with BOUNCE-generated resources, four cubic/analytic
 KRAKENC derivatives, broadband PCHIP Munk and original MunkS/MunkAnalytic
 environments with **derived** FIELD geometry, 27 water-material workflows and
-24 derived smooth-boundary/TRC workflows. Every mode, shape and
+24 derived smooth-boundary/TRC workflows, and 41 derived layered-fluid workflows
+(50 frequency blocks, 530 modes, 4,902 pressures). Layer metadata, fractional
+interfaces, cross-layer sources/receivers, repeated frequencies and cumulative
+budgets are checked; original coarse `double` and a later-frequency root-work
+failure preserve old output and remove scratch. Every mode, shape and
 pressure is checked at the existing tolerances. The table derivatives have new
 Fortran goldens; no numerical tolerance is changed. Rust HDF5 artifacts
 are not committed as Fortran goldens.

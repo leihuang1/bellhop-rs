@@ -154,6 +154,47 @@ fn smooth_boundaries_and_top_tables_match_pinned_goldens() {
 }
 
 #[test]
+fn layered_fluid_modes_and_field_match_pinned_goldens() {
+    for name in [
+        "LayeredFluidN",
+        "LayeredFluidC",
+        "LayeredFluidP",
+        "LayeredFluidS",
+        "LayeredBoundaryVV",
+        "LayeredBoundaryVR",
+        "LayeredBoundaryRV",
+        "LayeredBoundaryRR",
+        "LayeredBoundaryRA",
+        "LayeredBoundaryAV",
+        "LayeredBoundaryAR",
+        "LayeredBoundaryAA",
+        "LayeredFluidThree",
+        "LayeredFluidThreeWide",
+        "LayeredFluidPlane",
+        "LayeredFluidPower",
+        "LayeredFluidBio",
+        "LayeredFluidLeaky",
+        "LayeredDoubleRefined",
+        "LayeredNormalization",
+        "LayeredFluidFractional",
+    ] {
+        for (engine, solver) in [
+            ("kraken", kraken::ModeSolver::Kraken),
+            ("krakenc", kraken::ModeSolver::Krakenc),
+        ] {
+            if name == "LayeredFluidLeaky" && engine == "kraken" {
+                continue;
+            }
+            compare_frequencies(
+                &fixtures().join(name).with_extension("env"),
+                &fixtures().join("golden").join(format!("{name}-{engine}")),
+                solver,
+            );
+        }
+    }
+}
+
+#[test]
 fn tabulated_bottom_modes_and_field_match_pinned_goldens() {
     for name in ["TabRefBrcN", "TabRefBrcC", "TabRefIrcN", "TabRefIrcC"] {
         let env = fixtures().join(name).with_extension("env");
@@ -517,7 +558,8 @@ fn compare_modes_at(
         0.0,
         "result frequency",
     );
-    assert_eq!(count(header, 88), 1, "medium count");
+    let layer_count = 1 + case.additional_fluid_layers.len();
+    assert_eq!(count(header, 88), layer_count, "medium count");
     assert_eq!(
         count(header, 92),
         actual.sampled_depths_m.len(),
@@ -528,7 +570,40 @@ fn compare_modes_at(
         actual.sampled_depths_m.len(),
         "fluid mode shape size"
     );
-    assert_eq!(&file.record(1)[4..12], b"ACOUSTIC", "fluid material");
+    let mut top = 0.0;
+    for medium in 0..layer_count {
+        assert!(
+            (10..=1_000_000).contains(&count(file.record(1), 12 * medium)),
+            "medium mesh intervals"
+        );
+        assert_eq!(
+            &file.record(1)[12 * medium + 4..12 * medium + 12],
+            b"ACOUSTIC",
+            "fluid material"
+        );
+        let density = if medium == 0 {
+            case.water_density_g_cm3
+        } else {
+            case.additional_fluid_layers[medium - 1].density_g_cm3
+        };
+        close(
+            single(file.record(2), 8 * medium),
+            f64::from(top as f32),
+            0.0,
+            "medium top depth",
+        );
+        close(
+            single(file.record(2), 8 * medium + 4),
+            f64::from(density as f32),
+            0.0,
+            "medium density",
+        );
+        top = if medium == 0 {
+            case.water_depth_m
+        } else {
+            case.additional_fluid_layers[medium - 1].bottom_depth_m
+        };
+    }
     close(
         double(file.record(3), 8 * frequency_index),
         case.frequency_hz,
@@ -784,6 +859,29 @@ fn double(bytes: &[u8], offset: usize) -> f64 {
 
 fn complex(bytes: &[u8], offset: usize) -> Complex64 {
     Complex64::new(single(bytes, offset), single(bytes, offset + 4))
+}
+
+#[test]
+fn layered_comparator_detects_corruption_in_the_last_medium() {
+    let root = fixtures().join("LayeredFluidThree");
+    let case = load_complex_case(root.with_extension("env"), root.with_extension("flp")).unwrap();
+    let result = solve(&case).unwrap();
+    let root = fixtures().join("golden/LayeredFluidThree-krakenc");
+    let modes = Records::read(&root.with_extension("mod"));
+    let printed = fs::read_to_string(root.with_extension("prt")).unwrap();
+    for offset in [
+        modes.record_bytes + 24,
+        modes.record_bytes + 28,
+        2 * modes.record_bytes + 16,
+        2 * modes.record_bytes + 20,
+    ] {
+        let mut corrupted = modes.clone();
+        corrupted.bytes[offset..offset + 4].copy_from_slice(&f32::NAN.to_le_bytes());
+        assert!(
+            std::panic::catch_unwind(|| compare_modes(&case, &result.modes, &corrupted, &printed))
+                .is_err()
+        );
+    }
 }
 
 #[test]

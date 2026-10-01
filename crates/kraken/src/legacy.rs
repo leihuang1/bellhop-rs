@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::attenuation::{VolumeLoss, db_per_wavelength};
 use crate::{
-    BottomBoundary, Case, CaseDefinition, Diagnostic, DiagnosticReport, Interpolation,
+    BottomBoundary, Case, CaseDefinition, Diagnostic, DiagnosticReport, FluidLayer, Interpolation,
     MAX_VECTOR_LENGTH, ModeSolver, SoundSpeedPoint, SourceGeometry, SurfaceBoundary,
 };
 
@@ -16,7 +16,7 @@ const MAX_PROFILE_POINTS: usize = MAX_VECTOR_LENGTH;
 const MAX_FREQUENCIES: usize = 1000;
 const MAX_FREQUENCY_INPUT_VALUES: usize = 5_000_000;
 
-/// Load the supported single-fluid subset of a KRAKEN `.env` and FIELD `.flp` pair.
+/// Load the supported layered-fluid subset of a KRAKEN `.env` and FIELD `.flp` pair.
 ///
 /// # Errors
 ///
@@ -351,8 +351,12 @@ fn parse_frequency_cases_with_tables(
     let mut field = parse_field(flp_source, flp_path)?;
     // ReadSzRz stores depths in single precision. Keep an interface sample on
     // the exact validated f64 boundary even when the f32 spelling rounds upward.
+    let bottom_depth = environment
+        .additional_layers
+        .last()
+        .map_or(environment.water_depth_m, |layer| layer.bottom_depth_m);
     #[allow(clippy::cast_possible_truncation)]
-    let boundary = f64::from(environment.water_depth_m as f32);
+    let boundary = f64::from(bottom_depth as f32);
     for depths in [
         &mut environment.source_depths,
         &mut environment.receiver_depths,
@@ -361,7 +365,7 @@ fn parse_frequency_cases_with_tables(
     ] {
         for depth in depths {
             if *depth == boundary {
-                *depth = environment.water_depth_m;
+                *depth = bottom_depth;
             }
         }
     }
@@ -397,6 +401,7 @@ fn parse_frequency_cases_with_tables(
         sound_speed_profile: environment.profile,
         water_density_g_cm3: environment.water_density,
         water_attenuation_db_per_wavelength: Vec::new(),
+        additional_fluid_layers: environment.additional_layers,
         bottom_boundary: environment.bottom_boundary,
         bottom_sound_speed_mps: environment.bottom_speed,
         bottom_density_g_cm3: environment.bottom_density,
@@ -425,6 +430,13 @@ fn parse_frequency_cases_with_tables(
     let values = table_values
         + surface_values
         + environment.water_attenuation.len()
+        + definition
+            .additional_fluid_layers
+            .iter()
+            .map(|layer| {
+                1 + layer.sound_speed_profile.len() + layer.attenuation_db_per_wavelength.len()
+            })
+            .sum::<usize>()
         + definition.sound_speed_profile.len()
         + definition.mode_sample_depths_m.len()
         + definition.source_depths_m.len()
@@ -476,6 +488,34 @@ fn parse_frequency_cases_with_tables(
             {
                 input.water_attenuation_db_per_wavelength.clear();
             }
+            for (layer, &power) in input
+                .additional_fluid_layers
+                .iter_mut()
+                .zip(&environment.additional_power_laws)
+            {
+                for (point, loss) in layer
+                    .sound_speed_profile
+                    .iter()
+                    .zip(&mut layer.attenuation_db_per_wavelength)
+                {
+                    *loss = db_per_wavelength(
+                        environment.attenuation_unit,
+                        &environment.volume_loss,
+                        *loss,
+                        point.depth_m,
+                        point.sound_speed_mps,
+                        frequency_hz,
+                        power,
+                    );
+                }
+                if layer
+                    .attenuation_db_per_wavelength
+                    .iter()
+                    .all(|&a| a == 0.0)
+                {
+                    layer.attenuation_db_per_wavelength.clear();
+                }
+            }
             if input.surface_boundary == SurfaceBoundary::FluidHalfSpace {
                 input.surface_attenuation_db_per_wavelength = db_per_wavelength(
                     environment.attenuation_unit,
@@ -508,6 +548,20 @@ fn parse_frequency_cases_with_tables(
                 })
                 .map_err(|mut report| {
                     for diagnostic in &mut report.diagnostics {
+                        let layer_record = diagnostic
+                            .field
+                            .rsplit_once('.')
+                            .filter(|(prefix, _)| prefix.starts_with("additional_fluid_layers["))
+                            .map(|(prefix, suffix)| {
+                                format!(
+                                    "{prefix}.{}",
+                                    if matches!(suffix, "bottom_depth_m" | "mesh_points") {
+                                        "header"
+                                    } else {
+                                        "sound_speed_profile"
+                                    }
+                                )
+                            });
                         let (locations, path, record) = match diagnostic.field.as_str() {
                             "water_depth_m" | "mesh_points" => {
                                 (&env_locations, env_path, "water_header")
@@ -551,7 +605,9 @@ fn parse_frequency_cases_with_tables(
                             "mode_limit" => (&field_locations, flp_path, "mode_limit"),
                             other => (&env_locations, env_path, other),
                         };
-                        if let Some(&(line, column)) = locations.get(record) {
+                        if let Some(&(line, column)) =
+                            locations.get(layer_record.as_deref().unwrap_or(record))
+                        {
                             diagnostic.path = path.to_path_buf();
                             diagnostic.line = line;
                             diagnostic.column = column;
@@ -883,6 +939,8 @@ struct Environment {
     profile: Vec<SoundSpeedPoint>,
     water_density: f64,
     water_attenuation: Vec<f64>,
+    additional_layers: Vec<FluidLayer>,
+    additional_power_laws: Vec<(f64, f64, f64)>,
     attenuation_unit: u8,
     volume_loss: VolumeLoss,
     water_power_law: (f64, f64, f64),
@@ -914,11 +972,12 @@ fn parse_environment_with_solver(
     let mut reader = Reader::new(source, path)?;
     let title = reader.text("title")?.text;
     let frequency_hz = reader.scalar("frequency_hz")?;
-    if reader.count("medium_count")? != 1 {
+    let medium_count = reader.count("medium_count")?;
+    if medium_count > crate::layers::MAX_LAYERS {
         return Err(reader_error(
             &reader,
-            "KR0202",
-            "only one water medium is supported in this slice",
+            "KR0201",
+            "at most 500 finite fluid layers",
             "medium_count",
         ));
     }
@@ -950,6 +1009,14 @@ fn parse_environment_with_solver(
         ));
     }
 
+    if medium_count > 1 && (option(0) == b'A' || option(1) == b'F') {
+        return Err(reader_error(
+            &reader,
+            "KR0202",
+            "analytic Munk and top TRC remain single-layer",
+            "top_options",
+        ));
+    }
     let interpolation = match option(0) {
         b'N' => Interpolation::N2Linear,
         b'C' => Interpolation::CLinear,
@@ -1025,90 +1092,51 @@ fn parse_environment_with_solver(
     } else {
         [0.0; 6]
     };
-    let header = reader.record("water_header")?;
-    if header.tokens.len() != if option(2) == b'm' { 5 } else { 3 } {
-        return Err(reader.record_error(
-            &header,
-            "water_header",
-            "expected mesh count, roughness, depth (plus beta and transition frequency for m)",
-        ));
-    }
-    let mesh_points = header.tokens[0].text.parse::<usize>().map_err(|_| {
-        reader.record_error(&header, "mesh_points", "mesh count must be an integer")
-    })?;
-    let surface_roughness = number(&header.tokens[1], path, "surface_roughness")?;
-    let water_depth_m = number(&header.tokens[2], path, "water_depth_m")?;
-    let water_power_law = read_power_law(&reader, &header, 3, option(2), frequency_hz)?;
-    if surface_roughness != 0.0 {
-        return Err(reader.record_error(&header, "surface_roughness", "requires a smooth surface"));
-    }
-
-    let mut points: Vec<[f64; 6]> = Vec::new();
-    if interpolation != Interpolation::AnalyticMunk {
-        loop {
-            let record = reader.record("sound_speed_profile")?;
-            if !(2..=6).contains(&record.tokens.len()) || (record.tokens.len() < 6 && !record.slash)
-            {
-                return Err(reader.record_error(
-                    &record,
-                    "sound_speed_profile",
-                    "expected 6 values, or 2..=5 followed by / to inherit trailing values",
-                ));
-            }
-            let mut point = points.last().copied().unwrap_or(if option(1) == b'A' {
-                surface
-            } else {
-                [0.0, 1500.0, 0.0, 1.0, 0.0, 0.0]
-            });
-            for (index, token) in record.tokens.iter().enumerate() {
-                point[index] = number(token, path, "sound_speed_profile")?;
-            }
-            if point[0] < 0.0
-                || point[0] > water_depth_m
-                || points
-                    .last()
-                    .is_some_and(|previous| point[0] <= previous[0])
-            {
-                return Err(reader.record_error(
-                    &record,
-                    "sound_speed_profile",
-                    "depths must increase within the water column",
-                ));
-            }
-            if (points.is_empty() && point[0] != 0.0)
-                || point[2] != 0.0
-                || point[4] < 0.0
-                || point[5] != 0.0
-                || points.first().is_some_and(|first| point[3] != first[3])
-            {
-                return Err(reader.record_error(
-                    &record,
-                    "sound_speed_profile",
-                    "requires constant-density fluid water starting at 0 m, no shear and nonnegative absorption",
-                ));
-            }
-            points.push(point);
-            if points.len() > MAX_PROFILE_POINTS {
-                return Err(reader.record_error(
-                    &record,
-                    "sound_speed_profile",
-                    "too many profile points",
-                ));
-            }
-            if point[0] == water_depth_m {
-                break;
-            }
-        }
-        if points.len() < 2 {
+    let defaults = if option(1) == b'A' {
+        surface
+    } else {
+        [0.0, 1500.0, 0.0, 1.0, 0.0, 0.0]
+    };
+    let (water, water_power_law, mut inherited) = read_fluid_layer(
+        &mut reader,
+        interpolation,
+        option(2),
+        frequency_hz,
+        0,
+        0.0,
+        defaults,
+    )?;
+    let water_depth_m = water.bottom_depth_m;
+    let mesh_points = water.mesh_points;
+    let water_density = water.density_g_cm3;
+    let mut additional_layers = Vec::new();
+    let mut additional_power_laws = Vec::new();
+    let mut top = water_depth_m;
+    let mut profile_points = water.sound_speed_profile.len();
+    for index in 1..medium_count {
+        let (layer, power, last) = read_fluid_layer(
+            &mut reader,
+            interpolation,
+            option(2),
+            frequency_hz,
+            index,
+            top,
+            inherited,
+        )?;
+        inherited = last;
+        top = layer.bottom_depth_m;
+        profile_points += layer.sound_speed_profile.len();
+        if profile_points > MAX_PROFILE_POINTS {
             return Err(reader_error(
                 &reader,
-                "KR0202",
-                "a fluid profile needs top and interface points",
-                "sound_speed_profile",
+                "KR0201",
+                "total fluid profile points exceed the limit",
+                "medium_count",
             ));
         }
+        additional_layers.push(layer);
+        additional_power_laws.push(power);
     }
-    let water_density = points.first().map_or(1.0, |point| point[3]);
 
     let bottom_option = reader.record("bottom_options")?;
     if bottom_option.tokens.len() != if option(2) == b'm' { 4 } else { 2 }
@@ -1124,6 +1152,13 @@ fn parse_environment_with_solver(
             &bottom_option,
             "bottom_options",
             "requires smooth V/A/R bottom, or KRAKENC F/P table bottom",
+        ));
+    }
+    if medium_count > 1 && matches!(bottom_option.tokens[0].text.as_str(), "F" | "P") {
+        return Err(reader.record_error(
+            &bottom_option,
+            "bottom_options",
+            "tabulated bottoms remain single-layer",
         ));
     }
     if matches!(bottom_option.tokens[0].text.as_str(), "F" | "P") && option(4) == b'.' {
@@ -1146,23 +1181,17 @@ fn parse_environment_with_solver(
     };
     let mut bottom = [0.0; 6];
     if bottom_boundary == BottomBoundary::FluidHalfSpace {
-        let defaults =
-            points
-                .last()
-                .copied()
-                .unwrap_or([water_depth_m, 1500.0, 0.0, 1.0, 0.0, 0.0]);
+        let defaults = if interpolation == Interpolation::AnalyticMunk {
+            [top, 1500.0, 0.0, 1.0, 0.0, 0.0]
+        } else {
+            inherited
+        };
         let minimum = if interpolation == Interpolation::AnalyticMunk {
             4
         } else {
             1
         };
-        bottom = read_half_space(
-            &mut reader,
-            "bottom_half_space",
-            water_depth_m,
-            defaults,
-            minimum,
-        )?;
+        bottom = read_half_space(&mut reader, "bottom_half_space", top, defaults, minimum)?;
     }
     let limits = reader.numbers("phase_speed_limits", 2)?;
     let max_range_m = reader.scalar("max_range_km")? * 1000.0;
@@ -1211,18 +1240,14 @@ fn parse_environment_with_solver(
         surface_speed: surface[1],
         surface_density: surface[3],
         surface_attenuation: surface[4],
-        water_attenuation: points.iter().map(|p| p[4]).collect(),
+        water_attenuation: water.attenuation_db_per_wavelength,
+        additional_layers,
+        additional_power_laws,
         attenuation_unit: option(2),
         volume_loss,
         water_power_law,
         bottom_power_law,
-        profile: points
-            .into_iter()
-            .map(|point| SoundSpeedPoint {
-                depth_m: point[0],
-                sound_speed_mps: point[1],
-            })
-            .collect(),
+        profile: water.sound_speed_profile,
         water_density,
         bottom_boundary,
         bottom_speed: bottom[1],
@@ -1236,6 +1261,137 @@ fn parse_environment_with_solver(
         receiver_depths,
         locations: reader.locations,
     })
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::float_cmp,
+    clippy::type_complexity
+)]
+fn read_fluid_layer(
+    reader: &mut Reader,
+    interpolation: Interpolation,
+    unit: u8,
+    frequency: f64,
+    index: usize,
+    top: f64,
+    mut inherited: [f64; 6],
+) -> Result<(FluidLayer, (f64, f64, f64), [f64; 6]), DiagnosticReport> {
+    let header_field = if index == 0 {
+        "water_header".into()
+    } else {
+        format!("additional_fluid_layers[{}].header", index - 1)
+    };
+    let profile_field = if index == 0 {
+        "sound_speed_profile".into()
+    } else {
+        format!("additional_fluid_layers[{}].sound_speed_profile", index - 1)
+    };
+    let header = reader.record(&header_field)?;
+    if header.tokens.len() != if unit == b'm' { 5 } else { 3 } {
+        return Err(reader.record_error(
+            &header,
+            &header_field,
+            "expected mesh count, roughness, depth (plus beta and transition frequency for m)",
+        ));
+    }
+    let mesh_points = header.tokens[0].text.parse::<usize>().map_err(|_| {
+        reader.record_error(&header, &header_field, "mesh count must be an integer")
+    })?;
+    let bottom = number(&header.tokens[2], &reader.path, &header_field)?;
+    if bottom <= top {
+        return Err(reader.record_error(
+            &header,
+            &header_field,
+            "layer interfaces must strictly increase",
+        ));
+    }
+    if number(&header.tokens[1], &reader.path, &header_field)? != 0.0 {
+        return Err(reader.record_error(
+            &header,
+            if index == 0 {
+                "surface_roughness"
+            } else {
+                &header_field
+            },
+            "requires smooth interfaces",
+        ));
+    }
+    let power = read_power_law(reader, &header, 3, unit, frequency)?;
+    let mut points: Vec<[f64; 6]> = Vec::new();
+    if interpolation != Interpolation::AnalyticMunk {
+        loop {
+            let record = reader.record(&profile_field)?;
+            if !(2..=6).contains(&record.tokens.len()) || (record.tokens.len() < 6 && !record.slash)
+            {
+                return Err(reader.record_error(
+                    &record,
+                    &profile_field,
+                    "expected 6 values, or 2..=5 followed by / to inherit trailing values",
+                ));
+            }
+            let mut point = inherited;
+            for (i, token) in record.tokens.iter().enumerate() {
+                point[i] = number(token, &reader.path, &profile_field)?;
+            }
+            if point[0] < top
+                || point[0] > bottom
+                || points.last().is_some_and(|p| point[0] <= p[0])
+            {
+                return Err(reader.record_error(
+                    &record,
+                    &profile_field,
+                    "depths must increase within each fluid layer",
+                ));
+            }
+            if (points.is_empty() && point[0] != top)
+                || point[2] != 0.0
+                || point[4] < 0.0
+                || point[5] != 0.0
+                || points.first().is_some_and(|p| point[3] != p[3])
+            {
+                return Err(reader.record_error(&record, &profile_field, "requires constant-density fluid at the layer top, no shear and nonnegative absorption"));
+            }
+            inherited = point;
+            points.push(point);
+            if points.len() > MAX_PROFILE_POINTS {
+                return Err(reader.record_error(
+                    &record,
+                    &profile_field,
+                    "too many profile points",
+                ));
+            }
+            if point[0] == bottom {
+                break;
+            }
+        }
+        if points.len() < 2 {
+            return Err(reader_error(
+                reader,
+                "KR0202",
+                "a fluid profile needs top and interface points",
+                &profile_field,
+            ));
+        }
+    }
+    Ok((
+        FluidLayer {
+            bottom_depth_m: bottom,
+            density_g_cm3: points.first().map_or(1.0, |p| p[3]),
+            mesh_points,
+            sound_speed_profile: points
+                .iter()
+                .map(|p| SoundSpeedPoint {
+                    depth_m: p[0],
+                    sound_speed_mps: p[1],
+                })
+                .collect(),
+            attenuation_db_per_wavelength: points.iter().map(|p| p[4]).collect(),
+        },
+        power,
+        inherited,
+    ))
 }
 
 #[allow(clippy::float_cmp)]

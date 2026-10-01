@@ -1,8 +1,8 @@
 // Adapted from Acoustics Toolbox v2023.5 Kraken/krakenc.f90,
 // Kraken/InverseIterationMod.f90 and misc/RootFinderSecantMod.f90.
 // Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
-//! N/C/P/S complex water or lossless fixed-Munk-A over a fluid half-space,
-//! vacuum surface and optional Richardson mesh extrapolation; N/C table bottoms.
+//! N/C/P/S fluid stacks with smooth V/R/A boundaries and bounded Richardson
+//! extrapolation; analytic Munk and N/C table boundaries remain single-layer.
 use crate::profile::Profile;
 use crate::solver::error;
 use crate::{BottomBoundary, Case, DiagnosticReport, ModeSet, NormalMode, SurfaceBoundary};
@@ -21,7 +21,9 @@ const SECANT_RELATIVE_TOLERANCE: f64 = 1e-14;
 )]
 pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let omega = 2.0 * PI * case.frequency_hz;
-    let profile = Profile::new(case)?;
+    let profiles = crate::layers::iter(case)
+        .map(|layer| Profile::new_layer(case, layer))
+        .collect::<Result<Vec<_>, _>>()?;
     let bottom_c = Complex64::new(
         case.bottom_sound_speed_mps,
         case.bottom_attenuation_db_per_wavelength * case.bottom_sound_speed_mps
@@ -63,29 +65,38 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let mut work = 0;
     for set in 0..5 {
         let multiplier = 1_usize << set;
-        let n = case.mesh_points_at(multiplier)?;
-        let h = case.water_depth_m / n as f64;
+        let layers = crate::layers::mesh_layers(case, multiplier)?;
+        let h = layers[0].h;
         let mut min_speed = f64::INFINITY;
-        let b: Vec<_> = (0..=n)
-            .map(|i| {
-                let c = profile.mesh_complex_speed(i, n);
+        let mut b = Vec::new();
+        for ((layer, profile), material) in
+            layers.iter().zip(&profiles).zip(crate::layers::iter(case))
+        {
+            let lossy = material.loss.iter().any(|&a| a != 0.0);
+            for i in 0..=layer.intervals {
+                let c = profile.mesh_complex_speed(i, layer.intervals);
                 min_speed = min_speed.min(c.re);
-                if water_loss {
-                    -2.0 + Complex64::new(h * h * omega.powi(2), 0.0) / c.powi(2)
+                b.push(if lossy {
+                    -2.0 + Complex64::new(layer.h * layer.h * omega.powi(2), 0.0) / c.powi(2)
                 } else if tabulated {
                     Complex64::new(
-                        -2.0 + (Complex64::new(h * h * omega.powi(2), 0.0) / c.powi(2)).re,
+                        -2.0 + (Complex64::new(layer.h * layer.h * omega.powi(2), 0.0) / c.powi(2))
+                            .re,
                         0.0,
                     )
                 } else {
-                    Complex64::new(-2.0 + h * h * (omega / c.re).powi(2), 0.0)
-                }
-            })
-            .collect();
+                    Complex64::new(-2.0 + layer.h * layer.h * (omega / c.re).powi(2), 0.0)
+                });
+            }
+        }
+        let inside_h = layers.last().unwrap().h;
         let inside_c = pekeris_root(if water_loss {
-            Complex64::new(omega * omega * h * h, 0.0) / (2.0 + b[b.len() - 1])
+            Complex64::new(omega * omega * inside_h * inside_h, 0.0) / (2.0 + b[b.len() - 1])
         } else {
-            Complex64::new(omega * omega * h * h / (2.0 + b[b.len() - 1].re), 0.0)
+            Complex64::new(
+                omega * omega * inside_h * inside_h / (2.0 + b[b.len() - 1].re),
+                0.0,
+            )
         });
         let bottom = Bottom {
             case,
@@ -105,10 +116,10 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         // subsequent secants distinct.
         // A wavenumber-dependent table may introduce extra roots; the water-only
         // estimate is not its root bound. Keep the existing 20k/300m ceilings.
-        let guesses = if tabulated {
+        let guesses = if tabulated || layers.len() > 1 {
             crate::MAX_MODE_LIMIT
         } else {
-            (case.water_depth_m * (water_k2 - low_k2).max(0.0).sqrt() / PI).ceil() as usize + 1
+            (case.total_depth_m() * (water_k2 - low_k2).max(0.0).sqrt() / PI).ceil() as usize + 1
         };
         if guesses > crate::MAX_MODE_LIMIT || guesses == 0 {
             return Err(error(
@@ -124,6 +135,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             // ponytail: wide spectral intervals use the previous-root seed from
             // Fortran; revisit the 10x cutoff if a medium-width spectrum fails.
             let guess = if tabulated
+                || layers.len() > 1
                 || case.surface_boundary != SurfaceBoundary::Vacuum
                 || case.bottom_boundary != BottomBoundary::FluidHalfSpace
             {
@@ -144,15 +156,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             // Solve2 seeds refined meshes with unmodified EVMat roots, then
             // Neville interpolation in h²; restarting from above can skip roots.
             let guess = refinement_seed(&seed_meshes, index - 1, h).unwrap_or(guess);
-            let root = secant(
-                guess,
-                &roots,
-                &b,
-                h,
-                case.water_density_g_cm3,
-                &bottom,
-                &mut work,
-            )?;
+            let root = secant(guess, &roots, &b, &layers, &bottom, &mut work)?;
             if (tabulated && root.sqrt().re < omega / case.c_high_mps)
                 || (!tabulated && root.re <= low_k2)
             {
@@ -206,7 +210,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             }
             modes = selected
                 .iter()
-                .map(|&root| mode(case, &b, h, omega, bottom_c, &bottom, root))
+                .map(|&root| mode(case, &b, &layers, omega, bottom_c, &bottom, root))
                 .collect::<Result<Vec<_>, _>>()?;
         } else if selected.len() != modes.len() {
             return Err(error(
@@ -263,6 +267,11 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
 }
 
 fn refinement_seed(meshes: &[(f64, Vec<Complex64>)], index: usize, h: f64) -> Option<Complex64> {
+    // Solve2 leaves the upper/previous-root scan in place on mesh 2.
+    // Neville seeds start only on mesh 3, after two raw-root meshes exist.
+    if meshes.len() < 2 {
+        return None;
+    }
     let mut values = meshes
         .iter()
         .map(|(_, roots)| roots.get(index).copied())
@@ -341,10 +350,14 @@ fn dispersion(
     x: Complex64,
     roots: &[Complex64],
     b: &[Complex64],
-    h: f64,
-    water_rho: f64,
+    layers: &[crate::layers::MeshLayer],
     bottom: &Bottom<'_>,
 ) -> (Complex64, i32) {
+    if layers.len() > 1 {
+        return layered_dispersion(x, roots, b, layers, bottom);
+    }
+    let h = layers[0].h;
+    let water_rho = layers[0].density;
     let (f, g, mut power) = bottom.evaluate(x);
     let mut prev = -2.0 * g;
     let tabulated =
@@ -396,13 +409,65 @@ fn dispersion(
     (value, power)
 }
 
+#[allow(clippy::many_single_char_names)]
+fn layered_dispersion(
+    x: Complex64,
+    roots: &[Complex64],
+    b: &[Complex64],
+    layers: &[crate::layers::MeshLayer],
+    bottom: &Bottom<'_>,
+) -> (Complex64, i32) {
+    let (mut f, mut g, mut power) = bottom.evaluate(x);
+    for layer in layers.iter().rev() {
+        let shift = layer.h * layer.h * x;
+        let coefficients = &b[layer.coefficient_start..=layer.coefficient_start + layer.intervals];
+        let mut p0 = Complex64::new(0.0, 0.0);
+        let mut p1 = -2.0 * g;
+        let mut p2 = tabulated_shoot_step(
+            coefficients[layer.intervals] - shift,
+            g,
+            2.0 * layer.h * f * layer.density,
+        );
+        for &coefficient in coefficients[..layer.intervals].iter().rev() {
+            p0 = p1;
+            p1 = p2;
+            p2 = tabulated_shoot_step(shift - coefficient, p1, p0);
+            while p2.re.is_finite() && p2.re.abs() > 1e50 {
+                p0 *= 1e-50;
+                p1 *= 1e-50;
+                p2 *= 1e-50;
+                power += 50;
+            }
+        }
+        // GNU -ffast-math combines the two real divisors before division.
+        f = -(p2 - p0) / (layer.density * (2.0 * layer.h));
+        g = -p1;
+    }
+    let (f_top, g_top, top_power) = bottom.surface(x);
+    power += top_power;
+    // Retain the established vacuum-top sign; a global sign does not affect roots.
+    let mut value = f * g_top - g * f_top;
+    for &root in roots {
+        value /= x - root;
+        if value.re.abs() > 1e50 {
+            value *= 1e-50;
+            power += 50;
+        }
+        if value.re.abs() < 1e-50 && value.norm() > 0.0 {
+            value *= 1e50;
+            power -= 50;
+        }
+    }
+    (value, power)
+}
+
 fn tabulated_shoot_step(
     coefficient: Complex64,
     current: Complex64,
     previous: Complex64,
 ) -> Complex64 {
     // GNU Fortran 12.2.0 -ffast-math reassociates the real recurrence this way.
-    // IRC's previous-root seed is sensitive to even single-ulp changes.
+    // Table and multi-layer previous-root seeds are sensitive to single-ulp changes.
     Complex64::new(
         (coefficient.re * current.re - previous.re) - coefficient.im * current.im,
         coefficient.re * current.im + coefficient.im * current.re - previous.im,
@@ -414,8 +479,7 @@ fn secant(
     mut x: Complex64,
     roots: &[Complex64],
     b: &[Complex64],
-    h: f64,
-    water_rho: f64,
+    layers: &[crate::layers::MeshLayer],
     bottom: &Bottom<'_>,
     work: &mut usize,
 ) -> Result<Complex64, DiagnosticReport> {
@@ -436,7 +500,7 @@ fn secant(
                 "mesh_points",
             ));
         }
-        let value = dispersion(x, roots, b, h, water_rho, bottom);
+        let value = dispersion(x, roots, b, layers, bottom);
         if !value.0.re.is_finite() || !value.0.im.is_finite() {
             return Err(error(
                 "KR0303",
@@ -572,17 +636,36 @@ fn inverse_iteration(d: &[Complex64], e: &[f64]) -> Result<Vec<Complex64>, Diagn
 fn mode(
     case: &Case,
     b: &[Complex64],
-    h: f64,
+    layers: &[crate::layers::MeshLayer],
     omega: f64,
     bottom_c: Complex64,
     bottom: &Bottom<'_>,
     x: Complex64,
 ) -> Result<NormalMode, DiagnosticReport> {
-    let n = b.len();
+    let last = layers.last().unwrap();
+    let n = last.node_start + last.intervals + 1;
+    let h = layers[0].h;
     let shift = h * h * x;
-    let h_rho = h * case.water_density_g_cm3;
-    let mut d: Vec<_> = b.iter().map(|&v| (v - shift) / h_rho).collect();
-    let mut e = vec![1.0 / h_rho; n + 1];
+    let h_rho = h * layers[0].density;
+    let mut d = vec![Complex64::new(0.0, 0.0); n];
+    let mut e = vec![0.0; n + 1];
+    for (medium, layer) in layers.iter().enumerate() {
+        let shift = layer.h * layer.h * x;
+        let h_rho = layer.h * layer.density;
+        for i in 0..=layer.intervals {
+            let j = layer.node_start + i;
+            let diagonal = (b[layer.coefficient_start + i] - shift) / h_rho;
+            d[j] = if medium > 0 && i == 0 {
+                (d[j] + diagonal) / 2.0
+            } else {
+                diagonal
+            };
+            if i > 0 {
+                e[j] = 1.0 / h_rho;
+            }
+        }
+    }
+    e[n] = 1.0 / (last.h * last.density);
     let (f_top, g_top, _) = bottom.surface(x);
     if g_top == Complex64::new(0.0, 0.0) {
         d[0] = Complex64::new(1.0, 0.0);
@@ -595,16 +678,25 @@ fn mode(
         d[n - 1] = Complex64::new(1.0, 0.0);
         e[n - 1] = 0.0;
     } else {
-        d[n - 1] = (b[n - 1] - shift) / (2.0 * h_rho) - f_bot / g_bot;
+        d[n - 1] = (b[b.len() - 1] - last.h * last.h * x) / (2.0 * (last.h * last.density))
+            - f_bot / g_bot;
     }
     let mut phi = inverse_iteration(&d, &e)?;
     let mut sq_norm = Complex64::new(0.0, 0.0);
     let mut slow = Complex64::new(0.0, 0.0);
-    for (i, &value) in phi.iter().enumerate() {
-        let weight = if i == 0 || i + 1 == n { 0.5 } else { 1.0 };
-        let mass = weight * h / case.water_density_g_cm3 * value * value;
-        sq_norm += mass;
-        slow += mass * (b[i] + 2.0) / (omega * omega * h * h);
+    for layer in layers {
+        for i in 0..=layer.intervals {
+            let value = phi[layer.node_start + i];
+            let weight = if i == 0 || i == layer.intervals {
+                0.5
+            } else {
+                1.0
+            };
+            let mass = weight * layer.h / layer.density * value * value;
+            sq_norm += mass;
+            slow +=
+                mass * (b[layer.coefficient_start + i] + 2.0) / (omega * omega * layer.h * layer.h);
+        }
     }
     if case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
         let c = Complex64::new(
@@ -641,9 +733,11 @@ fn mode(
             / (case.bottom_density_g_cm3 * (x2 - x1))
     };
     let norm = sq_norm - top_derivative * phi[0].powi(2) + derivative * phi[n - 1].powi(2);
-    let turning = (1..n)
-        .find(|&i| (b[i] - shift).re + 2.0 > 0.0)
-        .unwrap_or(n - 2);
+    let turning = layers
+        .iter()
+        .flat_map(|layer| (1..=layer.intervals).map(move |i| (layer, i)))
+        .find(|(layer, i)| (b[layer.coefficient_start + i] - layer.h * layer.h * x).re + 2.0 > 0.0)
+        .map_or(n - 2, |(layer, i)| layer.node_start + i);
     let mut scale = Complex64::new(1.0, 0.0) / norm.sqrt();
     if (scale * phi[turning]).re < 0.0 {
         scale = -scale;
@@ -652,7 +746,7 @@ fn mode(
         *value *= scale;
     }
     let group_speed = (Complex64::new(1.0, 0.0) / (scale * scale * slow * omega / x.sqrt())).re;
-    let grid: Vec<_> = (0..n).map(|i| (i as f64 * h) as f32).collect();
+    let grid = crate::layers::grid(layers);
     let eigenfunction: Vec<Complex64> = case
         .mode_sample_depths_m
         .iter()
@@ -693,6 +787,17 @@ fn mode(
         attenuation_nepers_per_m: -k.im,
         eigenfunction,
     })
+}
+
+#[cfg(test)]
+#[test]
+fn neville_seeds_start_on_the_third_mesh_and_use_raw_roots() {
+    let mut meshes = vec![(1.0, vec![Complex64::new(10.0, -2.0)])];
+    assert_eq!(refinement_seed(&meshes, 0, 0.5), None);
+    meshes.push((0.5, vec![Complex64::new(7.0, -1.25)]));
+    let value = refinement_seed(&meshes, 0, 0.25).unwrap();
+    assert_eq!(value.re.to_bits(), 6.25_f64.to_bits());
+    assert_eq!(value.im.to_bits(), (-1.0625_f64).to_bits());
 }
 
 #[cfg(test)]

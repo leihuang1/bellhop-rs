@@ -34,7 +34,7 @@ tools/reference/run-kraken-case.sh kraken path/to/MunkK.env
 tools/reference/run-kraken-case.sh krakenc path/to/MunkKleaky.env
 ```
 
-Numerically compare a supported Rust single-fluid `.env`/`.flp` pair
+Numerically compare a supported Rust fluid `.env`/`.flp` pair
 against fresh KRAKEN/FIELD output (not merely a smoke test):
 
 ```sh
@@ -228,6 +228,26 @@ single-frequency lossless N/C, RMax=0/no B, blank restart and cLow >= last-node
 speed, with a smooth V/R/A bottom. The runner consumes the fixture's `.trc`;
 CLI/HDF5 hashes that same bounded snapshot and protects its input path/aliases.
 These are constructed/derived tests, not original TRC input-pair acceptance.
+
+Layered-fluid fixtures use the same commands and comparator (for example,
+`case=LayeredFluidPower` and either engine). Twenty-one **derived** pairs provide
+41 API/actual-CLI-HDF5 workflows: N/C/P/S interfaces, all V/R/A combinations,
+unequal/fractional meshes, per-layer power laws, biological loss, broadband
+leaky roots and cross-layer FIELD. `LayeredDoubleRefined` is a denser-mesh
+**derivative**, not acceptance of original TLslices `double`. The byte-identical
+`OriginalLayeredDouble.env` plus official shared `fieldbat.flp` is retained as a
+numerical-failure fixture: changing mode counts must not be clipped. A test also
+checks failure after three successful frequency blocks and old-output protection.
+Analytic Munk and F/P/TRC remain single-layer. The test-only `.mod` reader walks
+all finite fluid media and has a last-medium corruption regression.
+
+`python3 tools/reference/probe-layered-refinement.py` is a **diagnostic-only**
+experiment for the open three-layer refinement gap. It runs the unmodified
+oracle, a zero-perturbation control and ±256-ULP seed probes in a disposable
+container. The control binaries must match the oracle; altered results are
+never acceptance goldens. It requires the pinned image and refuses to overwrite
+`target/reference/layered-refinement-gap`. See the
+[diagnosis and failing regression](../docs/kraken-layered-refinement-gap.md).
 
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all

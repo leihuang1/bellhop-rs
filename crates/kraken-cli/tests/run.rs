@@ -205,6 +205,89 @@ fn cli_round_trips_smooth_boundaries_and_top_tables() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn cli_round_trips_layered_fluids() {
+    let root = directory("layered-fluids");
+    for name in [
+        "LayeredFluidN",
+        "LayeredFluidC",
+        "LayeredFluidP",
+        "LayeredFluidS",
+        "LayeredBoundaryVV",
+        "LayeredBoundaryVR",
+        "LayeredBoundaryRV",
+        "LayeredBoundaryRR",
+        "LayeredBoundaryRA",
+        "LayeredBoundaryAV",
+        "LayeredBoundaryAR",
+        "LayeredBoundaryAA",
+        "LayeredFluidThree",
+        "LayeredFluidThreeWide",
+        "LayeredFluidPlane",
+        "LayeredFluidPower",
+        "LayeredFluidBio",
+        "LayeredFluidLeaky",
+        "LayeredDoubleRefined",
+        "LayeredNormalization",
+        "LayeredFluidFractional",
+    ] {
+        for engine in ["kraken", "krakenc"] {
+            if name == "LayeredFluidLeaky" && engine == "kraken" {
+                continue;
+            }
+            let env = fixture(name).with_extension("env");
+            let output = root.join(format!("{name}-{engine}.h5"));
+            let process = run(&env, &output, engine, &[]);
+            assert!(
+                process.status.success(),
+                "{}",
+                String::from_utf8_lossy(&process.stderr)
+            );
+            assert_product(&output, &env, &env.with_extension("flp"), engine);
+        }
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn layered_failures_preserve_output_and_remove_scratch() {
+    let root = directory("layered-failures");
+    let output = root.join("previous.h5");
+    let original = fixture("OriginalLayeredDouble.env");
+    for engine in ["kraken", "krakenc"] {
+        fs::write(&output, b"old layered output").unwrap();
+        let process = run(&original, &output, engine, &["--overwrite"]);
+        assert_failure(&process, 3, &output, b"old layered output");
+        assert!(String::from_utf8_lossy(&process.stderr).contains("mode count changed"));
+    }
+    let env = root.join("later.env");
+    fs::write(
+        &env,
+        fs::read_to_string(fixture("LayeredFluidPower.env"))
+            .unwrap()
+            .replace("75.0 50.0 62.5 50.0 /", "75.0 50.0 62.5 7500.0 /"),
+    )
+    .unwrap();
+    fs::copy(fixture("LayeredFluidPower.flp"), env.with_extension("flp")).unwrap();
+    let process = run(&env, &output, "krakenc", &["--overwrite"]);
+    assert_failure(&process, 3, &output, b"old layered output");
+    let message = String::from_utf8_lossy(&process.stderr);
+    assert!(
+        message.contains("frequency[3] (7500 Hz)")
+            && message.contains("complex root work limit exceeded"),
+        "{message}"
+    );
+    let env = fixture("LayeredFluidN.env");
+    let process = run(
+        &env,
+        &output,
+        "krakenc",
+        &["--overwrite", "--max-output-bytes", "1"],
+    );
+    assert_failure(&process, 4, &output, b"old layered output");
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[allow(clippy::too_many_lines)]
 fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
     let engine = if solver == "krakenc" {
@@ -356,6 +439,64 @@ fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
                 kraken::BottomBoundary::Impedance { .. } => "P",
             }
         );
+        let layer_count = 1 + case.additional_fluid_layers.len();
+        assert_eq!(
+            group
+                .attr("finite_fluid_layer_count")
+                .unwrap()
+                .read_scalar::<u64>()
+                .unwrap(),
+            layer_count as u64
+        );
+        let media = group.group("media").unwrap();
+        assert_eq!(media.member_names().unwrap().len(), layer_count);
+        let mut top_depth = 0.0;
+        for index in 0..layer_count {
+            let (bottom_depth, density, mesh) = if index == 0 {
+                (
+                    case.water_depth_m,
+                    case.water_density_g_cm3,
+                    case.mesh_points,
+                )
+            } else {
+                let layer = &case.additional_fluid_layers[index - 1];
+                (layer.bottom_depth_m, layer.density_g_cm3, layer.mesh_points)
+            };
+            let layer = media.group(&index.to_string()).unwrap();
+            assert_eq!(
+                layer
+                    .attr("top_depth_m")
+                    .unwrap()
+                    .read_scalar::<f64>()
+                    .unwrap(),
+                top_depth
+            );
+            assert_eq!(
+                layer
+                    .attr("bottom_depth_m")
+                    .unwrap()
+                    .read_scalar::<f64>()
+                    .unwrap(),
+                bottom_depth
+            );
+            assert_eq!(
+                layer
+                    .attr("density_g_cm3")
+                    .unwrap()
+                    .read_scalar::<f64>()
+                    .unwrap(),
+                density
+            );
+            assert_eq!(
+                layer
+                    .attr("requested_mesh_points")
+                    .unwrap()
+                    .read_scalar::<u64>()
+                    .unwrap(),
+                mesh as u64
+            );
+            top_depth = bottom_depth;
+        }
         assert_modes(&group.group("modes").unwrap(), &expected);
         assert_field(&group.group("field").unwrap(), case, &expected);
         mode_count += expected.modes.modes.len() as u64;

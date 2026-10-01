@@ -14,6 +14,7 @@ pub(crate) fn validate(case: &CaseDefinition) -> Result<(), &'static str> {
             case.interpolation,
             Interpolation::N2Linear | Interpolation::CLinear
         )
+        || !case.additional_fluid_layers.is_empty()
         || case.surface_boundary != SurfaceBoundary::Vacuum
         || case.max_range_m != 0.0
         || case.mesh_reference_frequency_hz.is_some()
@@ -37,6 +38,7 @@ pub(crate) fn validate_surface(case: &CaseDefinition) -> Result<(), &'static str
         return Ok(());
     }
     if case.mode_solver != ModeSolver::Krakenc
+        || !case.additional_fluid_layers.is_empty()
         || !matches!(
             case.interpolation,
             Interpolation::N2Linear | Interpolation::CLinear

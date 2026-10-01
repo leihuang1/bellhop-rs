@@ -13,6 +13,7 @@ mod modes;
 #[cfg(test)]
 mod pekeris;
 mod profile;
+mod reflection;
 mod solver;
 
 const MAX_FIELD_SAMPLES: usize = 1_000_000;
@@ -129,10 +130,38 @@ pub enum SurfaceBoundary {
     Rigid,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BottomBoundary {
     FluidHalfSpace,
     Rigid,
+    /// KRAKENC bottom F, magnitude and unwrapped phase versus grazing angle.
+    Reflection(Vec<ReflectionPoint>),
+    /// KRAKENC bottom P, scaled impedance functions versus squared wavenumber.
+    Impedance {
+        frequency_hz: f64,
+        points: Vec<ImpedancePoint>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReflectionPoint {
+    pub angle_degrees: f64,
+    pub magnitude: f64,
+    pub phase_radians: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ImpedancePoint {
+    pub wavenumber_squared: f64,
+    pub f: Complex64,
+    pub g: Complex64,
+    pub power: i32,
+}
+
+impl BottomBoundary {
+    pub(crate) fn is_tabulated(&self) -> bool {
+        matches!(self, Self::Reflection(_) | Self::Impedance { .. })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -157,11 +186,11 @@ pub struct CaseDefinition {
     pub sound_speed_profile: Vec<SoundSpeedPoint>,
     pub water_density_g_cm3: f64,
     pub bottom_boundary: BottomBoundary,
-    /// Zero for a rigid bottom (no half-space material).
+    /// Zero for a rigid or tabulated bottom (no half-space material).
     pub bottom_sound_speed_mps: f64,
-    /// Zero for a rigid bottom (no half-space material).
+    /// Zero for a rigid or tabulated bottom (no half-space material).
     pub bottom_density_g_cm3: f64,
-    /// Bottom half-space attenuation in dB per wavelength (0 for lossless or rigid).
+    /// Bottom half-space attenuation in dB per wavelength (0 for lossless, rigid or table).
     pub bottom_attenuation_db_per_wavelength: f64,
     pub source_geometry: SourceGeometry,
     /// Mesh intervals at the reference frequency, or 0 for 20 per last-SSP wavelength.
@@ -295,7 +324,10 @@ impl Case {
                 )),
             }
         }
-        if definition.bottom_boundary == BottomBoundary::Rigid {
+        if let Err(message) = reflection::validate(&definition) {
+            diagnostics.push(error("bottom_boundary", message));
+        }
+        if definition.bottom_boundary != BottomBoundary::FluidHalfSpace {
             for (field, value) in [
                 ("bottom_sound_speed_mps", definition.bottom_sound_speed_mps),
                 ("bottom_density_g_cm3", definition.bottom_density_g_cm3),
@@ -305,7 +337,10 @@ impl Case {
                 ),
             ] {
                 if value != 0.0 {
-                    diagnostics.push(error(field, "rigid bottom has no half-space material"));
+                    diagnostics.push(error(
+                        field,
+                        "non-half-space bottom has no half-space material",
+                    ));
                 }
             }
         } else if definition.bottom_attenuation_db_per_wavelength < 0.0
@@ -438,11 +473,18 @@ impl Case {
             .source_depths_m
             .iter()
             .chain(&definition.receiver_depths_m)
-            .any(|depth| depth < first || depth > last)
+            .any(|depth| {
+                let extension = if definition.mode_sample_depths_m.len() >= 2 {
+                    1500.0 / definition.frequency_hz
+                } else {
+                    0.0
+                };
+                *depth < first - extension || *depth > last + extension
+            })
         {
             diagnostics.push(error(
                 "mode_sample_depths_m",
-                "FIELD depths must be covered by the legacy mode-sample depths",
+                "FIELD depths must lie within one reference wavelength of the mode-sample interval",
             ));
         }
         let field_samples = definition

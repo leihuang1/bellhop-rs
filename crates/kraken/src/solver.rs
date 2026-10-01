@@ -128,13 +128,22 @@ fn single(value: Complex64) -> Complex32 {
 }
 
 fn sample_shape(depths: &[f64], values: &[Complex64], depth: f64) -> Complex64 {
-    if depth <= depths[0] {
+    if depths.len() == 1 {
         return values[0];
     }
-    let index = depths.partition_point(|sample| *sample < depth);
-    if index == depths.len() {
-        return values[values.len() - 1];
+    if depth < depths[0] || depth > depths[depths.len() - 1] {
+        let i = if depth < depths[0] {
+            0
+        } else {
+            depths.len() - 2
+        };
+        // ReadModes/Weight_sngl extrapolates complex32 samples, including at the
+        // surface; do not insert a synthetic zero or clamp to the first sample.
+        #[allow(clippy::cast_possible_truncation)]
+        let weight = (depth as f32 - depths[i] as f32) / (depths[i + 1] as f32 - depths[i] as f32);
+        return double(single(values[i]) + weight * (single(values[i + 1]) - single(values[i])));
     }
+    let index = depths.partition_point(|sample| *sample < depth).max(1);
     let weight = (depth - depths[index - 1]) / (depths[index] - depths[index - 1]);
     values[index - 1] + (values[index] - values[index - 1]) * weight
 }
@@ -152,6 +161,28 @@ pub(super) fn error(
         1,
         1,
     ))
+}
+
+#[cfg(test)]
+#[test]
+fn endpoint_shape_extension_uses_nearest_complex32_pair_without_clamping() {
+    let depths = [1.0, 2.0, 98.0, 99.0];
+    let values = [
+        Complex64::new(1.0, 2.0),
+        Complex64::new(3.0, 5.0),
+        Complex64::new(4.0, -1.0),
+        Complex64::new(2.0, 2.0),
+    ];
+    assert_eq!(
+        sample_shape(&depths, &values, 0.0),
+        Complex64::new(-1.0, -1.0)
+    );
+    assert_eq!(
+        sample_shape(&depths, &values, 100.0),
+        Complex64::new(0.0, 5.0)
+    );
+    assert_eq!(sample_shape(&depths, &values, 99.0), values[3]);
+    assert_eq!(sample_shape(&[1.0], &values[..1], 1.0), values[0]);
 }
 
 #[cfg(test)]

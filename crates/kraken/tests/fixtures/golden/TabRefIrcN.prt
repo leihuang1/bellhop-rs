@@ -1,0 +1,62 @@
+ _________________________________________________
+
+ KRAKENC-Derived TabRefCoef Irc N; 50 Hz, NG=100, constructed table
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   1
+
+
+     N2-Linear approximation to SSP
+     Attenuation units: dB/wavelength
+     VACUUM
+
+       ( # mesh points =   100  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1545.72      0.00     1.00       0.0000    0.0000
+    100.00      1536.42      0.00     1.00       0.0000    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     reading PRECALCULATED IRC
+
+ cLow =   1450.0     m/s      cHigh =   3000.0     m/s
+ RMax =   0.0000     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            1
+    Source   z-coordinates, Sz (m)
+                 10.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =          100
+    Receiver z-coordinates, Rz (m)
+                 1.00000       2.00000       3.00000       4.00000
+   5.00000       6.00000       7.00000       8.00000       9.00000
+   10.0000
+          ...
+   100.000
+
+ Reading precalculated refl. coeff. table
+
+ Number of points in internal reflection coefficient =            3
+
+ Mesh multiplier   CPU seconds
+ Max. number of restarts in root finder, MaxTries =            1
+        1            0.352E-02s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2029964474     -0.36E-03   1547.609672       1531.18
+    2  0.1978732916     -0.45E-03   1587.678978       1495.22
+    3  0.1876150699     -0.51E-03   1674.488438       1418.03
+    4  0.1711260884     -0.57E-03   1835.835017       1293.50
+    5  0.1463168372     -0.67E-03   2147.116295       1106.00
+    6  0.1076095573     -0.92E-03   2919.436462       813.428
+ _________________________________________________
+
+ End of environmental file

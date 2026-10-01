@@ -26,7 +26,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         case.interpolation,
         Interpolation::N2Linear | Interpolation::CLinear
     ) || case.surface_boundary != SurfaceBoundary::Vacuum
-        || case.bottom_boundary != BottomBoundary::FluidHalfSpace
+        || case.bottom_boundary == BottomBoundary::Rigid
     {
         return Err(error(
             "KR0302",
@@ -41,7 +41,11 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         case.bottom_attenuation_db_per_wavelength * case.bottom_sound_speed_mps
             / (8.685_889_6 * 2.0 * PI),
     );
-    let bottom_k2 = (Complex64::new(omega, 0.0) / bottom_c).powi(2);
+    let bottom_k2 = if case.bottom_boundary.is_tabulated() {
+        Complex64::new(0.0, 0.0)
+    } else {
+        (Complex64::new(omega, 0.0) / bottom_c).powi(2)
+    };
     let low_k2 = (omega / case.c_high_mps).powi(2);
     let high_k2 = (omega / case.c_low_mps).powi(2);
     if !low_k2.is_finite() || !bottom_k2.re.is_finite() || !bottom_k2.im.is_finite() {
@@ -64,9 +68,24 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             .map(|i| {
                 let c = profile.speed((i as f64 * h).min(case.water_depth_m));
                 min_speed = min_speed.min(c);
-                -2.0 + h * h * (omega / c).powi(2)
+                if case.bottom_boundary.is_tabulated() {
+                    -2.0 + (Complex64::new(h * h * omega.powi(2), 0.0)
+                        / Complex64::new(c, 0.0).powi(2))
+                    .re
+                } else {
+                    -2.0 + h * h * (omega / c).powi(2)
+                }
             })
             .collect();
+        let inside_c = pekeris_root(Complex64::new(
+            omega * omega * h * h / (2.0 + b[b.len() - 1]),
+            0.0,
+        ));
+        let bottom = Bottom {
+            case,
+            k2: bottom_k2,
+            water_k2: (omega * omega / (inside_c * inside_c)).re,
+        };
         let water_k2 = (omega / min_speed).powi(2);
         if !water_k2.is_finite() || b.iter().any(|x| !x.is_finite()) {
             return Err(error(
@@ -77,8 +96,13 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         }
         // The minimum water speed bounds the first root; deflation keeps
         // subsequent secants distinct.
-        let guesses =
-            (case.water_depth_m * (water_k2 - low_k2).max(0.0).sqrt() / PI).ceil() as usize + 1;
+        // A wavenumber-dependent table may introduce extra roots; the water-only
+        // estimate is not its root bound. Keep the existing 20k/300m ceilings.
+        let guesses = if case.bottom_boundary.is_tabulated() {
+            crate::MAX_MODE_LIMIT
+        } else {
+            (case.water_depth_m * (water_k2 - low_k2).max(0.0).sqrt() / PI).ceil() as usize + 1
+        };
         if guesses > crate::MAX_MODE_LIMIT || guesses == 0 {
             return Err(error(
                 "KR0302",
@@ -92,7 +116,14 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             let vertical = (index as f64 - 0.5) * PI / case.water_depth_m;
             // ponytail: wide spectral intervals use the previous-root seed from
             // Fortran; revisit the 10x cutoff if a medium-width spectrum fails.
-            let guess = if case.c_high_mps > 10.0 * case.c_low_mps {
+            let guess = if case.bottom_boundary.is_tabulated() {
+                roots.last().copied().unwrap_or_else(|| {
+                    Complex64::new(
+                        omega * omega / case.c_low_mps.max(f64::from(0.99_f32) * min_speed).powi(2),
+                        0.0,
+                    )
+                }) * f64::from(1.000_01_f32)
+            } else if case.c_high_mps > 10.0 * case.c_low_mps {
                 roots.last().map_or_else(
                     || Complex64::new(water_k2 - vertical * vertical, 0.0),
                     |&previous| previous * 1.000_01,
@@ -106,11 +137,12 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
                 &b,
                 h,
                 case.water_density_g_cm3,
-                case.bottom_density_g_cm3,
-                bottom_k2,
+                &bottom,
                 &mut work,
             )?;
-            if root.re <= low_k2 {
+            if (case.bottom_boundary.is_tabulated() && root.sqrt().re < omega / case.c_high_mps)
+                || (!case.bottom_boundary.is_tabulated() && root.re <= low_k2)
+            {
                 reached_lower_limit = true;
                 break;
             }
@@ -134,7 +166,10 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
                 "phase_speed_limits",
             ));
         }
-        let selected: Vec<_> = roots.into_iter().filter(|x| x.re <= high_k2).collect();
+        let mut selected: Vec<_> = roots.into_iter().filter(|x| x.re <= high_k2).collect();
+        if case.bottom_boundary.is_tabulated() {
+            selected.sort_by(|a, b| b.re.total_cmp(&a.re));
+        }
         if selected.is_empty() {
             return Err(error(
                 "KR0301",
@@ -157,7 +192,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             }
             modes = selected
                 .iter()
-                .map(|&root| mode(case, &b, h, omega, bottom_c, bottom_k2, root))
+                .map(|&root| mode(case, &b, h, omega, bottom_c, &bottom, root))
                 .collect::<Result<Vec<_>, _>>()?;
         } else if selected.len() != modes.len() {
             return Err(error(
@@ -222,26 +257,59 @@ fn pekeris_root(z: Complex64) -> Complex64 {
     }
 }
 
+struct Bottom<'a> {
+    case: &'a Case,
+    k2: Complex64,
+    water_k2: f64,
+}
+
+impl Bottom<'_> {
+    fn evaluate(&self, x: Complex64) -> (Complex64, Complex64, i32) {
+        if self.case.bottom_boundary.is_tabulated() {
+            crate::reflection::impedance(&self.case.bottom_boundary, x, self.water_k2)
+        } else {
+            (
+                pekeris_root(x - self.k2),
+                self.case.bottom_density_g_cm3.into(),
+                0,
+            )
+        }
+    }
+
+    fn admittance(&self, x: Complex64) -> Complex64 {
+        let (f, g, _) = self.evaluate(x);
+        f / g
+    }
+}
+
+#[allow(clippy::many_single_char_names)]
 fn dispersion(
     x: Complex64,
     roots: &[Complex64],
     b: &[f64],
     h: f64,
     water_rho: f64,
-    bottom_rho: f64,
-    bottom_k2: Complex64,
+    bottom: &Bottom<'_>,
 ) -> (Complex64, i32) {
-    let gamma = pekeris_root(x - bottom_k2);
-    let mut prev = Complex64::new(-2.0 * bottom_rho, 0.0);
-    let mut current = (b[b.len() - 1] - h * h * x) * bottom_rho - 2.0 * h * gamma * water_rho;
+    let (f, g, mut power) = bottom.evaluate(x);
+    let mut prev = -2.0 * g;
+    let tabulated = bottom.case.bottom_boundary.is_tabulated();
+    let mut current = if tabulated {
+        tabulated_shoot_step(b[b.len() - 1] - h * h * x, g, 2.0 * h * f * water_rho)
+    } else {
+        (b[b.len() - 1] - h * h * x) * g - 2.0 * h * f * water_rho
+    };
     // Keep the decimal scaling exponent: secant compares evaluations at
     // different scales after shooting and deflation (as in RootFinderSecant).
-    let mut power = 0;
     for &coefficient in b[..b.len() - 1].iter().rev() {
-        let next = (h * h * x - coefficient) * current - prev;
+        let next = if tabulated {
+            tabulated_shoot_step(h * h * x - coefficient, current, prev)
+        } else {
+            (h * h * x - coefficient) * current - prev
+        };
         prev = current;
         current = next;
-        if current.re.abs() > 1e50 {
+        while current.re.is_finite() && current.re.abs() > 1e50 {
             prev *= 1e-50;
             current *= 1e-50;
             power += 50;
@@ -263,6 +331,19 @@ fn dispersion(
     (value, power)
 }
 
+fn tabulated_shoot_step(
+    coefficient: Complex64,
+    current: Complex64,
+    previous: Complex64,
+) -> Complex64 {
+    // GNU Fortran 12.2.0 -ffast-math reassociates the real recurrence this way.
+    // IRC's previous-root seed is sensitive to even single-ulp changes.
+    Complex64::new(
+        (coefficient.re * current.re - previous.re) - coefficient.im * current.im,
+        coefficient.re * current.im + coefficient.im * current.re - previous.im,
+    )
+}
+
 #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 fn secant(
     mut x: Complex64,
@@ -270,12 +351,16 @@ fn secant(
     b: &[f64],
     h: f64,
     water_rho: f64,
-    bottom_rho: f64,
-    bottom_k2: Complex64,
+    bottom: &Bottom<'_>,
     work: &mut usize,
 ) -> Result<Complex64, DiagnosticReport> {
     let mut evaluate = |x| {
-        *work += b.len() + roots.len();
+        let table_work = match &bottom.case.bottom_boundary {
+            BottomBoundary::Reflection(points) => points.len().ilog2() as usize + 3,
+            BottomBoundary::Impedance { points, .. } => points.len().ilog2() as usize + 8,
+            _ => 0,
+        };
+        *work += b.len() + roots.len() + table_work;
         if *work > MAX_ROOT_WORK {
             return Err(error(
                 "KR0302",
@@ -283,7 +368,15 @@ fn secant(
                 "mesh_points",
             ));
         }
-        Ok(dispersion(x, roots, b, h, water_rho, bottom_rho, bottom_k2))
+        let value = dispersion(x, roots, b, h, water_rho, bottom);
+        if !value.0.re.is_finite() || !value.0.im.is_finite() {
+            return Err(error(
+                "KR0303",
+                "non-finite complex boundary/dispersion",
+                "bottom_boundary",
+            ));
+        }
+        Ok(value)
     };
     let tolerance = x.norm() * b.len() as f64 * SECANT_RELATIVE_TOLERANCE;
     let mut previous = x + 100.0 * tolerance;
@@ -292,6 +385,13 @@ fn secant(
         let (f, power) = evaluate(x)?;
         let numerator = f * (x - previous);
         let denominator = f - f_previous * 10_f64.powi(previous_power - power);
+        if !denominator.re.is_finite()
+            || !denominator.im.is_finite()
+            || !numerator.re.is_finite()
+            || !numerator.im.is_finite()
+        {
+            break;
+        }
         let shift = if numerator.norm() >= (denominator * x).norm() {
             Complex64::new(0.1 * tolerance, 0.0)
         } else {
@@ -402,7 +502,7 @@ fn mode(
     h: f64,
     omega: f64,
     bottom_c: Complex64,
-    bottom_k2: Complex64,
+    bottom: &Bottom<'_>,
     x: Complex64,
 ) -> Result<NormalMode, DiagnosticReport> {
     let n = b.len();
@@ -412,8 +512,7 @@ fn mode(
     let mut e = vec![1.0 / h_rho; n + 1];
     d[0] = Complex64::new(1.0, 0.0);
     e[1] = 0.0;
-    d[n - 1] = (b[n - 1] - shift) / (2.0 * h_rho)
-        - pekeris_root(x - bottom_k2) / case.bottom_density_g_cm3;
+    d[n - 1] = (b[n - 1] - shift) / (2.0 * h_rho) - bottom.admittance(x);
     let mut phi = inverse_iteration(&d, &e)?;
     let mut sq_norm = Complex64::new(0.0, 0.0);
     let mut slow = Complex64::new(0.0, 0.0);
@@ -423,12 +522,19 @@ fn mode(
         sq_norm += mass;
         slow += mass * (b[i] + 2.0) / (omega * omega * h * h);
     }
-    let gamma = (x - bottom_k2).sqrt();
-    slow += phi[n - 1].powi(2) / (2.0 * gamma * case.bottom_density_g_cm3 * bottom_c.powi(2));
+    if case.bottom_boundary == BottomBoundary::FluidHalfSpace {
+        let gamma = (x - bottom.k2).sqrt();
+        slow += phi[n - 1].powi(2) / (2.0 * gamma * case.bottom_density_g_cm3 * bottom_c.powi(2));
+    }
     let x1 = x * 0.999_999_9;
     let x2 = x * 1.000_000_1;
-    let derivative = (pekeris_root(x2 - bottom_k2) - pekeris_root(x1 - bottom_k2))
-        / (case.bottom_density_g_cm3 * (x2 - x1));
+    let derivative = if case.bottom_boundary.is_tabulated() {
+        (bottom.admittance(x2) - bottom.admittance(x1)) / (x2 - x1)
+    } else {
+        // Retain the established half-space rounding order.
+        (pekeris_root(x2 - bottom.k2) - pekeris_root(x1 - bottom.k2))
+            / (case.bottom_density_g_cm3 * (x2 - x1))
+    };
     let norm = sq_norm + derivative * phi[n - 1].powi(2);
     let turning = (1..n)
         .find(|&i| (b[i] - shift).re + 2.0 > 0.0)
@@ -482,4 +588,15 @@ fn mode(
         attenuation_nepers_per_m: -k.im,
         eigenfunction,
     })
+}
+
+#[cfg(test)]
+#[test]
+fn tabulated_shooting_preserves_pinned_real_grouping() {
+    let value = tabulated_shoot_step(
+        Complex64::new(1.0, 1.0),
+        Complex64::new(1.0, 0.3),
+        Complex64::new(0.7, 0.0),
+    );
+    assert_eq!(value.re.to_bits(), 5.551_115_123_125_783e-17_f64.to_bits());
 }

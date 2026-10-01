@@ -3,7 +3,7 @@
 ## Pinned Fortran differential reference
 
 `reference/Dockerfile` builds the official Acoustics Toolbox `v2023.5`
-BELLHOP, KRAKEN, KRAKENC, and 2D FIELD programs at commit
+BELLHOP, KRAKEN, KRAKENC, BOUNCE, and 2D FIELD programs at commit
 `475108519289c6fb488b58980c644ea14eccc604` for Linux x86-64. The Debian base
 image, source-archive SHA-256, GNU Fortran version, and compiler flags are
 fixed in the image definition.
@@ -50,7 +50,7 @@ coherent FIELD `.flp` files), run the same pinned Fortran calculation
 and comparator used by CI:
 
 ```sh
-for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexRefined PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC; do
+for case in PekerisComplex PekerisComplexBlank PekerisComplexSlow PekerisComplexCLow PekerisComplexRefined PekerisComplexGradient PekerisComplexReverseGradient MunkLeakyPartial MunkLeakyPartialLoss MunkLeakyPartialC TabRefBrcN TabRefBrcC TabRefIrcN TabRefIrcC; do
   tools/reference/run-kraken-case.sh krakenc "crates/kraken/tests/fixtures/$case.env"
   KRAKEN_COMPLEX_CASE="$case" \
   KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -76,6 +76,38 @@ for case in MunkKleaky MunkKwb MunkKbb sductK calibK; do
       complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
 done
 ```
+
+For original **KRAKENC** TabRefCoef, rebuild the image to include source-built
+BOUNCE (the archive's `bounce.exe`/`bounce.o` are deleted before compilation).
+The upstream inputs contain no tables; the helper generates resources from
+original `neggradB.env` in three independent runs, requires identical tables and
+`.mod/.shd`, and retains build information and SHA-256 manifests. This reference
+preparation alone is not Rust acceptance. Compare the original unchanged pairs
+and actual CLI output with the same strict comparator:
+
+```sh
+tools/reference/build-image.sh
+tools/reference/prepare-tabref.sh
+cargo build --release -p kraken-cli
+for case in neggradC_geo neggradC_brc neggradC_irc; do
+  env="$PWD/target/reference/TabRefCoef/run1/$case.env"
+  root="$PWD/target/reference/TabRefCoef/run1/$case"
+  KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
+    cargo test --release -p kraken --test differential_reference \
+      complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+  target/release/kraken run "$env" --solver krakenc --output "$root.h5" --overwrite
+  KRAKEN_HDF5_RESULT="$root.h5" \
+  KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
+    cargo test --release -p kraken --test differential_reference \
+      complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+done
+```
+
+All 56/54/42 modes and 50,601 pressures per pair are checked, including original
+FIELD endpoints. Generated `.brc/.irc` are not upstream-original resources;
+Rust does not implement BOUNCE. Small `TabRefBrcN/C` and `TabRefIrcN/C` fixtures
+above have **constructed** tables and derived reduced geometry, not the original
+input/resource workflow. Fresh CI also checks their CLI/HDF5 output.
 
 For multi-frequency runs, the same comparator reads every frequency block in
 `.mod/.prt/.shd`. The two Pekeris inputs below are **derived**; the extracted

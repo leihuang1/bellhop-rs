@@ -69,6 +69,18 @@ fn complex_fluid_modes_match_pinned_fortran() {
 }
 
 #[test]
+fn tabulated_bottom_modes_and_field_match_pinned_goldens() {
+    for name in ["TabRefBrcN", "TabRefBrcC", "TabRefIrcN", "TabRefIrcC"] {
+        let env = fixtures().join(name).with_extension("env");
+        compare_complex_field(
+            &env,
+            &env.with_extension("flp"),
+            &fixtures().join("golden").join(name),
+        );
+    }
+}
+
+#[test]
 #[ignore = "requires a pinned external Fortran reference run"]
 fn complex_fluid_matches_fresh_reference() {
     let name = std::env::var("KRAKEN_COMPLEX_CASE").expect("KRAKEN_COMPLEX_CASE is required");
@@ -83,7 +95,8 @@ fn complex_fluid_matches_fresh_reference() {
             | "PekerisComplexRefined"
             | "MunkLeakyPartialLoss"
             | "MunkLeakyPartialC"
-    ) {
+    ) || name.starts_with("TabRef")
+    {
         compare_complex_field(&env, &env.with_extension("flp"), &reference);
     } else {
         compare_complex(&env, &reference);

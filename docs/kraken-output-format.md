@@ -19,6 +19,10 @@ The installed binary is `kraken`; `cargo install --path crates/kraken-cli`
 builds it using the existing static HDF5 dependency.
 
 - `--solver kraken|krakenc` defaults to `kraken`; the engine is not guessed.
+- KRAKENC `F`/`P` bottoms additionally consume same-stem `.brc`/`.irc`; this
+  slice is single-frequency, RMax=0, lossless N/C water and vacuum top. Missing,
+  malformed or unaccepted table combinations fail explicitly. Rust does not
+  generate tables or infer an IRC solve frequency from its header.
 - `.flp` defaults to the environment's same-stem file. It remains required:
   `.env` controls modal samples; `.flp` controls FIELD geometry and mode limit.
 - Output defaults to `<case-stem>.h5` in the current directory. Its parent
@@ -37,7 +41,7 @@ has no production HDF5 dependency.
 
 Input limits are unchanged: 1 MiB per UTF-8 file, 1,000 frequencies, and
 5,000,000 total copied case-vector entries. Inputs are read once into bounded
-snapshots, parsed through `legacy::load_frequency_cases_from_sources`, and
+snapshots, parsed through `legacy::load_frequency_cases_with_bottom_table`, and
 hashed from those exact bytes. Metadata is never obtained by rereading an
 input after solving.
 
@@ -88,7 +92,12 @@ This is independent of [BELLHOP schema v3](output-format.md); the common
 `/frequency_hz` is float64 `[F]`, unit `Hz`, in input order. Descending and
 repeated frequencies are retained. `/inputs/env` and `/inputs/flp` have UTF-8
 `filename` (the supplied path), uint64 `size_bytes`, and UTF-8 `sha256`
-attributes. Their input contents are not embedded.
+attributes. F/P adds exactly the consumed `/inputs/brc` or `/inputs/irc` group
+with the same attributes, hashed from the **actual parsed snapshot**. Unused
+same-stem resources are neither read nor recorded. Input contents are not embedded.
+These groups and the `bottom_boundary` attribute below are additive schema-v1
+metadata; existing dataset layouts, types, units and schema identity are unchanged.
+Older v1 files may omit this additive metadata.
 
 Results live under `/frequencies/0`, `/frequencies/1`, ... using **indices,
 not Hz names**. Every frequency has its own mode count and arrays; no padded
@@ -104,7 +113,8 @@ Each `/frequencies/i` group has attributes:
 - `requested_mesh_points`: uint64 nominal NG, including `0` for automatic;
 - `max_range_m`: float64 extrapolation control;
 - `field_mode_limit`: uint64 requested FIELD cap (not the total stored mode count);
-- `source_geometry`: UTF-8 `line` or `point`.
+- `source_geometry`: UTF-8 `line` or `point`;
+- `bottom_boundary`: UTF-8 `A`, `R`, `F` or `P` (additive v1 metadata).
 
 ## Modes
 
@@ -161,6 +171,8 @@ Fresh pinned CI additionally passes CLI-produced `.h5` files back through the
 same strict `.mod/.prt/.shd` comparator (`KRAKEN_HDF5_RESULT`): both derived
 Pekeris broadband pairs, original single-frequency MunkK, all five original
 KRAKENC pairs, and original BroadBand/MunkK (both frequencies, 1,003,002
-pressures). Every mode, shape and pressure is checked at the existing tolerances;
-no new Fortran golden or numerical tolerance is introduced. Rust HDF5 artifacts
+pressures), plus four small table derivatives and all three original TabRefCoef
+geo/brc/irc workflows with BOUNCE-generated resources. Every mode, shape and
+pressure is checked at the existing tolerances. The table derivatives have new
+Fortran goldens; no numerical tolerance is changed. Rust HDF5 artifacts
 are not committed as Fortran goldens.

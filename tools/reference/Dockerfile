@@ -23,13 +23,15 @@ RUN make -C misc FC=gfortran \
         FFLAGS='-O1 -ffast-math -funroll-all-loops -fomit-frame-pointer -std=gnu' \
     && make -C Bellhop bellhop.exe FC=gfortran \
         FFLAGS='-O1 -ffast-math -funroll-all-loops -fomit-frame-pointer -std=gnu -I../misc' \
-    && make -C Kraken kraken.exe krakenc.exe FC=gfortran \
+    && rm -f Kraken/bounce.exe Kraken/bounce.o \
+    && make -C Kraken kraken.exe krakenc.exe bounce.exe FC=gfortran \
         FFLAGS='-O1 -ffast-math -funroll-all-loops -fomit-frame-pointer -std=gnu -I../misc' \
     && make -C KrakenField field.exe FC=gfortran \
         FFLAGS='-O1 -ffast-math -funroll-all-loops -fomit-frame-pointer -std=gnu -I../misc' \
     && install -m 0755 Bellhop/bellhop.exe /usr/local/bin/bellhop-fortran \
     && install -m 0755 Kraken/kraken.exe /usr/local/bin/kraken-fortran \
     && install -m 0755 Kraken/krakenc.exe /usr/local/bin/krakenc-fortran \
+    && install -m 0755 Kraken/bounce.exe /usr/local/bin/bounce-fortran \
     && install -m 0755 KrakenField/field.exe /usr/local/bin/field-fortran \
     && printf '%s\n' \
         'Acoustics Toolbox v2023.5' \
@@ -38,7 +40,7 @@ RUN make -C misc FC=gfortran \
         'GNU Fortran runtime 12.2.0-14+deb12u1' \
         'glibc 2.36-9+deb12u14' \
         'flags -O1 -ffast-math -funroll-all-loops -fomit-frame-pointer -std=gnu' \
-        'programs bellhop-fortran kraken-fortran krakenc-fortran field-fortran' \
+        'programs bellhop-fortran kraken-fortran krakenc-fortran bounce-fortran field-fortran' \
         > /opt/reference-build.txt
 
 LABEL org.opencontainers.image.title="bellhop-rs BELLHOP/KRAKEN reference" \

@@ -19,7 +19,8 @@ The installed binary is `kraken`; `cargo install --path crates/kraken-cli`
 builds it using the existing static HDF5 dependency.
 
 - `--solver kraken|krakenc` defaults to `kraken`; the engine is not guessed.
-- KRAKENC A-bottom supports complex N/C/P/S water or lossless fixed-Munk-A,
+- Both backends accept smooth V/R/A boundaries; real KRAKEN stays trapped
+  at each A half-space. KRAKENC supports complex N/C/P/S or lossless fixed-Munk-A,
   with N/M/m/F/W/Q/L material units, optional T/F/B volume loss, and the existing
   bounded refinement/frequency-order contract. Analytic A remains lossless and
   rejects volume addition. Loss conversion is per solve frequency; the HDF5
@@ -31,6 +32,9 @@ builds it using the existing static HDF5 dependency.
   slice is single-frequency, RMax=0, lossless N/C water and vacuum top. Missing,
   malformed or unaccepted table combinations fail explicitly. Rust does not
   generate tables or infer an IRC solve frequency from its header.
+- KRAKENC top F consumes `.trc`: single frequency, RMax=0, lossless N/C,
+  blank restart/no B, smooth bottom and cLow >= last SSP-node speed.
+  Evanescent top-table roots, top P and simultaneous top/bottom tables are rejected.
 - `.flp` defaults to the environment's same-stem file. It remains required:
   `.env` controls modal samples; `.flp` controls FIELD geometry and mode limit.
 - Output defaults to `<case-stem>.h5` in the current directory. Its parent
@@ -49,7 +53,7 @@ has no production HDF5 dependency.
 
 Input limits are unchanged: 1 MiB per UTF-8 file, 1,000 frequencies, and
 5,000,000 total copied case-vector entries. Inputs are read once into bounded
-snapshots, parsed through `legacy::load_frequency_cases_with_bottom_table`, and
+snapshots, parsed through `legacy::load_frequency_cases_with_boundary_tables`, and
 hashed from those exact bytes. Metadata is never obtained by rereading an
 input after solving.
 
@@ -100,10 +104,10 @@ This is independent of [BELLHOP schema v3](output-format.md); the common
 `/frequency_hz` is float64 `[F]`, unit `Hz`, in input order. Descending and
 repeated frequencies are retained. `/inputs/env` and `/inputs/flp` have UTF-8
 `filename` (the supplied path), uint64 `size_bytes`, and UTF-8 `sha256`
-attributes. F/P adds exactly the consumed `/inputs/brc` or `/inputs/irc` group
+attributes. Bottom F/P adds `/inputs/brc` or `/inputs/irc`; top F adds `/inputs/trc`
 with the same attributes, hashed from the **actual parsed snapshot**. Unused
 same-stem resources are neither read nor recorded. Input contents are not embedded.
-These groups and the `bottom_boundary` attribute below are additive schema-v1
+These groups and the `surface_boundary`/`bottom_boundary` attributes below are additive schema-v1
 metadata; existing dataset layouts, types, units and schema identity are unchanged.
 Older v1 files may omit this additive metadata.
 
@@ -122,7 +126,8 @@ Each `/frequencies/i` group has attributes:
 - `max_range_m`: float64 extrapolation control;
 - `field_mode_limit`: uint64 requested FIELD cap (not the total stored mode count);
 - `source_geometry`: UTF-8 `line` or `point`;
-- `bottom_boundary`: UTF-8 `A`, `R`, `F` or `P` (additive v1 metadata).
+- `surface_boundary`: UTF-8 `V`, `R`, `A` or `F` (additive v1 metadata);
+- `bottom_boundary`: UTF-8 `V`, `A`, `R`, `F` or `P` (additive v1 metadata).
 
 ## Modes
 
@@ -182,7 +187,8 @@ KRAKENC pairs, and original BroadBand/MunkK (both frequencies, 1,003,002
 pressures), plus four small table derivatives and all three original TabRefCoef
 geo/brc/irc workflows with BOUNCE-generated resources, four cubic/analytic
 KRAKENC derivatives, broadband PCHIP Munk and original MunkS/MunkAnalytic
-environments with **derived** FIELD geometry. Every mode, shape and
+environments with **derived** FIELD geometry, 27 water-material workflows and
+24 derived smooth-boundary/TRC workflows. Every mode, shape and
 pressure is checked at the existing tolerances. The table derivatives have new
 Fortran goldens; no numerical tolerance is changed. Rust HDF5 artifacts
 are not committed as Fortran goldens.

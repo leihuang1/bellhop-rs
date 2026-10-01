@@ -169,7 +169,10 @@ impl<'a> Profile<'a> {
         let b = points[upper];
         let weight = (depth - a.depth_m) / (b.depth_m - a.depth_m);
         match self.case.interpolation {
-            Interpolation::N2Linear if self.case.bottom_boundary.is_tabulated() => {
+            Interpolation::N2Linear
+                if self.case.bottom_boundary.is_tabulated()
+                    || self.case.surface_boundary.is_tabulated() =>
+            {
                 // Preserve n2Linear's complex divisions for table-root seeding.
                 let one = num_complex::Complex64::new(1.0, 0.0);
                 let top = one / num_complex::Complex64::new(a.sound_speed_mps, 0.0).powi(2);

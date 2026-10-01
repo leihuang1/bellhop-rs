@@ -168,6 +168,43 @@ fn cli_round_trips_water_material_results() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn cli_round_trips_smooth_boundaries_and_top_tables() {
+    let root = directory("fluid-boundaries");
+    for name in [
+        "FluidBoundaryVV",
+        "FluidBoundaryVR",
+        "FluidBoundaryVA",
+        "FluidBoundaryRV",
+        "FluidBoundaryRR",
+        "FluidBoundaryRA",
+        "FluidBoundaryAV",
+        "FluidBoundaryAR",
+        "FluidBoundaryAA",
+        "FluidRigidPlaneLoss",
+        "FluidBoundaryAir",
+        "FluidTrcN",
+        "FluidTrcC",
+        "FluidTrcRigid",
+    ] {
+        for engine in ["kraken", "krakenc"] {
+            if engine == "kraken" && (name == "FluidBoundaryAir" || name.starts_with("FluidTrc")) {
+                continue;
+            }
+            let env = fixture(name).with_extension("env");
+            let output = root.join(format!("{name}-{engine}.h5"));
+            let process = run(&env, &output, engine, &[]);
+            assert!(
+                process.status.success(),
+                "{}",
+                String::from_utf8_lossy(&process.stderr)
+            );
+            assert_product(&output, &env, &env.with_extension("flp"), engine);
+        }
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[allow(clippy::too_many_lines)]
 fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
     let engine = if solver == "krakenc" {
@@ -214,6 +251,12 @@ fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
         cases.len()
     );
     let mut inputs = vec![("env", env.to_path_buf()), ("flp", flp.to_path_buf())];
+    if matches!(
+        cases[0].surface_boundary,
+        kraken::SurfaceBoundary::Reflection(_)
+    ) {
+        inputs.push(("trc", env.with_extension("trc")));
+    }
     match &cases[0].bottom_boundary {
         kraken::BottomBoundary::Reflection(_) => inputs.push(("brc", env.with_extension("brc"))),
         kraken::BottomBoundary::Impedance { .. } => inputs.push(("irc", env.with_extension("irc"))),
@@ -294,8 +337,19 @@ fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
             }
         );
         assert_eq!(
+            attribute(&group, "surface_boundary"),
+            match &case.surface_boundary {
+                kraken::SurfaceBoundary::Vacuum => "V",
+                kraken::SurfaceBoundary::Rigid => "R",
+                kraken::SurfaceBoundary::FluidHalfSpace => "A",
+                kraken::SurfaceBoundary::Reflection(_) => "F",
+                kraken::SurfaceBoundary::Impedance { .. } => "P",
+            }
+        );
+        assert_eq!(
             attribute(&group, "bottom_boundary"),
             match &case.bottom_boundary {
+                kraken::BottomBoundary::Vacuum => "V",
                 kraken::BottomBoundary::FluidHalfSpace => "A",
                 kraken::BottomBoundary::Rigid => "R",
                 kraken::BottomBoundary::Reflection(_) => "F",
@@ -442,7 +496,11 @@ fn assert_field(group: &Group, case: &Case, expected: &SimulationResult) {
 #[test]
 fn cli_protects_consumed_tables_and_preserves_outputs_on_table_errors() {
     let root = directory("tables");
-    for (name, extension) in [("TabRefBrcC", "brc"), ("TabRefIrcC", "irc")] {
+    for (name, extension) in [
+        ("TabRefBrcC", "brc"),
+        ("TabRefIrcC", "irc"),
+        ("FluidTrcC", "trc"),
+    ] {
         let env = root.join(name).with_extension("env");
         let table = env.with_extension(extension);
         for ext in ["env", "flp", extension] {
@@ -485,7 +543,7 @@ fn cli_protects_consumed_tables_and_preserves_outputs_on_table_errors() {
             &output,
             old,
         );
-        if extension == "brc" {
+        if matches!(extension, "brc" | "trc") {
             // Valid finite rows, singular F impedance: failure after HDF5 creation.
             fs::write(&table, "2\n0.0 1.0 0.0\n90.0 1.0 0.0\n").unwrap();
             assert_failure(

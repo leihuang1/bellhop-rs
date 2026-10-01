@@ -125,17 +125,13 @@ pub enum SourceGeometry {
     Point,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SurfaceBoundary {
-    Vacuum,
-    Rigid,
-}
-
+/// Smooth fluid boundary; material values live in the corresponding case fields.
 #[derive(Clone, Debug, PartialEq)]
-pub enum BottomBoundary {
+pub enum Boundary {
+    Vacuum,
     FluidHalfSpace,
     Rigid,
-    /// KRAKENC bottom F, magnitude and unwrapped phase versus grazing angle.
+    /// KRAKENC F (top TRC or bottom BRC): magnitude and unwrapped phase versus grazing angle.
     Reflection(Vec<ReflectionPoint>),
     /// KRAKENC bottom P, scaled impedance functions versus squared wavenumber.
     Impedance {
@@ -159,7 +155,12 @@ pub struct ImpedancePoint {
     pub power: i32,
 }
 
-impl BottomBoundary {
+/// Top V/R/A/F boundary. Top P is explicitly unsupported.
+pub type SurfaceBoundary = Boundary;
+/// Bottom V/R/A/F/P boundary.
+pub type BottomBoundary = Boundary;
+
+impl Boundary {
     pub(crate) fn is_tabulated(&self) -> bool {
         matches!(self, Self::Reflection(_) | Self::Impedance { .. })
     }
@@ -183,6 +184,12 @@ pub struct CaseDefinition {
     pub water_depth_m: f64,
     pub interpolation: Interpolation,
     pub surface_boundary: SurfaceBoundary,
+    /// Zero unless the surface is a fluid half-space.
+    pub surface_sound_speed_mps: f64,
+    /// Zero unless the surface is a fluid half-space.
+    pub surface_density_g_cm3: f64,
+    /// Surface half-space loss at the solve frequency, in dB/wavelength.
+    pub surface_attenuation_db_per_wavelength: f64,
     /// Empty for `AnalyticMunk`; otherwise depths from the surface to the interface.
     pub sound_speed_profile: Vec<SoundSpeedPoint>,
     pub water_density_g_cm3: f64,
@@ -236,6 +243,15 @@ impl Case {
             ("frequency_hz", definition.frequency_hz),
             ("water_depth_m", definition.water_depth_m),
             ("water_density_g_cm3", definition.water_density_g_cm3),
+            (
+                "surface_sound_speed_mps",
+                definition.surface_sound_speed_mps,
+            ),
+            ("surface_density_g_cm3", definition.surface_density_g_cm3),
+            (
+                "surface_attenuation_db_per_wavelength",
+                definition.surface_attenuation_db_per_wavelength,
+            ),
             ("bottom_sound_speed_mps", definition.bottom_sound_speed_mps),
             ("bottom_density_g_cm3", definition.bottom_density_g_cm3),
             (
@@ -325,6 +341,13 @@ impl Case {
             match profile::Profile::new(&definition) {
                 Ok(profile) => {
                     if definition.mode_solver == ModeSolver::Kraken
+                        && definition.surface_boundary == SurfaceBoundary::FluidHalfSpace
+                        && definition.surface_sound_speed_mps > 0.0
+                        && definition.surface_sound_speed_mps <= profile.minimum_speed()
+                    {
+                        diagnostics.push(error("surface_sound_speed_mps", "trapped modes require a surface half-space faster than the minimum water sound speed"));
+                    }
+                    if definition.mode_solver == ModeSolver::Kraken
                         && definition.bottom_boundary == BottomBoundary::FluidHalfSpace
                         && definition.bottom_sound_speed_mps > 0.0
                         && definition.bottom_sound_speed_mps <= profile.minimum_speed()
@@ -343,6 +366,53 @@ impl Case {
         }
         if let Err(message) = reflection::validate(&definition) {
             diagnostics.push(error("bottom_boundary", message));
+        }
+        if let Err(message) = reflection::validate_surface(&definition) {
+            diagnostics.push(error("surface_boundary", message));
+        }
+        if definition.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+            if definition.surface_sound_speed_mps <= 0.0 || definition.surface_density_g_cm3 <= 0.0
+            {
+                diagnostics.push(error(
+                    "surface_boundary",
+                    "surface half-space requires positive sound speed and density",
+                ));
+            }
+            if !(0.0..=8.685_889_6 * 2.0 * std::f64::consts::PI)
+                .contains(&definition.surface_attenuation_db_per_wavelength)
+            {
+                diagnostics.push(error(
+                    "surface_attenuation_db_per_wavelength",
+                    "surface loss requires 0 <= Im(c) <= Re(c)",
+                ));
+            }
+            if definition.mode_solver == ModeSolver::Kraken
+                && definition.c_high_mps > definition.surface_sound_speed_mps
+            {
+                diagnostics.push(error(
+                    "phase_speed_limits",
+                    "KRAKEN does not support leaky modes above the surface half-space speed",
+                ));
+            }
+        } else {
+            for (field, value) in [
+                (
+                    "surface_sound_speed_mps",
+                    definition.surface_sound_speed_mps,
+                ),
+                ("surface_density_g_cm3", definition.surface_density_g_cm3),
+                (
+                    "surface_attenuation_db_per_wavelength",
+                    definition.surface_attenuation_db_per_wavelength,
+                ),
+            ] {
+                if value != 0.0 {
+                    diagnostics.push(error(
+                        field,
+                        "non-half-space surface has no half-space material",
+                    ));
+                }
+            }
         }
         if definition.bottom_boundary != BottomBoundary::FluidHalfSpace {
             for (field, value) in [

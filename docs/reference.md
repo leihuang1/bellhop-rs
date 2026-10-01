@@ -57,8 +57,8 @@ Unmodified `tests/Munk/MunkS.env` (a SCOOTER environment) and `MunkAnalytic.env`
 also pass through KRAKENC, 102 modes/25 pressures each, with a **separately derived**
 coherent `.flp`. Original three-line `.flp` fails in pinned FIELD for both;
 this is not original-pair or SCOOTER acceptance. The material checkpoint below
-adds complex N/C/P/S water; rigid complex boundaries and P/S/A table-boundary
-combinations remain excluded.
+adds complex N/C/P/S water. The smooth-boundary checkpoint adds V/R/A at either
+end; P/S/A table-boundary combinations remain excluded.
 
 Water-material acceptance uses fourteen **derived** pairs: N/C/P/S complex
 water, N/M/m/F/W/Q/L material units, T/F/B volume attenuation, overlapping
@@ -87,6 +87,18 @@ domain results, not a wideband time-domain acceptance. KRAKENC S water at
 pair. A fresh-CI CLI regression checks exit 3, no partial publication, preservation
 of an existing output and scratch cleanup after 50 Hz succeeds. A local 50 Hz
 KRAKENC comparison passes, but the full pair is not accepted through KRAKENC.
+
+Smooth-boundary acceptance adds eleven **derived** pairs: all nine V/R/A top/
+bottom combinations with spline water loss, a lossy rigid-rigid plane mode with
+NG=68, and a radiating air top through KRAKENC only (21 workflows). Three more
+**constructed** top-TRC derivatives with N/C water, cLow=1550 and A/R bottoms
+add three workflows; top tables require a propagating spectral window, no
+refinement/B and no simultaneous bottom table. All 24 `.mod/.shd` workflows are
+byte-identical in three pinned runs and have committed goldens, hashes and
+API/actual-CLI-HDF5 differential. These are not original TRC input-pair acceptance.
+Automatic NG=17 rigid-plane refinement changes its mode count and remains an
+explicit numerical failure, not a truncated result. An evanescent top-TRC
+experiment produced a growing reference root and is explicitly outside support.
 
 TabRefCoef acceptance adds four **derived** 50 Hz N/C single-water cases with
 **constructed** BRC/IRC tables and committed `.mod/.prt/.shd`. Original

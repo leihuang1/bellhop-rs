@@ -120,6 +120,40 @@ fn water_material_modes_and_field_match_pinned_goldens() {
 }
 
 #[test]
+fn smooth_boundaries_and_top_tables_match_pinned_goldens() {
+    for name in [
+        "FluidBoundaryVV",
+        "FluidBoundaryVR",
+        "FluidBoundaryVA",
+        "FluidBoundaryRV",
+        "FluidBoundaryRR",
+        "FluidBoundaryRA",
+        "FluidBoundaryAV",
+        "FluidBoundaryAR",
+        "FluidBoundaryAA",
+        "FluidRigidPlaneLoss",
+        "FluidBoundaryAir",
+        "FluidTrcN",
+        "FluidTrcC",
+        "FluidTrcRigid",
+    ] {
+        for (engine, solver) in [
+            ("kraken", kraken::ModeSolver::Kraken),
+            ("krakenc", kraken::ModeSolver::Krakenc),
+        ] {
+            if engine == "kraken" && (name == "FluidBoundaryAir" || name.starts_with("FluidTrc")) {
+                continue;
+            }
+            compare_frequencies(
+                &fixtures().join(name).with_extension("env"),
+                &fixtures().join("golden").join(format!("{name}-{engine}")),
+                solver,
+            );
+        }
+    }
+}
+
+#[test]
 fn tabulated_bottom_modes_and_field_match_pinned_goldens() {
     for name in ["TabRefBrcN", "TabRefBrcC", "TabRefIrcN", "TabRefIrcC"] {
         let env = fixtures().join(name).with_extension("env");
@@ -598,6 +632,7 @@ fn compare_modes_at(
             f64::from(mode.horizontal_wavenumber_rad_per_m.im as f32),
             stored.im,
             if case.bottom_attenuation_db_per_wavelength > 0.0
+                || case.surface_attenuation_db_per_wavelength > 0.0
                 || case
                     .water_attenuation_db_per_wavelength
                     .iter()

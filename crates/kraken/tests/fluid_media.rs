@@ -13,6 +13,78 @@ fn cases(env: &str) -> Result<Vec<Case>, kraken::DiagnosticReport> {
 }
 
 #[test]
+fn surface_half_space_refinement_keeps_all_modes_on_the_third_mesh() {
+    let case = cases(include_str!("fixtures/FluidBoundaryAV.env"))
+        .unwrap()
+        .remove(0);
+    let result = solve(&case).unwrap();
+    assert_eq!(result.modes.modes.len(), 3);
+    assert!((result.modes.modes[2].phase_speed_mps - 1_671.656_687).abs() < 5e-6);
+}
+
+#[test]
+fn half_space_materials_and_legacy_power_law_limits_are_explicit() {
+    let base = cases(include_str!("fixtures/FluidBoundaryAA.env"))
+        .unwrap()
+        .remove(0)
+        .into_definition();
+    for change in [
+        "speed",
+        "density",
+        "loss",
+        "finite",
+        "rigidMaterial",
+        "leakyReal",
+    ] {
+        let mut input = base.clone();
+        match change {
+            "speed" => input.surface_sound_speed_mps = 0.0,
+            "density" => input.surface_density_g_cm3 = -1.0,
+            "loss" => input.surface_attenuation_db_per_wavelength = 55.0,
+            "finite" => input.surface_sound_speed_mps = f64::NAN,
+            "rigidMaterial" => input.surface_boundary = kraken::SurfaceBoundary::Rigid,
+            _ => {
+                input.mode_solver = ModeSolver::Kraken;
+                input.surface_sound_speed_mps = 343.0;
+            }
+        }
+        assert!(Case::from_definition(input).is_err(), "{change}");
+    }
+    let undefined = include_str!("fixtures/FluidBoundaryAA.env").replace("'SAW'", "'SAm'");
+    assert!(
+        cases(&undefined)
+            .unwrap_err()
+            .to_string()
+            .contains("no defined reference power-law")
+    );
+    let bogus = include_str!("fixtures/FluidBoundaryAA.env")
+        .replace("0.0 1900.0 0.0 1.1 0.3", "0.0 1900.0 100.0 1.1 0.3");
+    assert!(cases(&bogus).is_err());
+}
+
+#[test]
+fn sparse_rigid_plane_refinement_rejects_a_changed_mode_count() {
+    let mut input = kraken::legacy::load_frequency_cases_from_sources(
+        include_str!("fixtures/FluidRigidPlaneLoss.env"),
+        include_str!("fixtures/FluidRigidPlaneLoss.flp"),
+        Path::new("water.env"),
+        Path::new("water.flp"),
+        ModeSolver::Krakenc,
+    )
+    .unwrap()
+    .remove(0)
+    .into_definition();
+    input.mesh_points = 0; // 17 base intervals: branch-sensitive first-mesh search misses a root.
+    let report = solve(&Case::from_definition(input).unwrap()).unwrap_err();
+    assert!(
+        report
+            .diagnostics()
+            .iter()
+            .any(|d| d.message.contains("mode count changed"))
+    );
+}
+
+#[test]
 fn biological_loss_is_sampled_at_ssp_nodes_but_not_in_half_spaces() {
     let case = cases(include_str!("fixtures/WaterLossBio.env"))
         .unwrap()

@@ -92,12 +92,21 @@ pub fn run_legacy(
             Ok::<_, RunError>((extension, path, source))
         })
         .transpose()?;
-    let cases = kraken::legacy::load_frequency_cases_with_bottom_table(
+    let surface_table = kraken::legacy::surface_table_extension(&env_source, env_path, solver)
+        .map_err(|report| RunError::Input(report.to_string()))?
+        .map(|extension| {
+            let path = env_path.with_extension(extension);
+            let source = read_source(&path)?;
+            Ok::<_, RunError>((extension, path, source))
+        })
+        .transpose()?;
+    let cases = kraken::legacy::load_frequency_cases_with_boundary_tables(
         &env_source,
         &flp_source,
         env_path,
         flp_path,
         solver,
+        surface_table.as_ref().map(|(_, _, source)| source.as_str()),
         bottom_table.as_ref().map(|(_, _, source)| source.as_str()),
     )
     .map_err(|report| RunError::Input(report.to_string()))?;
@@ -105,8 +114,8 @@ pub fn run_legacy(
         ("env", env_path, env_source.as_str()),
         ("flp", flp_path, flp_source.as_str()),
     ];
-    if let Some((extension, path, source)) = &bottom_table {
-        inputs.push((extension, path.as_path(), source.as_str()));
+    for table in [&surface_table, &bottom_table].into_iter().flatten() {
+        inputs.push((table.0, table.1.as_path(), table.2.as_str()));
     }
     protect_inputs(
         output_path,
@@ -351,8 +360,20 @@ fn write_frequency(
     write_scalar_attribute(group, "frequency_hz", &result.modes.frequency_hz)?;
     write_string_attribute(
         group,
+        "surface_boundary",
+        match &case.surface_boundary {
+            kraken::SurfaceBoundary::Vacuum => "V",
+            kraken::SurfaceBoundary::Rigid => "R",
+            kraken::SurfaceBoundary::FluidHalfSpace => "A",
+            kraken::SurfaceBoundary::Reflection(_) => "F",
+            kraken::SurfaceBoundary::Impedance { .. } => "P",
+        },
+    )?;
+    write_string_attribute(
+        group,
         "bottom_boundary",
         match &case.bottom_boundary {
+            kraken::BottomBoundary::Vacuum => "V",
             kraken::BottomBoundary::FluidHalfSpace => "A",
             kraken::BottomBoundary::Rigid => "R",
             kraken::BottomBoundary::Reflection(_) => "F",

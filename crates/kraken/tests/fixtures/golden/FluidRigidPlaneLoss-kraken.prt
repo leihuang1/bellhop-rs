@@ -1,0 +1,53 @@
+ _________________________________________________
+
+ KRAKEN- Derived complex constant spline rigid-rigid plane mode
+ Nominal Frequency =   18.49    Hz
+ NMedia    =   1
+
+
+     Spline approximation to SSP
+     Attenuation units: dB/wavelength
+     Perfectly RIGID
+
+       ( # mesh points =    68  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1595.86      0.00     1.00       0.0300    0.0000
+     77.45      1595.86      0.00     1.00       0.0300    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     Perfectly RIGID
+
+ cLow =   1000.0     m/s      cHigh =   2000.0     m/s
+ RMax =   1000.0     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            1
+    Source   z-coordinates, Sz (m)
+                 30.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            2
+    Receiver z-coordinates, Rz (m)
+                 30.0000       50.0000
+
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            2
+        1            0.226E-02s
+                --- Number of modes =            2
+        2            0.340E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.7280957874E-01 -0.40E-04   1595.858575       1595.86
+    2  0.6046488675E-01 -0.48E-04   1921.673832       1325.34
+ _________________________________________________
+
+ End of environmental file

@@ -29,6 +29,41 @@ pub(crate) fn validate(case: &CaseDefinition) -> Result<(), &'static str> {
     validate_table(&case.bottom_boundary, case.frequency_hz)
 }
 
+pub(crate) fn validate_surface(case: &CaseDefinition) -> Result<(), &'static str> {
+    if matches!(case.surface_boundary, SurfaceBoundary::Impedance { .. }) {
+        return Err("top P/IRC is not supported");
+    }
+    if !case.surface_boundary.is_tabulated() {
+        return Ok(());
+    }
+    if case.mode_solver != ModeSolver::Krakenc
+        || !matches!(
+            case.interpolation,
+            Interpolation::N2Linear | Interpolation::CLinear
+        )
+        || case.max_range_m != 0.0
+        || case.mesh_reference_frequency_hz.is_some()
+        || case
+            .water_attenuation_db_per_wavelength
+            .iter()
+            .any(|&a| a != 0.0)
+    {
+        return Err(
+            "TRC requires single-frequency KRAKENC lossless N/C water and RMax=0 (no B option)",
+        );
+    }
+    if case
+        .sound_speed_profile
+        .last()
+        .is_some_and(|p| case.c_low_mps < p.sound_speed_mps)
+    {
+        return Err(
+            "TRC requires cLow at or above the reference inside-water speed (last SSP node); evanescent top-table roots are not supported",
+        );
+    }
+    validate_table(&case.surface_boundary, case.frequency_hz)
+}
+
 #[allow(clippy::float_cmp)]
 pub(crate) fn validate_table(
     boundary: &BottomBoundary,

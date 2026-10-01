@@ -221,6 +221,14 @@ KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
 These are derived material/volume-loss cases, not original VolAtt acceptance.
 The CI step checks all 27 workflows through both direct and serialized paths.
 
+The same command also accepts derived `FluidBoundary{V,R,A}{V,R,A}` and
+`FluidRigidPlaneLoss` through either engine; `FluidBoundaryAir` and
+`FluidTrcN/C/Rigid` use KRAKENC only (24 more workflows). Top TRC input is
+single-frequency lossless N/C, RMax=0/no B, blank restart and cLow >= last-node
+speed, with a smooth V/R/A bottom. The runner consumes the fixture's `.trc`;
+CLI/HDF5 hashes that same bounded snapshot and protects its input path/aliases.
+These are constructed/derived tests, not original TRC input-pair acceptance.
+
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
 seventeen single-frequency KRAKEN cases, the KRAKENC derivatives above and

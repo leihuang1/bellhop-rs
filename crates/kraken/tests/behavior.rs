@@ -99,16 +99,20 @@ fn complex_case_accepts_extrapolation_and_lossless_cubic_profiles() {
         );
     }
     for boundary in ["surface", "bottom"] {
-        let mut unsupported = base.clone();
+        let mut rigid = base.clone();
         if boundary == "surface" {
-            unsupported.surface_boundary = SurfaceBoundary::Rigid;
+            rigid.surface_boundary = SurfaceBoundary::Rigid;
         } else {
-            unsupported.bottom_boundary = BottomBoundary::Rigid;
-            unsupported.bottom_sound_speed_mps = 0.0;
-            unsupported.bottom_density_g_cm3 = 0.0;
+            rigid.bottom_boundary = BottomBoundary::Rigid;
+            rigid.bottom_sound_speed_mps = 0.0;
+            rigid.bottom_density_g_cm3 = 0.0;
         }
-        let report = solve_complex_modes(&Case::from_definition(unsupported).unwrap()).unwrap_err();
-        assert_eq!(report.diagnostics()[0].field, "mode_solver");
+        assert!(
+            !solve_complex_modes(&Case::from_definition(rigid).unwrap())
+                .unwrap()
+                .modes
+                .is_empty()
+        );
     }
 }
 

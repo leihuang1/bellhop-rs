@@ -44,14 +44,15 @@ layer inputs needed to produce a table.
 ## KRAKEN/KRAKENC
 
 The workspace also contains a separate KRAKEN rewrite: `kraken` currently covers
-validated single-fluid-layer `N/C/P/S` and fixed analytic Munk `A` sound-speed profiles, vacuum or rigid
-surface, modes with a fluid (`A`) or rigid (`R`) bottom, water/bottom material
-attenuation, and coherent line- or point-source FIELD. A separate, narrow
+validated range-independent `N/C/P/S` fluid stacks and single-layer fixed analytic
+Munk `A` profiles, smooth V/R/A outer boundaries, material/volume attenuation,
+and coherent line- or point-source FIELD. A separate, narrow
 KRAKENC path supports complex modes and coherent line-/point-source FIELD for
 complex `N/C/P/S` or lossless fixed-Munk-A water over a fluid bottom with Richardson
 mesh extrapolation, covering trapped and leaky spectral intervals. Legacy
-N/M/m/F/W/Q/L loss units and T/F/B volume loss are supported; density gradients,
-and extra layers remain excluded. Both backends accept smooth V/R/A top and
+N/M/m/F/W/Q/L loss units and T/F/B volume loss are supported; density gradients within a layer and elastic media remain excluded. Fluid
+interfaces may have density, sound-speed and loss jumps; each layer has its own
+mesh, with all budgets shared across the stack. Both backends accept smooth V/R/A top and
 bottom combinations; KRAKENC also accepts a propagating, single-frequency N/C
 top F/TRC subset (cLow >= last-node speed), with no refinement or simultaneous bottom table. Unmodified
 MunkKleaky, MunkKwb, MunkKbb, sductK and refined calibK `.env/.flp` pairs are
@@ -61,6 +62,10 @@ with separately derived FIELD geometry also pass modes, FIELD and CLI/HDF5.
 Single-frequency, RMax=0 KRAKENC F/BRC and P/IRC bottoms also accept original
 TabRefCoef geo/brc/irc inputs with generated reference tables, including all
 151,803 pressures; auxiliary-file snapshots are recorded in CLI/HDF5 provenance.
+Twenty-one derived layered-fluid pairs pass 41 API/CLI-HDF5 workflows (530 modes,
+4,902 pressures). The original TLslices `double` is still rejected for changing
+mesh mode counts; its denser-mesh derivative is accepted, not relabelled original.
+Analytic Munk and F/P/TRC boundaries remain single-layer.
 `legacy::load_frequency_cases` supports discrete multi-frequency KRAKEN/KRAKENC
 runs; original `BroadBand/MunkK` passes through KRAKEN at 50 and 500 Hz (102/1,023 modes,
 1,003,002 total complex pressures). KRAKENC 500 Hz still hits its unchanged
@@ -86,7 +91,7 @@ matrix or provide JSON/HTTP or time-domain products. BELLHOP schema v3 is unchan
 - `bellhop-hdf5`: separate BELLHOP v3 and KRAKEN v1 HDF5 adapters
 - `bellhop-cli`: local validation, conversion, and simulation
 - `bellhop-server`: synchronous JSON/HDF5 HTTP service
-- `kraken`: single-fluid-layer 2D KRAKEN modes/FIELD and narrow KRAKENC modes/FIELD slice
+- `kraken`: layered-fluid 2D KRAKEN/KRAKENC modes and coherent FIELD
 - `kraken-cli`: supported legacy KRAKEN/KRAKENC pairs to atomic, bounded HDF5 output
 
 ## License

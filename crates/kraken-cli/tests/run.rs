@@ -222,6 +222,7 @@ fn cli_round_trips_layered_fluids() {
         "LayeredBoundaryAR",
         "LayeredBoundaryAA",
         "LayeredFluidThree",
+        "LayeredFluidThreeWide",
         "LayeredFluidPlane",
         "LayeredFluidPower",
         "LayeredFluidBio",

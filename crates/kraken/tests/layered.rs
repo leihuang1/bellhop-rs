@@ -197,6 +197,42 @@ fn legacy_layer_diagnostics_point_to_the_offending_medium() {
 }
 
 #[test]
+fn layer_spline_loss_undershoot_and_cumulative_input_copies_are_rejected() {
+    let mut input = definition();
+    input.interpolation = Interpolation::Spline;
+    input.additional_fluid_layers[0].attenuation_db_per_wavelength = vec![0.02, 0.0, 0.0];
+    let report = Case::from_definition(input).unwrap_err();
+    assert!(
+        report
+            .diagnostics()
+            .iter()
+            .any(|d| d.field == "additional_fluid_layers[0].attenuation_db_per_wavelength")
+    );
+    let source = include_str!("fixtures/LayeredFluidN.env")
+        .replace("'NVW'", "'NVW  B'")
+        .replace("\n7\n", "\n3000\n")
+        .replace("0.0 69.99 70.0 70.01 105.0 139.99 140.0 /", "0.0 140.0 /")
+        + "1000\n"
+        + &"50.0 ".repeat(1000)
+        + "\n";
+    let field = include_str!("fixtures/LayeredFluidN.flp")
+        .replace("\n7\n", "\n3000\n")
+        .replace("0.0 69.99 70.0 70.01 105.0 139.99 140.0 /", "0.0 140.0 /");
+    let report = legacy::load_frequency_cases_from_sources(
+        &source,
+        &field,
+        Path::new("layers.env"),
+        Path::new("layers.flp"),
+        ModeSolver::Krakenc,
+    )
+    .unwrap_err();
+    assert!(
+        report.to_string().contains("input storage limit"),
+        "{report}"
+    );
+}
+
+#[test]
 fn loss_is_converted_per_layer_and_frequency_without_reordering() {
     let cases = cases(
         include_str!("fixtures/LayeredFluidPower.env"),

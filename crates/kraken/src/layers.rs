@@ -119,16 +119,17 @@ pub(crate) fn validate(case: &CaseDefinition, diagnostics: &mut DiagnosticReport
                 "mesh points must be 0 or in 10..=1000000",
             ));
         }
-        if !invalid && !bad_loss {
-            if let Err(report) = Profile::new_layer(case, layer) {
-                let d = &report.diagnostics()[0];
-                let suffix = if d.field == "water_attenuation_db_per_wavelength" {
-                    "attenuation_db_per_wavelength"
-                } else {
-                    "sound_speed_profile"
-                };
-                diagnostics.push(error(format!("{field}.{suffix}"), &d.message));
-            }
+        if !invalid
+            && !bad_loss
+            && let Err(report) = Profile::new_layer(case, layer)
+        {
+            let d = &report.diagnostics()[0];
+            let suffix = if d.field == "water_attenuation_db_per_wavelength" {
+                "attenuation_db_per_wavelength"
+            } else {
+                "sound_speed_profile"
+            };
+            diagnostics.push(error(format!("{field}.{suffix}"), &d.message));
         }
     }
 }

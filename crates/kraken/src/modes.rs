@@ -269,10 +269,10 @@ impl<'a> Mesh<'a> {
                 }
         } else if i == layer.intervals {
             if let Some(next) = self.layers.get(medium + 1) {
-                (diagonal
-                    + (self.b1[next.coefficient_start] - next.h * next.h * x)
-                        / (next.h * next.density))
-                    * 0.5
+                diagonal.midpoint(
+                    (self.b1[next.coefficient_start] - next.h * next.h * x)
+                        / (next.h * next.density),
+                )
             } else {
                 diagonal * 0.5
                     - if self.case.bottom_boundary == BottomBoundary::FluidHalfSpace {

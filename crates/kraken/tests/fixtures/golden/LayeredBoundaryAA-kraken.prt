@@ -1,0 +1,73 @@
+ _________________________________________________
+
+ KRAKEN- Derived LayeredBoundaryAA: finite fluid interfaces
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   2
+
+
+     N2-Linear approximation to SSP
+     Attenuation units: dB/wavelength
+
+
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+     ACOUSTO-ELASTIC half-space
+      0.00      1900.00      0.00     1.10       0.3000    0.0000
+
+       ( # mesh points =   101  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1500.00      0.00     1.00       0.0200    0.0000
+     31.00      1520.00      0.00     1.00       0.0150    0.0000
+     70.00      1510.00      0.00     1.00       0.0100    0.0000
+
+       ( # mesh points =    83  RMS roughness =   0.00     m )
+
+     70.00      1450.00      0.00     1.60       0.0350    0.0000
+     89.00      1480.00      0.00     1.60       0.0300    0.0000
+    140.00      1460.00      0.00     1.60       0.0250    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     ACOUSTO-ELASTIC half-space
+    140.00      1800.00      0.00     2.00       0.2500    0.0000
+
+ cLow =   1400.0     m/s      cHigh =   1800.0     m/s
+ RMax =   1000.0     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            3
+    Source   z-coordinates, Sz (m)
+                 31.0000       70.0000       105.000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            7
+    Receiver z-coordinates, Rz (m)
+                 0.00000       69.9900       70.0000       70.0100
+   105.000       139.990       140.000
+
+
+ Mesh multiplier   CPU seconds
+                --- Number of modes =            6
+        1            0.321E-02s
+                --- Number of modes =            6
+        2            0.736E-03s
+        4            0.697E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2110305961     -0.11E-03   1488.690603       1464.83
+    2  0.2063812860     -0.84E-04   1522.227482       1474.12
+    3  0.2019832803     -0.10E-03   1555.372627       1450.49
+    4  0.1957038298     -0.12E-03   1605.279088       1413.32
+    5  0.1861990561     -0.16E-03   1687.222653       1361.62
+    6  0.1761971174     -0.26E-03   1782.998894       1334.04
+ _________________________________________________
+
+ End of environmental file

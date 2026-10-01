@@ -399,6 +399,32 @@ fn write_frequency(
         },
     )?;
 
+    write_scalar_attribute(
+        group,
+        "finite_fluid_layer_count",
+        &((1 + case.additional_fluid_layers.len()) as u64),
+    )?;
+    let media = group.create_group("media").map_err(hdf5_error)?;
+    let mut top_depth = 0.0;
+    for index in 0..=case.additional_fluid_layers.len() {
+        let (bottom_depth, density, mesh_points) = if index == 0 {
+            (
+                case.water_depth_m,
+                case.water_density_g_cm3,
+                case.mesh_points,
+            )
+        } else {
+            let layer = &case.additional_fluid_layers[index - 1];
+            (layer.bottom_depth_m, layer.density_g_cm3, layer.mesh_points)
+        };
+        let layer = media.create_group(&index.to_string()).map_err(hdf5_error)?;
+        write_scalar_attribute(&layer, "top_depth_m", &top_depth)?;
+        write_scalar_attribute(&layer, "bottom_depth_m", &bottom_depth)?;
+        write_scalar_attribute(&layer, "density_g_cm3", &density)?;
+        write_scalar_attribute(&layer, "requested_mesh_points", &(mesh_points as u64))?;
+        top_depth = bottom_depth;
+    }
+
     write_modes(group, result, budget)?;
     write_field(group, result, budget)
 }

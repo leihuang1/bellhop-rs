@@ -9,6 +9,7 @@ use num_complex::Complex64;
 
 mod attenuation;
 mod complex_modes;
+mod layers;
 pub mod legacy;
 mod modes;
 #[cfg(test)]
@@ -172,7 +173,21 @@ pub struct SoundSpeedPoint {
     pub sound_speed_mps: f64,
 }
 
-/// Unvalidated input for a single fluid layer with smooth boundaries.
+/// A finite fluid layer below the first water layer. Depths are absolute metres.
+/// Interpolation and attenuation conventions are shared with the enclosing case.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FluidLayer {
+    pub bottom_depth_m: f64,
+    pub density_g_cm3: f64,
+    pub sound_speed_profile: Vec<SoundSpeedPoint>,
+    /// Empty for lossless material, otherwise one solve-frequency dB/wavelength per node.
+    pub attenuation_db_per_wavelength: Vec<f64>,
+    /// Nominal mesh intervals; 0 selects the reference automatic mesh.
+    pub mesh_points: usize,
+}
+
+/// Unvalidated fluid stack with smooth boundaries. The existing water fields
+/// define its first layer; `additional_fluid_layers` contains only subsequent layers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CaseDefinition {
     pub title: String,
@@ -196,6 +211,7 @@ pub struct CaseDefinition {
     /// Empty for lossless water, otherwise one dB/wavelength value per SSP node.
     /// Values are evaluated at `frequency_hz` before complex SSP interpolation.
     pub water_attenuation_db_per_wavelength: Vec<f64>,
+    pub additional_fluid_layers: Vec<FluidLayer>,
     pub bottom_boundary: BottomBoundary,
     /// Zero for a rigid or tabulated bottom (no half-space material).
     pub bottom_sound_speed_mps: f64,
@@ -323,7 +339,14 @@ impl Case {
                 "require one finite nonnegative loss per SSP node, Im(c) <= Re(c); analytic Munk remains lossless",
             ));
         }
+        layers::validate(&definition, &mut diagnostics);
         if analytic {
+            if !definition.additional_fluid_layers.is_empty() {
+                diagnostics.push(error(
+                    "additional_fluid_layers",
+                    "analytic Munk remains single-layer",
+                ));
+            }
             if definition.water_depth_m != 5000.0 {
                 diagnostics.push(error(
                     "water_depth_m",
@@ -338,19 +361,19 @@ impl Case {
             }
         }
         if !profile_invalid && !loss_invalid {
-            match profile::Profile::new(&definition) {
-                Ok(profile) => {
+            match layers::minimum_speed(&definition) {
+                Ok(minimum_speed) => {
                     if definition.mode_solver == ModeSolver::Kraken
                         && definition.surface_boundary == SurfaceBoundary::FluidHalfSpace
                         && definition.surface_sound_speed_mps > 0.0
-                        && definition.surface_sound_speed_mps <= profile.minimum_speed()
+                        && definition.surface_sound_speed_mps <= minimum_speed
                     {
                         diagnostics.push(error("surface_sound_speed_mps", "trapped modes require a surface half-space faster than the minimum water sound speed"));
                     }
                     if definition.mode_solver == ModeSolver::Kraken
                         && definition.bottom_boundary == BottomBoundary::FluidHalfSpace
                         && definition.bottom_sound_speed_mps > 0.0
-                        && definition.bottom_sound_speed_mps <= profile.minimum_speed()
+                        && definition.bottom_sound_speed_mps <= minimum_speed
                     {
                         diagnostics.push(error(
                             "bottom_sound_speed_mps",
@@ -484,7 +507,7 @@ impl Case {
         if definition.mode_sample_depths_m.is_empty()
             || definition.mode_sample_depths_m.len() > MAX_VECTOR_LENGTH
             || definition.mode_sample_depths_m.iter().any(|depth| {
-                !depth.is_finite() || *depth < 0.0 || *depth > definition.water_depth_m
+                !depth.is_finite() || *depth < 0.0 || *depth > definition.total_depth_m()
             })
             || definition
                 .mode_sample_depths_m
@@ -510,7 +533,7 @@ impl Case {
             if field != "receiver_ranges_m"
                 && values
                     .iter()
-                    .any(|depth| *depth < 0.0 || *depth > definition.water_depth_m)
+                    .any(|depth| *depth < 0.0 || *depth > definition.total_depth_m())
             {
                 diagnostics.push(error(field, "depths must lie in water"));
             }
@@ -604,46 +627,7 @@ impl Case {
         clippy::cast_sign_loss
     )]
     pub(crate) fn mesh_points_at(&self, multiplier: usize) -> Result<usize, DiagnosticReport> {
-        let reference = self
-            .mesh_reference_frequency_hz
-            .unwrap_or(self.frequency_hz);
-        // Analytic INIT leaves the reference's last-read sound speed at 1500.
-        let last_speed = self
-            .sound_speed_profile
-            .last()
-            .map_or(1500.0, |p| p.sound_speed_mps);
-        let needed = (self.water_depth_m / (last_speed / reference / 20.0))
-            .floor()
-            .max(10.0);
-        let base = if self.mesh_points == 0 {
-            needed
-        } else {
-            self.mesh_points as f64
-        };
-        if !needed.is_finite()
-            || base < (needed as usize / 2) as f64
-            || base > MAX_MESH_POINTS as f64
-        {
-            return Err(solver::error(
-                "KR0302",
-                "mesh is too coarse or exceeds the mesh limit",
-                "mesh_points",
-            ));
-        }
-        // INT(NG * NV * freq / freq0), not INT(NG * freq / freq0) * NV.
-        let scaled = if self.mesh_reference_frequency_hz.is_some() {
-            (base * multiplier as f64 * self.frequency_hz / reference).floor()
-        } else {
-            base * multiplier as f64
-        };
-        if !scaled.is_finite() || !(10.0..=MAX_MESH_POINTS as f64).contains(&scaled) {
-            return Err(solver::error(
-                "KR0302",
-                "scaled or refined mesh exceeds the mesh limits",
-                "mesh_points",
-            ));
-        }
-        Ok(scaled as usize)
+        layers::mesh_intervals(self, multiplier).map(|intervals| intervals[0])
     }
 }
 

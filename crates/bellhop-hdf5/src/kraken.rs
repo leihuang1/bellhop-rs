@@ -129,6 +129,9 @@ pub fn run_legacy(
         File::create_excl(&temporary).map_err(|error| RunError::Output(hdf5_error(error)))?;
     let cleanup = TemporaryOutput(temporary);
     (|| {
+        // Own the handle in this inner scope: every early return drops it (and
+        // child groups) before the outer guard removes the scratch path.
+        let file = file;
         let mut budget = Budget {
             payload: 0,
             maximum: max_output_bytes,

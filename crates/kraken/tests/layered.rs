@@ -55,6 +55,29 @@ fn original_double_rejects_a_changed_mesh_mode_count() {
 }
 
 #[test]
+#[ignore = "known pinned secant parity gap; see docs/kraken-layered-refinement-gap.md"]
+fn wide_three_layer_refinement_rejects_the_pinned_count_change() {
+    // Pinned mesh 1 finds five roots, mesh 2 only four. Matching that search
+    // must reach the existing count-change guard, never silently clip a root.
+    let mut input = cases(
+        include_str!("fixtures/LayeredFluidThreeWide.env"),
+        ModeSolver::Krakenc,
+    )
+    .unwrap()
+    .remove(0)
+    .into_definition();
+    input.max_range_m = 1_000_000.0;
+    let result = solve(&Case::from_definition(input).unwrap());
+    assert!(result.is_err(), "known gap: Rust retains five modes");
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("mode count changed")
+    );
+}
+
+#[test]
 fn layer_validation_keeps_interfaces_and_materials_explicit() {
     let base = definition();
     for change in [

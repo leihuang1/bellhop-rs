@@ -241,6 +241,14 @@ checks failure after three successful frequency blocks and old-output protection
 Analytic Munk and F/P/TRC remain single-layer. The test-only `.mod` reader walks
 all finite fluid media and has a last-medium corruption regression.
 
+`python3 tools/reference/probe-layered-refinement.py` is a **diagnostic-only**
+experiment for the open three-layer refinement gap. It runs the unmodified
+oracle, a zero-perturbation control and ±256-ULP seed probes in a disposable
+container. The control binaries must match the oracle; altered results are
+never acceptance goldens. It requires the pinned image and refuses to overwrite
+`target/reference/layered-refinement-gap`. See the
+[diagnosis and failing regression](../docs/kraken-layered-refinement-gap.md).
+
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
 seventeen single-frequency KRAKEN cases, the KRAKENC derivatives above and

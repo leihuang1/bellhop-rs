@@ -316,6 +316,11 @@ refinement-parity gap, not an input rejected by the current Rust guard. No
 reference is trimmed or re-labelled; narrowed and base-mesh inputs have their
 own complete reference outputs. Stable mode counts and triplicate binaries do
 not prove mathematical root completeness for arbitrary secant spectra.
+[Targeted diagnosis](kraken-layered-refinement-gap.md) localizes this gap to the
+second-mesh deflated secant trajectory: perturbing only the pinned fifth search
+seed by ±256 ULP changes its final count from four to five. Altered-reference
+outputs match Rust but are diagnostic evidence, **not** fixed-oracle acceptance.
+A runnable, explicitly ignored failing regression preserves the open blocker.
 
 ### Smooth boundaries and top reflection tables
 

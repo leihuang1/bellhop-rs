@@ -45,17 +45,35 @@ frequency/depth-scaling test checks that small distinct squared-wavenumbers
 remain separate; it does not claim a fresh Fortran acceptance for scaled
 inputs.
 
+KRAKENC cubic/analytic profile acceptance reuses the lossless `Profile`, adding
+**derived** `MunkLeakyPartialP/S` (30 modes including 9 leaky, 36 pressures each),
+`PekerisComplexSpline3` (4 modes, 9 pressures, meshes 1/2/4), and
+`MunkAnalyticComplex` (102 modes, 25 pressures, NG=2003, eleven modal depths and
+meshes 1/2/4). A **derived** broadband PCHIP Munk has NG=803, 75/50/62.5/50 Hz,
+45/30/37/30 modes and 36 pressures per block. Three pinned runs of all five
+produce identical `.mod/.shd`; raw goldens and input/output hashes are recorded.
+Analytic f32 grid-step rounding is shared by both Rust mode backends.
+Unmodified `tests/Munk/MunkS.env` (a SCOOTER environment) and `MunkAnalytic.env`
+also pass through KRAKENC, 102 modes/25 pressures each, with a **separately derived**
+coherent `.flp`. Original three-line `.flp` fails in pinned FIELD for both;
+this is not original-pair or SCOOTER acceptance. Water loss, complex-valued SSP,
+rigid complex boundaries, and P/S/A table-boundary combinations remain excluded.
+
 Discrete multi-frequency regressions use two **derived** Pekeris `.env/.flp`
 pairs (KRAKEN and KRAKENC): unsorted 75/50/62.5 Hz, fractional mesh scaling,
 three refinement levels, `W` bottom loss, and nine pressures per frequency.
 Committed `.mod/.prt/.shd` and fresh CI compare every frequency block. Fresh
-CI also compares the **unmodified** `tests/BroadBand/MunkK.env/.flp`:
+CI also compares the **unmodified** `tests/BroadBand/MunkK.env/.flp` through KRAKEN:
 102 modes at 50 Hz, 1,023 at 500 Hz, and 501,501 pressures at each frequency
 (1,003,002 total). Three pinned runs yield identical `.mod/.shd`. The reference
 reader checks frequency order, per-frequency mode counts and offsets, shapes,
 printed/binary wavenumbers, group speeds and every pressure; a later-frequency
 corruption regression ensures no frequency is skipped. These are frequency-
-domain results, not a wideband time-domain acceptance.
+domain results, not a wideband time-domain acceptance. KRAKENC S water at
+500 Hz exceeds its unchanged 300M root-work limit for this original broadband
+pair. A fresh-CI CLI regression checks exit 3, no partial publication, preservation
+of an existing output and scratch cleanup after 50 Hz succeeds. A local 50 Hz
+KRAKENC comparison passes, but the full pair is not accepted through KRAKENC.
 
 TabRefCoef acceptance adds four **derived** 50 Hz N/C single-water cases with
 **constructed** BRC/IRC tables and committed `.mod/.prt/.shd`. Original
@@ -76,7 +94,9 @@ through its actual serialized output: `KRAKEN_HDF5_RESULT` makes the same test-o
 comparator read `.h5` modes and FIELD instead of recomputing the in-memory
 result. Fresh CI exercises both Pekeris broadband derivatives, original MunkK,
 all five original fluid KRAKENC pairs, original BroadBand/MunkK, four table
-derivatives and the three original TabRefCoef workflows through this path,
+derivatives, the three original TabRefCoef workflows, four cubic/analytic
+derivatives, the broadband PCHIP derivative and the two unmodified MunkS/analytic
+environments with derived FIELD geometry through this path,
 with every frequency/sample and unchanged tolerances. Schema/metadata/units,
 exact Rust-value round-trips and file/quota failure protections also run without
 Docker. Existing BELLHOP schema-v3 tests remain unchanged; Rust `.h5` output is

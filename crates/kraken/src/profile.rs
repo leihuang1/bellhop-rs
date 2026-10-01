@@ -92,6 +92,23 @@ impl<'a> Profile<'a> {
         self.minimum_speed
     }
 
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    pub(super) fn mesh_speed(&self, index: usize, intervals: usize) -> f64 {
+        let analytic = self.case.interpolation == Interpolation::AnalyticMunk;
+        // munk.f90 computes 5000.0 / N in f32 before assigning it to f64 h.
+        let step = if analytic {
+            f64::from(5000.0_f32 / intervals as f32)
+        } else {
+            self.case.water_depth_m / intervals as f64
+        };
+        let depth = index as f64 * step;
+        self.speed(if analytic {
+            depth
+        } else {
+            depth.min(self.case.water_depth_m)
+        })
+    }
+
     pub(super) fn speed(&self, depth: f64) -> f64 {
         if self.case.interpolation == Interpolation::AnalyticMunk {
             // Acoustics Toolbox v2023.5 misc/munk.f90, medium 1.
@@ -297,6 +314,27 @@ mod tests {
     use super::{Profile, spline_slopes};
     use crate::{Case, Interpolation, legacy::load_case};
     use std::path::Path;
+
+    #[test]
+    fn analytic_mesh_sampling_preserves_the_reference_f32_step() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/MunkAnalytic");
+        let case = load_case(root.with_extension("env"), root.with_extension("flp")).unwrap();
+        let profile = Profile::new(&case).unwrap();
+        let rounded_depth = 5000.0 * f64::from(5000.0_f32 / 5000.0_f32);
+        assert_eq!(
+            profile.mesh_speed(5000, 5000).to_bits(),
+            profile.speed(rounded_depth).to_bits()
+        );
+        let rounded_depth = 3333.0 * f64::from(5000.0_f32 / 3333.0_f32);
+        assert_eq!(
+            profile.mesh_speed(3333, 3333).to_bits(),
+            profile.speed(rounded_depth).to_bits()
+        );
+        assert_ne!(
+            profile.mesh_speed(3333, 3333).to_bits(),
+            profile.speed(5000.0).to_bits()
+        );
+    }
 
     #[test]
     fn short_spline_and_pchip_profiles() {

@@ -8,7 +8,7 @@ Fortran 12.2 environment described in [`reference.md`](reference.md).
 trapped or rigid-bottom confined modes with optional bottom-half-space `W`
 attenuation, and coherent line- or point-source FIELD. A separate
 KRAKENC slice computes trapped and leaky modes and coherent line-/point-source
-FIELD for lossless `N/C` water, vacuum surface and fluid bottom with optional
+FIELD for lossless `N/C/P/S/fixed-Munk-A` water, vacuum surface and fluid bottom with optional
 `W` loss and up to five Richardson-extrapolated meshes. Unmodified
 `MunkKleaky`, `MunkKwb`, `MunkKbb`, `sductK` and `calibK` `.env/.flp` pairs
 pass end-to-end differential. Single-frequency, RMax=0 KRAKENC bottom F/BRC
@@ -16,7 +16,8 @@ and P/IRC also pass the original TabRefCoef geo/brc/irc workflows, including
 FIELD endpoint extension and CLI/HDF5 auxiliary-input provenance.
 Discrete multi-frequency KRAKEN/KRAKENC fluid-bottom cases
 are also supported; unmodified `tests/BroadBand/MunkK.env/.flp` passes at 50
-and 500 Hz. The `kraken` CLI now runs supported legacy pairs and writes
+and 500 Hz through **KRAKEN**. KRAKENC 500 Hz still exceeds its 300M root-work
+limit and is not accepted. The `kraken` CLI now runs supported legacy pairs and writes
 [KRAKEN HDF5 schema v1](kraken-output-format.md), with sequential frequency
 output and atomic publication. JSON/HTTP remain unimplemented. This is not
 the full matrix below; unsupported inputs are rejected.
@@ -96,7 +97,7 @@ original `.env/.flp` *pair* is not claimed as accepted. The KRAKEN sduct
 derivatives still remove the original leaky phase-speed interval; **unmodified**
 `sductK` is instead compared through KRAKENC below.
 The separate KRAKENC `load_complex_case`/`solve_complex_modes` path currently
-supports lossless `N/C`-profile water, vacuum surface, fluid half-space with
+supports lossless `N/C/P/S/fixed-Munk-A` water, vacuum surface, fluid half-space with
 zero or `W` attenuation (including a bottom slower than the water), trapped
 or leaky phase-speed intervals, and non-negative `RMax`. The KRAKENC legacy
 reader accepts both blank and dotted restart options. The `.env` supplies modal sample depths; `.flp`
@@ -151,12 +152,57 @@ pass fresh `.mod/.prt/.shd` comparison in CI:
 Repeated pinned runs produce identical `.mod/.shd` binaries for each original
 pair; the original artifacts stay out of Git. The sduct FIELD has 216,693,477
 modal contributions, below the 550-million-per-frequency work ceiling. Water loss
-and `P/S/A` complex interpolation remain unsupported. Upstream
+remains unsupported. KRAKENC `P/S/A` profile evidence is detailed below. Upstream
 `tests/PekerisRD` is a BELLHOP, not a KRAKEN, case. The same comparator in
 [`tests/differential_reference.rs`](../crates/kraken/tests/differential_reference.rs)
 checks committed `.mod/.shd/.prt` goldens and newly generated pinned Fortran
 output in CI; provenance is recorded
 [with the goldens](../crates/kraken/tests/fixtures/golden/README.md).
+
+### KRAKENC cubic and analytic water
+
+KRAKENC now reuses the existing real/lossless `Profile` for PCHIP (`P`),
+not-a-knot cubic spline (`S`) and the fixed 5000 m Munk formula (`A`). This does
+**not** add water-column attenuation or complex-valued SSP interpolation.
+The half-space slice retains vacuum top, constant density and A bottom with
+optional W loss, blank/dotted restarts, bounded Richardson refinement and
+ordered discrete frequencies. F/P table boundaries remain **N/C only**;
+complex rigid boundaries, density gradients and extra layers remain excluded.
+Spline positivity and coefficient-overflow checks still run at `CaseDefinition`
+validation. Both mode backends share analytic mesh sampling: the f32 step from
+`5000.0 / N` is promoted to f64 separately from the physical finite-difference
+step; endpoint clamping must not erase this reference rounding.
+
+All modes, shapes, attenuation, speeds and FIELD pressures are compared at
+unchanged tolerances, including actual CLI-HDF5 readback:
+
+| Derived input | Modes | Pressures | Reference mesh multipliers |
+|---|---:|---:|---|
+| `MunkLeakyPartialP` / `MunkLeakyPartialS` | 30 each (9 leaky) | 36 each | 1 |
+| `PekerisComplexSpline3` | 4 (1 leaky) | 9 | 1/2/4 |
+| `MunkAnalyticComplex` | 102 | 25 | 1/2/4 |
+| `MunkLeakyPchipBroadband` at 75/50/62.5/50 Hz | 45/30/37/30 | 36 per block | 1/2/4 |
+
+The broadband derivative has NG=803; scaling is performed before truncation,
+with the repeated 50 Hz result stored in its own frequency-index group.
+The analytic derivative has NG=2003 (noninteger analytic grid step), RMax=1000 km
+and eleven modal sample depths. These are explicitly derived, reduced-geometry
+inputs; small raw goldens are committed and all seven single/multi-frequency
+reference workflows produce identical `.mod/.shd` in three pinned runs.
+
+The **unmodified upstream environments** `tests/Munk/MunkS.env` (S, originally
+a SCOOTER fixture) and `MunkAnalytic.env` (A) are additionally run with KRAKENC:
+102 modes and 25 pressures each, using a separately derived coherent `.flp`.
+Neither original three-line `.flp` parses in pinned FIELD, so this is original
+**environment** acceptance, not acceptance of the original input pairs or a
+SCOOTER implementation. Hashes and provenance are
+[with the goldens](../crates/kraken/tests/fixtures/golden/README.md).
+
+Unmodified BroadBand/MunkK at 50 Hz also passes a local KRAKENC differential;
+500 Hz hits the unchanged 300M root-work ceiling. CI explicitly checks CLI
+exit 3 after the first frequency, preserves an existing output and cleans
+scratch; no partial/truncated result is accepted. Full 50/500 Hz upstream
+BroadBand/MunkK remains accepted through KRAKEN, not KRAKENC.
 
 ### Tabulated KRAKENC bottoms
 
@@ -361,10 +407,13 @@ Mode-shape comparisons account for the arbitrary sign/phase convention of
 eigenvectors. Small committed goldens keep ordinary tests independent of Docker;
 the pinned reference workflow numerically compares all seventeen constructed
 single-frequency KRAKEN fixtures, ten derived single-frequency KRAKENC mode
-fixtures, four derived single-frequency KRAKENC FIELD fixtures, four derived
-table modes/FIELD fixtures, two broadband Pekeris derivatives, and unmodified
+fixtures, four earlier derived single-frequency KRAKENC FIELD fixtures, four
+cubic/analytic mode/FIELD derivatives, four table modes/FIELD fixtures, two
+broadband Pekeris derivatives and a broadband PCHIP Munk derivative, and unmodified
 upstream MunkK, MunkKleaky, MunkKwb, MunkKbb, sductK, calibK, BroadBand/MunkK
-and all three neggradC geo/brc/irc modes and FIELD. Original
+and all three neggradC geo/brc/irc modes and FIELD. Unmodified MunkS and
+MunkAnalytic environments are additionally checked through KRAKENC with
+separately derived FIELD geometry. Original
 `.mod/.shd` output is not committed.
 
 ## Repository shape

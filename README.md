@@ -65,6 +65,10 @@ TabRefCoef geo/brc/irc inputs with generated reference tables, including all
 Twenty-one derived layered-fluid pairs pass 41 API/CLI-HDF5 workflows (530 modes,
 4,902 pressures). The original TLslices `double` is still rejected for changing
 mesh mode counts; its denser-mesh derivative is accepted, not relabelled original.
+A [known wide three-layer KRAKENC refinement gap](docs/kraken-layered-refinement-gap.md)
+remains outside acceptance as a non-blocking release exception: Rust can return
+five modes where the pinned reference returns four. CLI success is not a guarantee
+of arbitrary-input reference parity; the extra mode may affect coherent FIELD.
 Analytic Munk and F/P/TRC boundaries remain single-layer.
 `legacy::load_frequency_cases` supports discrete multi-frequency KRAKEN/KRAKENC
 runs; original `BroadBand/MunkK` passes through KRAKEN at 50 and 500 Hz (102/1,023 modes,

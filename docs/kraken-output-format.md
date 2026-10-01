@@ -50,6 +50,13 @@ builds it using the existing static HDF5 dependency.
   `4` output/quota/I/O failure. Numerical errors identify the zero-based
   frequency index and Hz value. Unsupported physics is rejected, not approximated.
 
+Exit 0 and successful HDF5 publication certify completion, not fixed-oracle
+parity for arbitrary inputs. The documented
+[wide three-layer refinement exception](kraken-layered-refinement-gap.md) can
+return five modes versus the pinned reference's four without a warning or a
+parity-certification attribute. It remains outside numerical acceptance; this
+release-scope exception does not change the solver or add a runtime guard.
+
 Rust adapters may call `bellhop_hdf5::kraken::run_legacy` with input/output
 paths, engine, overwrite policy and byte quota. The numerical `kraken` crate
 has no production HDF5 dependency.

@@ -320,7 +320,14 @@ not prove mathematical root completeness for arbitrary secant spectra.
 second-mesh deflated secant trajectory: perturbing only the pinned fifth search
 seed by ±256 ULP changes its final count from four to five. Altered-reference
 outputs match Rust but are diagnostic evidence, **not** fixed-oracle acceptance.
-A runnable, explicitly ignored failing regression preserves the open blocker.
+Following scope review, this documented workflow is a **non-blocking release
+exception**, still outside numerical acceptance. The 41 accepted workflows keep
+full fixed-oracle comparisons; no blanket waiver applies to other failures.
+A runnable, explicitly ignored failing regression preserves the unresolved gap.
+The affected calculation can still return five modes and CLI exit 0 without a
+warning: successful execution/HDF5 publication is not a parity certificate.
+The fifth mode may materially affect coherent FIELD; exact legacy reproduction
+must exclude this workflow and independently validate other unverified inputs.
 
 ### Smooth boundaries and top reflection tables
 

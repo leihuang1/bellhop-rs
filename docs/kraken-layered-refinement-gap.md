@@ -1,7 +1,9 @@
 # Wide three-layer KRAKENC refinement: open parity gap
 
-**Not fixed; not an accepted workflow.** PR #25 remains draft. No solver,
-reference, tolerance or accepted golden was changed by this diagnosis.
+**Not fixed; not an accepted workflow.** Following the user's scope review,
+this documented exception no longer blocks review/release of PR #25's validated
+fluid-stack subset. It is not a numerical fix or a general waiver for other
+parity failures. No solver, reference, tolerance or accepted golden was changed.
 
 ## Reproducer and expected contract
 
@@ -98,7 +100,7 @@ KRAKEN_DIFFERENTIAL_ROOT="$root/pinned" KRAKEN_HDF5_RESULT="$root/rust.h5" \
 # Unset KRAKEN_HDF5_RESULT to compare the API instead.
 ```
 
-## Attempted fix and remaining decision
+## Attempted fix
 
 Changing the bottom k² arithmetic from `(omega/c)^2` to the reference expression
 `omega²/c²` reduced a boundary-evaluation discrepancy but still returned five
@@ -112,7 +114,68 @@ would require further control of floating-point trajectories, not a missing
 interface condition; selecting arithmetic solely because it happens to skip
 this root would be a fragile, platform-sensitive workaround.
 
-Under the current fixed-oracle parity requirement, the blocker remains open.
-Accepting this known search limitation, or adopting an independently validated
-root-completeness criterion, requires an explicit scope/acceptance decision;
-neither has been done here. The 41 already accepted workflows remain separate.
+## Scope decision and impact assessment
+
+The user authorized a scope adjustment if its practical impact on this stage
+was limited. Based on the existing evidence, accept a **release-gate exception
+for this documented workflow**, not acceptance of its numerical result. The
+41 validated workflows remain the strict acceptance set. Arbitrary complex
+fluid stacks are not certified as fixed-oracle-equivalent merely because their
+inputs parse and the solver finishes.
+
+### Physical impact is not established as small
+
+Pinned `KrakenField/EvaluateMod.f90::Evaluate` forms the coherent pressure as a
+sum of modal contributions proportional to
+`C_m * phi_m(z) * exp(-i*k_m*r) / sqrt(k_m)` for a point source, followed by
+cylindrical spreading. Adding/removing one root can change interference and
+transmission-loss minima; mode-count fraction is not a pressure-error estimate.
+
+The diagnostic fifth root has `-Im(k) ≈ 1.7555e-4 /m`, so its attenuation-only
+amplitude factor is `exp(-1.7555e-4*r)` and its e-folding distance is about
+5.7 km. `LayeredFluidThreeWide.flp` samples 0.5, 1 and 2 km, where that factor
+is roughly 0.92, 0.84 and 0.70. These are analytical attenuation factors, **not**
+measured fractions of the total pressure: source/receiver coupling, modal
+normalization, phase and spreading also matter. RMax=1000 km controls mesh
+refinement; it is not the FIELD receiver range and cannot justify neglecting
+this mode. No new pressure-error calculation was performed for this review.
+
+The tiny seed perturbation explains why strict search-path parity is fragile;
+it does not bound the physical effect, prove Rust is universally more accurate,
+or prove this behavior occurs only in the one known fixture.
+
+### Impact on this delivery is bounded
+
+- No previously accepted input or capability is removed. Independent refined
+  three-layer, wide base-mesh, layered loss/broadband/leaky, V/R/A and interface
+  workflows retain their existing complete comparisons. This is not a waiver
+  for all three-layer refinement, all wide spectra or all KRAKENC failures.
+- API, CLI/HDF5 schema, atomic publication, quotas, work ceilings, physics and
+  the original `double` count-change rejection are unchanged. Layer-density
+  gradients, elasticity and multi-profile FIELD remain out of scope.
+- The known case still may return five modes and CLI exit 0, without a warning
+  or a parity-certification flag. This exception is documentary, **not** runtime
+  rejection/protection. Users requiring exact legacy reproduction must exclude
+  this workflow and independently validate unverified configurations.
+- Changing cHigh to 1700 or RMax to 0 creates a different calculation. Their
+  accepted fixtures are not automatic substitutes for a user's wide refined
+  problem. HDF5 provenance identifies inputs; it does not certify parity.
+
+### Acceptance rules retained
+
+1. All 41 accepted workflows must continue to match the **unmodified** pinned
+   oracle, for every reference mode and pressure, at unchanged tolerances.
+2. This wide refined workflow stays outside acceptance. Keep its diagnosis,
+   reference-only perturbation tool and explicitly ignored failing reproducer;
+   none may be relabelled a passing test or included in acceptance totals.
+3. Do not trim reference/Rust roots, promote perturbed outputs to goldens, or
+   replace the fixed oracle with an unvalidated root-completeness criterion.
+4. Any new parity failure, regression in an accepted workflow, or evidence of
+   broader practical impact requires a separate scope review; no blanket waiver.
+5. Promotion of this workflow requires fresh unmodified-oracle API/CLI-HDF5
+   evidence and resolution of the count-change contract, or a separately
+   approved numerical acceptance contract. The current exception does neither.
+
+This permits PR #25 to leave draft for normal review; it does not authorize
+merging or claim a complete KRAKENC rewrite. This assessment used the existing
+source, fixtures and diagnostic evidence only; no new code or tests were run.

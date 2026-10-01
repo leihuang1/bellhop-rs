@@ -127,6 +127,7 @@ struct Mesh<'a> {
     bottom_k2: f64,
     bottom_complex_k2: Complex64,
     b1: Vec<f64>,
+    b1c: Vec<f64>,
     min_speed: f64,
 }
 
@@ -143,12 +144,24 @@ impl<'a> Mesh<'a> {
         let h = case.water_depth_m / n as f64;
         let mut min_speed = f64::INFINITY;
         let mut invalid_speed = false;
+        let water_loss = case
+            .water_attenuation_db_per_wavelength
+            .iter()
+            .any(|&a| a != 0.0);
+        let mut b1c = Vec::with_capacity(n + 1);
         let b1: Vec<_> = (0..=n)
             .map(|i| {
-                let speed = profile.mesh_speed(i, n);
-                invalid_speed |= !speed.is_finite() || speed <= 0.0;
-                min_speed = min_speed.min(speed);
-                -2.0 + h * h * (omega * omega / (speed * speed))
+                let speed = profile.mesh_complex_speed(i, n);
+                invalid_speed |= !speed.re.is_finite() || speed.re <= 0.0 || !speed.im.is_finite();
+                min_speed = min_speed.min(speed.re);
+                if water_loss {
+                    let k2 = Complex64::new(omega * omega, 0.0) / speed.powi(2);
+                    b1c.push(k2.im);
+                    -2.0 + h * h * k2.re
+                } else {
+                    b1c.push(0.0);
+                    -2.0 + h * h * (omega * omega / (speed.re * speed.re))
+                }
             })
             .collect();
         if invalid_speed {
@@ -158,7 +171,7 @@ impl<'a> Mesh<'a> {
                 "sound_speed_profile",
             ));
         }
-        if h <= 0.0 || !h.is_finite() || b1.iter().any(|x| !x.is_finite()) {
+        if h <= 0.0 || !h.is_finite() || b1.iter().chain(&b1c).any(|x| !x.is_finite()) {
             return Err(error(
                 "KR0302",
                 "mesh coefficients exceed numeric range",
@@ -172,6 +185,7 @@ impl<'a> Mesh<'a> {
             bottom_k2,
             bottom_complex_k2,
             b1,
+            b1c,
             min_speed,
         })
     }
@@ -322,10 +336,12 @@ impl<'a> Mesh<'a> {
         let mut phi = inverse_iteration(&d, &e)?;
         let mut norm = 0.0;
         let mut slow = 0.0;
+        let mut volume_loss = 0.0;
         for (i, &value) in phi.iter().enumerate() {
             let weight = if i == 0 || i + 1 == n { 0.5 } else { 1.0 };
             let mass = weight * self.h * value * value / self.case.water_density_g_cm3;
             norm += mass;
+            volume_loss += mass * self.b1c[i];
             slow += mass * (self.b1[i] + 2.0) / (self.omega * self.omega * self.h * self.h);
         }
         if self.case.bottom_boundary == BottomBoundary::FluidHalfSpace {
@@ -374,11 +390,12 @@ impl<'a> Mesh<'a> {
             .collect();
         // BCImpedance returns the real admittance for mode finding and the
         // complex admittance for first-order attenuation (Normalize in kraken.f90).
-        let loss_k2 = if self.case.bottom_boundary == BottomBoundary::Rigid {
-            0.0
-        } else {
-            -self.bottom_gamma(x).im * phi[n - 1].powi(2) / self.case.bottom_density_g_cm3
-        };
+        let loss_k2 = volume_loss * scale * scale
+            + if self.case.bottom_boundary == BottomBoundary::Rigid {
+                0.0
+            } else {
+                -self.bottom_gamma(x).im * phi[n - 1].powi(2) / self.case.bottom_density_g_cm3
+            };
         let k = Complex64::new(x, loss_k2).sqrt();
         Ok(NormalMode {
             horizontal_wavenumber_rad_per_m: k,

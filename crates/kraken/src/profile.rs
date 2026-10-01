@@ -1,14 +1,18 @@
 // Adapted from Acoustics Toolbox v2023.5 misc/pchipMod.f90, splinec.f90, and munk.f90,
 // Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
-// Real, constant-density water-column profiles only.
+// Constant-density fluid profiles. Complex speeds are converted before interpolation.
 use crate::solver::error;
 use crate::{CaseDefinition, DiagnosticReport, Interpolation};
+use num_complex::Complex64;
+use std::f64::consts::PI;
 
 pub(super) struct Profile<'a> {
     case: &'a CaseDefinition,
     minimum_speed: f64,
     // Local polynomial coefficients, c0 + t * (c1 + t * (c2 + t * c3)).
     cubic: Vec<[f64; 4]>,
+    imaginary_speeds: Vec<f64>,
+    imaginary_cubic: Vec<[f64; 4]>,
 }
 
 impl<'a> Profile<'a> {
@@ -31,41 +35,8 @@ impl<'a> Profile<'a> {
                 .windows(2)
                 .map(|p| p[1].depth_m - p[0].depth_m)
                 .collect();
-            let delta: Vec<_> = points
-                .windows(2)
-                .zip(&h)
-                .map(|(p, &step)| (p[1].sound_speed_mps - p[0].sound_speed_mps) / step)
-                .collect();
-            if delta.iter().any(|v| !v.is_finite()) {
-                return Err(invalid_profile());
-            }
-            let mut slopes = if case.interpolation == Interpolation::Pchip {
-                pchip_slopes(&h, &delta)
-            } else {
-                spline_slopes(&h, &delta)
-            };
-            if case.interpolation == Interpolation::Pchip && h.len() > 1 {
-                for (index, slope) in slopes.iter_mut().enumerate().skip(1).take(h.len() - 1) {
-                    *slope = project(delta[index - 1], delta[index], *slope);
-                }
-            }
-            cubic = points
-                .windows(2)
-                .zip(&h)
-                .zip(slopes.windows(2))
-                .map(|((pair, &step), slope)| {
-                    let difference = pair[1].sound_speed_mps - pair[0].sound_speed_mps;
-                    [
-                        pair[0].sound_speed_mps,
-                        slope[0],
-                        (3.0 * difference - step * (2.0 * slope[0] + slope[1])) / step.powi(2),
-                        (step * (slope[0] + slope[1]) - 2.0 * difference) / step.powi(3),
-                    ]
-                })
-                .collect();
-            if cubic.iter().flatten().any(|v| !v.is_finite()) {
-                return Err(invalid_profile());
-            }
+            let speeds: Vec<_> = points.iter().map(|p| p.sound_speed_mps).collect();
+            cubic = cubic_coefficients(case.interpolation, &h, &speeds)?;
             for (&coefficients, &step) in cubic.iter().zip(&h) {
                 let segment_minimum = segment_minimum(coefficients, step);
                 if !segment_minimum.is_finite() {
@@ -81,10 +52,48 @@ impl<'a> Profile<'a> {
                 ));
             }
         }
+        let imaginary_speeds: Vec<_> = if case
+            .water_attenuation_db_per_wavelength
+            .iter()
+            .any(|&a| a != 0.0)
+        {
+            points
+                .iter()
+                .zip(&case.water_attenuation_db_per_wavelength)
+                .map(|(p, &a)| a * p.sound_speed_mps / (8.685_889_6 * 2.0 * PI))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if imaginary_speeds.iter().any(|c| !c.is_finite()) {
+            return Err(invalid_profile());
+        }
+        let mut imaginary_cubic = Vec::new();
+        if !imaginary_speeds.is_empty() && !cubic.is_empty() {
+            let h: Vec<_> = points
+                .windows(2)
+                .map(|p| p[1].depth_m - p[0].depth_m)
+                .collect();
+            imaginary_cubic = cubic_coefficients(case.interpolation, &h, &imaginary_speeds)?;
+            for ((&real, &imaginary), &step) in cubic.iter().zip(&imaginary_cubic).zip(&h) {
+                let difference = std::array::from_fn(|i| real[i] - imaginary[i]);
+                let minimum = segment_minimum(imaginary, step);
+                let margin = segment_minimum(difference, step);
+                if !minimum.is_finite() || !margin.is_finite() || minimum < 0.0 || margin < 0.0 {
+                    return Err(error(
+                        "KR0302",
+                        "interpolated complex speed requires 0 <= Im(c) <= Re(c)",
+                        "water_attenuation_db_per_wavelength",
+                    ));
+                }
+            }
+        }
         Ok(Self {
             case,
             minimum_speed,
             cubic,
+            imaginary_speeds,
+            imaginary_cubic,
         })
     }
 
@@ -107,6 +116,42 @@ impl<'a> Profile<'a> {
         } else {
             depth.min(self.case.water_depth_m)
         })
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    pub(super) fn mesh_complex_speed(&self, index: usize, intervals: usize) -> Complex64 {
+        if self.imaginary_speeds.is_empty() {
+            return Complex64::new(self.mesh_speed(index, intervals), 0.0);
+        }
+        self.complex_speed(
+            (index as f64 * (self.case.water_depth_m / intervals as f64))
+                .min(self.case.water_depth_m),
+        )
+    }
+
+    fn complex_speed(&self, depth: f64) -> Complex64 {
+        let points = &self.case.sound_speed_profile;
+        let upper = points
+            .partition_point(|p| p.depth_m < depth)
+            .clamp(1, points.len() - 1);
+        let a = Complex64::new(
+            points[upper - 1].sound_speed_mps,
+            self.imaginary_speeds[upper - 1],
+        );
+        let b = Complex64::new(points[upper].sound_speed_mps, self.imaginary_speeds[upper]);
+        let t = depth - points[upper - 1].depth_m;
+        let weight = t / (points[upper].depth_m - points[upper - 1].depth_m);
+        match self.case.interpolation {
+            Interpolation::N2Linear => {
+                Complex64::new(1.0, 0.0) / ((1.0 - weight) / a.powi(2) + weight / b.powi(2)).sqrt()
+            }
+            Interpolation::CLinear => (1.0 - weight) * a + weight * b,
+            Interpolation::Pchip | Interpolation::Spline => {
+                let [c0, c1, c2, c3] = self.imaginary_cubic[upper - 1];
+                Complex64::new(self.speed(depth), c0 + t * (c1 + t * (c2 + t * c3)))
+            }
+            Interpolation::AnalyticMunk => unreachable!(),
+        }
     }
 
     pub(super) fn speed(&self, depth: f64) -> f64 {
@@ -146,6 +191,49 @@ impl<'a> Profile<'a> {
             Interpolation::AnalyticMunk => unreachable!(),
         }
     }
+}
+
+fn cubic_coefficients(
+    kind: Interpolation,
+    h: &[f64],
+    values: &[f64],
+) -> Result<Vec<[f64; 4]>, DiagnosticReport> {
+    let delta: Vec<_> = values
+        .windows(2)
+        .zip(h)
+        .map(|(p, &step)| (p[1] - p[0]) / step)
+        .collect();
+    if delta.iter().any(|v| !v.is_finite()) {
+        return Err(invalid_profile());
+    }
+    let mut slopes = if kind == Interpolation::Pchip {
+        pchip_slopes(h, &delta)
+    } else {
+        spline_slopes(h, &delta)
+    };
+    if kind == Interpolation::Pchip && h.len() > 1 {
+        for (index, slope) in slopes.iter_mut().enumerate().skip(1).take(h.len() - 1) {
+            *slope = project(delta[index - 1], delta[index], *slope);
+        }
+    }
+    let cubic: Vec<_> = values
+        .windows(2)
+        .zip(h)
+        .zip(slopes.windows(2))
+        .map(|((p, &step), slope)| {
+            let difference = p[1] - p[0];
+            [
+                p[0],
+                slope[0],
+                (3.0 * difference - step * (2.0 * slope[0] + slope[1])) / step.powi(2),
+                (step * (slope[0] + slope[1]) - 2.0 * difference) / step.powi(3),
+            ]
+        })
+        .collect();
+    if cubic.iter().flatten().any(|v| !v.is_finite()) {
+        return Err(invalid_profile());
+    }
+    Ok(cubic)
 }
 
 // Cubic extrema can lie between mesh nodes; use them for validation and trapping.

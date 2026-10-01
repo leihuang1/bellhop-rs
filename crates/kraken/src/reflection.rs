@@ -17,9 +17,13 @@ pub(crate) fn validate(case: &CaseDefinition) -> Result<(), &'static str> {
         || case.surface_boundary != SurfaceBoundary::Vacuum
         || case.max_range_m != 0.0
         || case.mesh_reference_frequency_hz.is_some()
+        || case
+            .water_attenuation_db_per_wavelength
+            .iter()
+            .any(|&a| a != 0.0)
     {
         return Err(
-            "tabulated bottoms require single-frequency KRAKENC N/C water, vacuum top and RMax=0 (no B option)",
+            "tabulated bottoms require single-frequency KRAKENC lossless N/C water, vacuum top and RMax=0 (no B option)",
         );
     }
     validate_table(&case.bottom_boundary, case.frequency_hz)

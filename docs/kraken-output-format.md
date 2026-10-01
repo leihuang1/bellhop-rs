@@ -19,9 +19,11 @@ The installed binary is `kraken`; `cargo install --path crates/kraken-cli`
 builds it using the existing static HDF5 dependency.
 
 - `--solver kraken|krakenc` defaults to `kraken`; the engine is not guessed.
-- KRAKENC A-bottom lossless water supports N/C/P/S/fixed-Munk-A interpolation,
-  with the existing bounded refinement and frequency-order contract. This is
-  not water attenuation or a complex-valued SSP input. Original BroadBand/MunkK
+- KRAKENC A-bottom supports complex N/C/P/S water or lossless fixed-Munk-A,
+  with N/M/m/F/W/Q/L material units, optional T/F/B volume loss, and the existing
+  bounded refinement/frequency-order contract. Analytic A remains lossless and
+  rejects volume addition. Loss conversion is per solve frequency; the HDF5
+  schema and exact-input provenance contract are unchanged. Original BroadBand/MunkK
   at 500 Hz still exceeds KRAKENC's 300M root-work ceiling: exit 3 preserves the
   previous output, even after 50 Hz was written to scratch. KRAKEN acceptance
   of the same pair is unchanged.

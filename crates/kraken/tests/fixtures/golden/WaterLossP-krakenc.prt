@@ -1,0 +1,58 @@
+ _________________________________________________
+
+ KRAKENC-Derived WaterLossP: water/material attenuation
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   1
+
+
+     PCHIP approximation to SSP
+     Attenuation units: dB/wavelength
+     VACUUM
+
+       ( # mesh points =   101  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      1500.00      0.00     1.00       0.0300    0.0000
+     43.00      1530.00      0.00     1.00       0.0250    0.0000
+    100.00      1500.00      0.00     1.00       0.0200    0.0000
+
+                              ( RMS roughness =   0.00     m )
+     ACOUSTO-ELASTIC half-space
+    100.00      1700.00      0.00     1.50       0.2500    0.0000
+
+ cLow =   1400.0     m/s      cHigh =   1700.0     m/s
+ RMax =   1000.0     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            1
+    Source   z-coordinates, Sz (m)
+                 75.0000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            3
+    Receiver z-coordinates, Rz (m)
+                 25.0000       75.0000       99.0000
+
+
+ Mesh multiplier   CPU seconds
+ Max. number of restarts in root finder, MaxTries =            1
+        1            0.307E-02s
+ Max. number of restarts in root finder, MaxTries =            1
+        2            0.472E-03s
+ Max. number of restarts in root finder, MaxTries =            1
+        4            0.132E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2043913854     -0.10E-03   1537.047488       1514.92
+    2  0.1993744149     -0.13E-03   1575.725077       1479.33
+    3  0.1897992058     -0.18E-03   1655.219072       1427.58
+ _________________________________________________
+
+ End of environmental file

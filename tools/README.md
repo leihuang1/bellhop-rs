@@ -201,6 +201,26 @@ MunkS/analytic environments with derived FIELD geometry. The optional reader
 checks schema identity, native datatypes, axes and
 all values; numerical tolerances are shared with the direct solver path.
 
+Water-material fixtures also use the multi-frequency comparator, even for one
+frequency. Thirteen `WaterLoss*` inputs run through both engines; `WaterLossLeaky`
+runs through KRAKENC only. For example:
+
+```sh
+case=WaterLossPower
+engine=krakenc
+env="$PWD/crates/kraken/tests/fixtures/$case.env"
+reference="$PWD/target/reference/$case-$engine/$case"
+tools/reference/run-kraken-case.sh "$engine" "$env"
+cargo run --release -p kraken-cli -- run "$env" --solver "$engine" --output "$reference.h5"
+KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_FREQUENCY_SOLVER="$engine" \
+KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
+  cargo test --release -p kraken --test differential_reference \
+    multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+```
+
+These are derived material/volume-loss cases, not original VolAtt acceptance.
+The CI step checks all 27 workflows through both direct and serialized paths.
+
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all
 seventeen single-frequency KRAKEN cases, the KRAKENC derivatives above and

@@ -56,8 +56,21 @@ Analytic f32 grid-step rounding is shared by both Rust mode backends.
 Unmodified `tests/Munk/MunkS.env` (a SCOOTER environment) and `MunkAnalytic.env`
 also pass through KRAKENC, 102 modes/25 pressures each, with a **separately derived**
 coherent `.flp`. Original three-line `.flp` fails in pinned FIELD for both;
-this is not original-pair or SCOOTER acceptance. Water loss, complex-valued SSP,
-rigid complex boundaries, and P/S/A table-boundary combinations remain excluded.
+this is not original-pair or SCOOTER acceptance. The material checkpoint below
+adds complex N/C/P/S water; rigid complex boundaries and P/S/A table-boundary
+combinations remain excluded.
+
+Water-material acceptance uses fourteen **derived** pairs: N/C/P/S complex
+water, N/M/m/F/W/Q/L material units, T/F/B volume attenuation, overlapping
+biological layers, and repeated/unsorted refined frequencies. Thirteen pairs
+run through both KRAKEN and KRAKENC; the leaky PCHIP partial-Munk derivative
+runs through KRAKENC only: 27 workflows, 36 frequency blocks, 404 modes and
+432 pressures. Three pinned runs yield identical `.mod/.shd`; all samples pass
+local API and actual CLI-HDF5 comparisons at unchanged tolerances. Raw goldens,
+hashes and derivation details are committed; fresh CI is configured for all 27.
+Biological attenuation is sampled at SSP knots, not mesh nodes, and excluded
+from half-spaces as in `UpdateHSLoss` (HUGE depth). This is not original upstream
+VolAtt acceptance and does not add physical density gradients or layers.
 
 Discrete multi-frequency regressions use two **derived** Pekeris `.env/.flp`
 pairs (KRAKEN and KRAKENC): unsorted 75/50/62.5 Hz, fractional mesh scaling,

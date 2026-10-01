@@ -131,6 +131,43 @@ fn original_complex_spline_broadband_retains_the_work_limit_and_output() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn cli_round_trips_water_material_results() {
+    let root = directory("water-materials");
+    for name in [
+        "WaterLossN",
+        "WaterLossC",
+        "WaterLossP",
+        "WaterLossS",
+        "WaterLossUnitN",
+        "WaterLossUnitM",
+        "WaterLossUnitF",
+        "WaterLossUnitQ",
+        "WaterLossUnitL",
+        "WaterLossPower",
+        "WaterLossThorp",
+        "WaterLossFg",
+        "WaterLossBio",
+        "WaterLossLeaky",
+    ] {
+        for engine in ["kraken", "krakenc"] {
+            if name == "WaterLossLeaky" && engine == "kraken" {
+                continue;
+            }
+            let env = fixture(name).with_extension("env");
+            let output = root.join(format!("{name}-{engine}.h5"));
+            let process = run(&env, &output, engine, &[]);
+            assert!(
+                process.status.success(),
+                "{}",
+                String::from_utf8_lossy(&process.stderr)
+            );
+            assert_product(&output, &env, &env.with_extension("flp"), engine);
+        }
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[allow(clippy::too_many_lines)]
 fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
     let engine = if solver == "krakenc" {

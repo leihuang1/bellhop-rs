@@ -45,11 +45,13 @@ layer inputs needed to produce a table.
 
 The workspace also contains a separate KRAKEN rewrite: `kraken` currently covers
 validated single-fluid-layer `N/C/P/S` and fixed analytic Munk `A` sound-speed profiles, vacuum or rigid
-surface, modes with a fluid (`A`) or rigid (`R`) bottom and optional fluid-bottom
-`W` attenuation, and coherent line- or point-source FIELD. A separate, narrow
+surface, modes with a fluid (`A`) or rigid (`R`) bottom, water/bottom material
+attenuation, and coherent line- or point-source FIELD. A separate, narrow
 KRAKENC path supports complex modes and coherent line-/point-source FIELD for
-lossless `N/C/P/S/fixed-Munk-A` water over a fluid bottom with optional `W` loss and Richardson
-mesh extrapolation, covering trapped and leaky spectral intervals. Unmodified
+complex `N/C/P/S` or lossless fixed-Munk-A water over a fluid bottom with Richardson
+mesh extrapolation, covering trapped and leaky spectral intervals. Legacy
+N/M/m/F/W/Q/L loss units and T/F/B volume loss are supported; density gradients,
+extra layers and complex rigid boundaries remain excluded. Unmodified
 MunkKleaky, MunkKwb, MunkKbb, sductK and refined calibK `.env/.flp` pairs are
 accepted end to end (1,077 modes and 201,201 complex pressures for sductK).
 Cubic/analytic KRAKENC derivatives and unmodified MunkS/MunkAnalytic environments

@@ -86,6 +86,40 @@ fn complex_cubic_and_analytic_modes_and_field_match_pinned_goldens() {
 }
 
 #[test]
+fn water_material_modes_and_field_match_pinned_goldens() {
+    for name in [
+        "WaterLossN",
+        "WaterLossC",
+        "WaterLossP",
+        "WaterLossS",
+        "WaterLossUnitN",
+        "WaterLossUnitM",
+        "WaterLossUnitF",
+        "WaterLossUnitQ",
+        "WaterLossUnitL",
+        "WaterLossPower",
+        "WaterLossThorp",
+        "WaterLossFg",
+        "WaterLossBio",
+        "WaterLossLeaky",
+    ] {
+        for (engine, solver) in [
+            ("kraken", kraken::ModeSolver::Kraken),
+            ("krakenc", kraken::ModeSolver::Krakenc),
+        ] {
+            if name == "WaterLossLeaky" && engine == "kraken" {
+                continue;
+            }
+            compare_frequencies(
+                &fixtures().join(name).with_extension("env"),
+                &fixtures().join("golden").join(format!("{name}-{engine}")),
+                solver,
+            );
+        }
+    }
+}
+
+#[test]
 fn tabulated_bottom_modes_and_field_match_pinned_goldens() {
     for name in ["TabRefBrcN", "TabRefBrcC", "TabRefIrcN", "TabRefIrcC"] {
         let env = fixtures().join(name).with_extension("env");
@@ -563,7 +597,12 @@ fn compare_modes_at(
         max_binary_loss = max_binary_loss.max(close(
             f64::from(mode.horizontal_wavenumber_rad_per_m.im as f32),
             stored.im,
-            if case.bottom_attenuation_db_per_wavelength > 0.0 {
+            if case.bottom_attenuation_db_per_wavelength > 0.0
+                || case
+                    .water_attenuation_db_per_wavelength
+                    .iter()
+                    .any(|&a| a > 0.0)
+            {
                 1e-10
             } else {
                 0.0

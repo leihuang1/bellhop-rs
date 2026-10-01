@@ -101,6 +101,25 @@ jobs:
           KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK" \
             cargo test --release -p kraken --test differential_reference \
               multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+      - name: Water material modes, FIELD and actual CLI HDF5 differential
+        run: |
+          cargo build --release -p kraken-cli
+          for engine in kraken krakenc; do
+            for case in WaterLossN WaterLossC WaterLossP WaterLossS WaterLossUnitN WaterLossUnitM WaterLossUnitF WaterLossUnitQ WaterLossUnitL WaterLossPower WaterLossThorp WaterLossFg WaterLossBio WaterLossLeaky; do
+              if [ "$case" = WaterLossLeaky ] && [ "$engine" = kraken ]; then continue; fi
+              env="$PWD/crates/kraken/tests/fixtures/$case.env"
+              reference="$PWD/target/reference/$case-$engine/$case"
+              tools/reference/run-kraken-case.sh "$engine" "$env"
+              KRAKEN_FREQUENCY_SOLVER="$engine" KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
+                cargo test --release -p kraken --test differential_reference \
+                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+              target/release/kraken run "$env" --solver "$engine" --output "$reference.h5"
+              KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_FREQUENCY_SOLVER="$engine" \
+              KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
+                cargo test --release -p kraken --test differential_reference \
+                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+            done
+          done
       - name: KRAKEN CLI HDF5 numerical differential
         run: |
           cargo build --release -p kraken-cli

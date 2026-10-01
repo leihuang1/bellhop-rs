@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use num_complex::Complex64;
 
+mod attenuation;
 mod complex_modes;
 pub mod legacy;
 mod modes;
@@ -185,6 +186,9 @@ pub struct CaseDefinition {
     /// Empty for `AnalyticMunk`; otherwise depths from the surface to the interface.
     pub sound_speed_profile: Vec<SoundSpeedPoint>,
     pub water_density_g_cm3: f64,
+    /// Empty for lossless water, otherwise one dB/wavelength value per SSP node.
+    /// Values are evaluated at `frequency_hz` before complex SSP interpolation.
+    pub water_attenuation_db_per_wavelength: Vec<f64>,
     pub bottom_boundary: BottomBoundary,
     /// Zero for a rigid or tabulated bottom (no half-space material).
     pub bottom_sound_speed_mps: f64,
@@ -290,6 +294,19 @@ impl Case {
                 },
             ));
         }
+        let water_loss = &definition.water_attenuation_db_per_wavelength;
+        let loss_invalid = !water_loss.is_empty()
+            && (analytic
+                || water_loss.len() != profile.len()
+                || water_loss
+                    .iter()
+                    .any(|&a| !(0.0..=8.685_889_6 * 2.0 * std::f64::consts::PI).contains(&a)));
+        if loss_invalid {
+            diagnostics.push(error(
+                "water_attenuation_db_per_wavelength",
+                "require one finite nonnegative loss per SSP node, Im(c) <= Re(c); analytic Munk remains lossless",
+            ));
+        }
         if analytic {
             if definition.water_depth_m != 5000.0 {
                 diagnostics.push(error(
@@ -304,7 +321,7 @@ impl Case {
                 ));
             }
         }
-        if !profile_invalid {
+        if !profile_invalid && !loss_invalid {
             match profile::Profile::new(&definition) {
                 Ok(profile) => {
                     if definition.mode_solver == ModeSolver::Kraken
@@ -319,7 +336,7 @@ impl Case {
                     }
                 }
                 Err(report) => diagnostics.push(error(
-                    "sound_speed_profile",
+                    &report.diagnostics()[0].field,
                     &report.diagnostics()[0].message,
                 )),
             }

@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use crate::attenuation::{VolumeLoss, db_per_wavelength};
 use crate::{
     BottomBoundary, Case, CaseDefinition, Diagnostic, DiagnosticReport, Interpolation,
     MAX_VECTOR_LENGTH, ModeSolver, SoundSpeedPoint, SourceGeometry, SurfaceBoundary,
@@ -308,6 +309,7 @@ fn parse_frequency_cases_with_bottom_table(
         surface_boundary: environment.surface_boundary,
         sound_speed_profile: environment.profile,
         water_density_g_cm3: environment.water_density,
+        water_attenuation_db_per_wavelength: Vec::new(),
         bottom_boundary: environment.bottom_boundary,
         bottom_sound_speed_mps: environment.bottom_speed,
         bottom_density_g_cm3: environment.bottom_density,
@@ -330,6 +332,7 @@ fn parse_frequency_cases_with_bottom_table(
         _ => 0,
     };
     let values = table_values
+        + environment.water_attenuation.len()
         + definition.sound_speed_profile.len()
         + definition.mode_sample_depths_m.len()
         + definition.source_depths_m.len()
@@ -358,6 +361,41 @@ fn parse_frequency_cases_with_bottom_table(
         .map(|frequency_hz| {
             let mut input = definition.clone();
             input.frequency_hz = frequency_hz;
+            input.water_attenuation_db_per_wavelength = input
+                .sound_speed_profile
+                .iter()
+                .zip(&environment.water_attenuation)
+                .map(|(p, &a)| {
+                    db_per_wavelength(
+                        environment.attenuation_unit,
+                        &environment.volume_loss,
+                        a,
+                        p.depth_m,
+                        p.sound_speed_mps,
+                        frequency_hz,
+                        environment.water_power_law,
+                    )
+                })
+                .collect();
+            if input
+                .water_attenuation_db_per_wavelength
+                .iter()
+                .all(|&a| a == 0.0)
+            {
+                input.water_attenuation_db_per_wavelength.clear();
+            }
+            if input.bottom_boundary == BottomBoundary::FluidHalfSpace {
+                input.bottom_attenuation_db_per_wavelength = db_per_wavelength(
+                    environment.attenuation_unit,
+                    &environment.volume_loss,
+                    environment.bottom_attenuation,
+                    // UpdateHSLoss excludes depth-local biological layers using HUGE.
+                    f64::MAX,
+                    input.bottom_sound_speed_mps,
+                    frequency_hz,
+                    environment.bottom_power_law,
+                );
+            }
             Case::from_definition(input)
                 .and_then(|case| {
                     if case.mesh_reference_frequency_hz.is_some() {
@@ -371,7 +409,9 @@ fn parse_frequency_cases_with_bottom_table(
                             "water_depth_m" | "mesh_points" => {
                                 (&env_locations, env_path, "water_header")
                             }
-                            "sound_speed_profile" | "water_density_g_cm3" => {
+                            "sound_speed_profile"
+                            | "water_density_g_cm3"
+                            | "water_attenuation_db_per_wavelength" => {
                                 (&env_locations, env_path, "sound_speed_profile")
                             }
                             "bottom_boundary"
@@ -730,6 +770,11 @@ struct Environment {
     surface_boundary: SurfaceBoundary,
     profile: Vec<SoundSpeedPoint>,
     water_density: f64,
+    water_attenuation: Vec<f64>,
+    attenuation_unit: u8,
+    volume_loss: VolumeLoss,
+    water_power_law: (f64, f64, f64),
+    bottom_power_law: (f64, f64, f64),
     bottom_boundary: BottomBoundary,
     bottom_speed: f64,
     bottom_density: f64,
@@ -770,8 +815,8 @@ fn parse_environment_with_solver(
     let option = |index| options.text.as_bytes().get(index).copied().unwrap_or(b' ');
     if !matches!(option(0), b'N' | b'C' | b'P' | b'S' | b'A')
         || !matches!(option(1), b'V' | b'R')
-        || !matches!(option(2), b'N' | b'W')
-        || option(3) != b' '
+        || !matches!(option(2), b'N' | b'W' | b'M' | b'm' | b'F' | b'Q' | b'L')
+        || !matches!(option(3), b' ' | b'T' | b'F' | b'B')
         || (mode_solver == ModeSolver::Kraken && option(4) != b' ')
         || (mode_solver == ModeSolver::Krakenc && !matches!(option(4), b' ' | b'.'))
         || !matches!(option(5), b' ' | b'B')
@@ -784,7 +829,7 @@ fn parse_environment_with_solver(
     {
         return Err(one(
             "KR0202",
-            "requires N/C/P/S or fixed analytic A interpolation, vacuum or rigid surface, N/W attenuation without water loss, and optional B frequencies",
+            "requires N/C/P/S or fixed analytic A interpolation, vacuum or rigid surface, N/W/M/m/F/Q/L attenuation, optional T/F/B volume loss and B frequencies",
             "top_options",
             path,
             options.line,
@@ -799,12 +844,61 @@ fn parse_environment_with_solver(
         b'S' => Interpolation::Spline,
         _ => Interpolation::AnalyticMunk,
     };
+    let volume_loss = match option(3) {
+        b'T' => VolumeLoss::Thorp,
+        b'F' => {
+            let p = reader.numbers("volume_attenuation", 4)?;
+            if p[0] <= -273.0 || p[1] < 0.0 || !(0.0..=14.0).contains(&p[2]) || p[3] < 0.0 {
+                return Err(reader_error(
+                    &reader,
+                    "KR0201",
+                    "require T > -273, salinity >= 0, 0 <= pH <= 14 and mean depth >= 0",
+                    "volume_attenuation",
+                ));
+            }
+            VolumeLoss::FrancoisGarrison([p[0], p[1], p[2], p[3]])
+        }
+        b'B' => {
+            let count = reader.count("bio_layers.count")?;
+            if count > 200 {
+                return Err(reader_error(
+                    &reader,
+                    "KR0201",
+                    "at most 200 biological layers",
+                    "bio_layers.count",
+                ));
+            }
+            let mut layers = Vec::with_capacity(count);
+            for _ in 0..count {
+                let p = reader.numbers("bio_layers", 5)?;
+                if p[0] < 0.0 || p[1] < p[0] || p[2] <= 0.0 || p[3] <= 0.0 || p[4] < 0.0 {
+                    return Err(reader_error(
+                        &reader,
+                        "KR0201",
+                        "require 0 <= top <= bottom, positive resonance/Q and nonnegative a0",
+                        "bio_layers",
+                    ));
+                }
+                layers.push([p[0], p[1], p[2], p[3], p[4]]);
+            }
+            VolumeLoss::Biological(layers)
+        }
+        _ => VolumeLoss::None,
+    };
+    if interpolation == Interpolation::AnalyticMunk && !matches!(volume_loss, VolumeLoss::None) {
+        return Err(reader_error(
+            &reader,
+            "KR0202",
+            "analytic Munk water remains lossless; volume attenuation is not supported with A",
+            "top_options",
+        ));
+    }
     let header = reader.record("water_header")?;
-    if header.tokens.len() != 3 {
+    if header.tokens.len() != if option(2) == b'm' { 5 } else { 3 } {
         return Err(reader.record_error(
             &header,
             "water_header",
-            "expected mesh count, roughness, and depth",
+            "expected mesh count, roughness, depth (plus beta and transition frequency for m)",
         ));
     }
     let mesh_points = header.tokens[0].text.parse::<usize>().map_err(|_| {
@@ -812,6 +906,7 @@ fn parse_environment_with_solver(
     })?;
     let surface_roughness = number(&header.tokens[1], path, "surface_roughness")?;
     let water_depth_m = number(&header.tokens[2], path, "water_depth_m")?;
+    let water_power_law = read_power_law(&reader, &header, 3, option(2), frequency_hz)?;
     if surface_roughness != 0.0 {
         return Err(reader.record_error(&header, "surface_roughness", "requires a smooth surface"));
     }
@@ -849,14 +944,14 @@ fn parse_environment_with_solver(
             }
             if (points.is_empty() && point[0] != 0.0)
                 || point[2] != 0.0
-                || point[4] != 0.0
+                || point[4] < 0.0
                 || point[5] != 0.0
                 || points.first().is_some_and(|first| point[3] != first[3])
             {
                 return Err(reader.record_error(
                     &record,
                     "sound_speed_profile",
-                    "requires a lossless, constant-density fluid water column starting at 0 m",
+                    "requires constant-density fluid water starting at 0 m, no shear and nonnegative absorption",
                 ));
             }
             points.push(point);
@@ -883,17 +978,16 @@ fn parse_environment_with_solver(
     let water_density = points.first().map_or(1.0, |point| point[3]);
 
     let bottom_option = reader.record("bottom_options")?;
-    if bottom_option.tokens.len() != 2
+    if bottom_option.tokens.len() != if option(2) == b'm' { 4 } else { 2 }
         || !matches!(bottom_option.tokens[0].text.as_str(), "A" | "R" | "F" | "P")
         || (mode_solver == ModeSolver::Kraken
             && matches!(bottom_option.tokens[0].text.as_str(), "F" | "P"))
         || number(&bottom_option.tokens[1], path, "bottom_roughness")? != 0.0
-        || (bottom_option.tokens[0].text == "R" && option(2) != b'N')
     {
         return Err(reader.record_error(
             &bottom_option,
             "bottom_options",
-            "requires smooth A/R bottom (R without loss units), or KRAKENC F/P table bottom",
+            "requires smooth A/R bottom, or KRAKENC F/P table bottom",
         ));
     }
     if matches!(bottom_option.tokens[0].text.as_str(), "F" | "P") && option(4) == b'.' {
@@ -903,6 +997,7 @@ fn parse_environment_with_solver(
             "tabulated bottoms require blank restart option (no random restarts)",
         ));
     }
+    let bottom_power_law = read_power_law(&reader, &bottom_option, 2, option(2), frequency_hz)?;
     let bottom_boundary = match bottom_option.tokens[0].text.as_str() {
         "R" => BottomBoundary::Rigid,
         "F" => BottomBoundary::Reflection(Vec::new()),
@@ -938,11 +1033,7 @@ fn parse_environment_with_solver(
         for (index, token) in bottom_record.tokens.iter().enumerate() {
             bottom[index] = number(token, path, "bottom_half_space")?;
         }
-        if bottom[0] != water_depth_m
-            || bottom[2] != 0.0
-            || bottom[5] != 0.0
-            || (option(2) != b'W' && bottom[4] != 0.0)
-        {
+        if bottom[0] != water_depth_m || bottom[2] != 0.0 || bottom[5] != 0.0 || bottom[4] < 0.0 {
             return Err(reader_error(
                 &reader,
                 "KR0202",
@@ -994,6 +1085,11 @@ fn parse_environment_with_solver(
         } else {
             SurfaceBoundary::Rigid
         },
+        water_attenuation: points.iter().map(|p| p[4]).collect(),
+        attenuation_unit: option(2),
+        volume_loss,
+        water_power_law,
+        bottom_power_law,
         profile: points
             .into_iter()
             .map(|point| SoundSpeedPoint {
@@ -1014,6 +1110,32 @@ fn parse_environment_with_solver(
         receiver_depths,
         locations: reader.locations,
     })
+}
+
+fn read_power_law(
+    reader: &Reader,
+    record: &Record,
+    start: usize,
+    unit: u8,
+    reference: f64,
+) -> Result<(f64, f64, f64), DiagnosticReport> {
+    if unit != b'm' {
+        return Ok((reference, 1.0, reference));
+    }
+    let beta = number(&record.tokens[start], &reader.path, "attenuation_power_law")?;
+    let transition = number(
+        &record.tokens[start + 1],
+        &reader.path,
+        "attenuation_power_law",
+    )?;
+    if beta < 0.0 || transition <= 0.0 {
+        return Err(reader.record_error(
+            record,
+            "attenuation_power_law",
+            "require beta >= 0 and transition frequency > 0",
+        ));
+    }
+    Ok((reference, beta, transition))
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
@@ -1586,7 +1708,7 @@ mod tests {
     }
 
     #[test]
-    fn rigid_bottom_has_no_half_space_record_or_loss_unit() {
+    fn rigid_bottom_has_no_half_space_record_but_allows_water_loss_units() {
         let env = include_str!("../tests/fixtures/PekerisHard.env");
         let unexpected = env.replace("'R' 0.0\n", "'R' 0.0\n100.0 1700.0 0.0 1.5 0.0 0.0 /\n");
         assert_eq!(
@@ -1597,20 +1719,13 @@ mod tests {
                 .field,
             "phase_speed_limits"
         );
-        let wrong_unit = env.replace("'SVN'", "'SVW'");
-        assert_eq!(
-            parse_environment(&wrong_unit, Path::new("case.env"))
-                .err()
-                .unwrap()
-                .diagnostics()[0]
-                .field,
-            "bottom_options"
-        );
+        let water_unit = env.replace("'SVN'", "'SVW'");
+        assert!(parse_environment(&water_unit, Path::new("case.env")).is_ok());
     }
 
     #[test]
     fn unsupported_solver_and_field_options_are_rejected() {
-        let env = include_str!("../tests/fixtures/Pekeris.env").replace("'NVN'", "'NVM'");
+        let env = include_str!("../tests/fixtures/Pekeris.env").replace("'NVN'", "'NVX'");
         let error = parse_environment(&env, Path::new("Pekeris.env"))
             .err()
             .expect("unsupported attenuation unit should be rejected");
@@ -1658,7 +1773,7 @@ mod tests {
         );
 
         let lossy_water = include_str!("../tests/fixtures/MunkBottomLoss.env")
-            .replace("200.0 1530.29 /", "200.0 1530.29 0.0 1.0 0.1 /");
+            .replace("200.0 1530.29 /", "200.0 1530.29 0.0 1.0 -0.1 /");
         assert_eq!(
             parse_environment(&lossy_water, Path::new("MunkBottomLoss.env"))
                 .err()
@@ -1677,15 +1792,19 @@ mod tests {
                 .field,
             "bottom_options"
         );
-        let wrong_units =
+        let excessive_loss =
             include_str!("../tests/fixtures/MunkBottomLoss.env").replace("'NVW'", "'NVN'");
         assert_eq!(
-            parse_environment(&wrong_units, Path::new("MunkBottomLoss.env"))
-                .err()
-                .unwrap()
-                .diagnostics()[0]
+            parse_case(
+                &excessive_loss,
+                include_str!("../tests/fixtures/MunkBottomLoss.flp"),
+                Path::new("MunkBottomLoss.env"),
+                Path::new("MunkBottomLoss.flp")
+            )
+            .unwrap_err()
+            .diagnostics()[0]
                 .field,
-            "bottom_half_space"
+            "bottom_attenuation_db_per_wavelength"
         );
 
         let flp = include_str!("../tests/fixtures/Pekeris.flp").replace("'X OC'", "'S OC'");

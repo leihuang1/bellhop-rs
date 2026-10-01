@@ -1,7 +1,7 @@
 // Adapted from Acoustics Toolbox v2023.5 Kraken/krakenc.f90,
 // Kraken/InverseIterationMod.f90 and misc/RootFinderSecantMod.f90.
 // Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
-//! Lossless N/C/P/S/fixed-Munk-A water over a fluid half-space,
+//! N/C/P/S complex water or lossless fixed-Munk-A over a fluid half-space,
 //! vacuum surface and optional Richardson mesh extrapolation; N/C table bottoms.
 use crate::profile::Profile;
 use crate::solver::error;
@@ -25,7 +25,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     {
         return Err(error(
             "KR0302",
-            "KRAKENC requires lossless N/C/P/S/fixed-Munk-A water, a vacuum surface and an A fluid or validated F/P table bottom",
+            "KRAKENC requires N/C/P/S complex or lossless fixed-Munk-A water, a vacuum surface and an A fluid or validated F/P table bottom",
             "mode_solver",
         ));
     }
@@ -51,6 +51,10 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         ));
     }
 
+    let water_loss = case
+        .water_attenuation_db_per_wavelength
+        .iter()
+        .any(|&a| a != 0.0);
     let mut table: Vec<Vec<Complex64>> = Vec::new();
     let mut modes = Vec::new();
     let mut work = 0;
@@ -61,28 +65,32 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         let mut min_speed = f64::INFINITY;
         let b: Vec<_> = (0..=n)
             .map(|i| {
-                let c = profile.mesh_speed(i, n);
-                min_speed = min_speed.min(c);
-                if case.bottom_boundary.is_tabulated() {
-                    -2.0 + (Complex64::new(h * h * omega.powi(2), 0.0)
-                        / Complex64::new(c, 0.0).powi(2))
-                    .re
+                let c = profile.mesh_complex_speed(i, n);
+                min_speed = min_speed.min(c.re);
+                if water_loss {
+                    -2.0 + Complex64::new(h * h * omega.powi(2), 0.0) / c.powi(2)
+                } else if case.bottom_boundary.is_tabulated() {
+                    Complex64::new(
+                        -2.0 + (Complex64::new(h * h * omega.powi(2), 0.0) / c.powi(2)).re,
+                        0.0,
+                    )
                 } else {
-                    -2.0 + h * h * (omega / c).powi(2)
+                    Complex64::new(-2.0 + h * h * (omega / c.re).powi(2), 0.0)
                 }
             })
             .collect();
-        let inside_c = pekeris_root(Complex64::new(
-            omega * omega * h * h / (2.0 + b[b.len() - 1]),
-            0.0,
-        ));
+        let inside_c = pekeris_root(if water_loss {
+            Complex64::new(omega * omega * h * h, 0.0) / (2.0 + b[b.len() - 1])
+        } else {
+            Complex64::new(omega * omega * h * h / (2.0 + b[b.len() - 1].re), 0.0)
+        });
         let bottom = Bottom {
             case,
             k2: bottom_k2,
             water_k2: (omega * omega / (inside_c * inside_c)).re,
         };
         let water_k2 = (omega / min_speed).powi(2);
-        if !water_k2.is_finite() || b.iter().any(|x| !x.is_finite()) {
+        if !water_k2.is_finite() || b.iter().any(|x| !x.re.is_finite() || !x.im.is_finite()) {
             return Err(error(
                 "KR0302",
                 "mesh coefficients exceed numeric range",
@@ -281,7 +289,7 @@ impl Bottom<'_> {
 fn dispersion(
     x: Complex64,
     roots: &[Complex64],
-    b: &[f64],
+    b: &[Complex64],
     h: f64,
     water_rho: f64,
     bottom: &Bottom<'_>,
@@ -343,7 +351,7 @@ fn tabulated_shoot_step(
 fn secant(
     mut x: Complex64,
     roots: &[Complex64],
-    b: &[f64],
+    b: &[Complex64],
     h: f64,
     water_rho: f64,
     bottom: &Bottom<'_>,
@@ -493,7 +501,7 @@ fn inverse_iteration(d: &[Complex64], e: &[f64]) -> Result<Vec<Complex64>, Diagn
 )]
 fn mode(
     case: &Case,
-    b: &[f64],
+    b: &[Complex64],
     h: f64,
     omega: f64,
     bottom_c: Complex64,

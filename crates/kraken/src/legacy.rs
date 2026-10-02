@@ -2469,6 +2469,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(incoherent.mode_addition, crate::ModeAddition::Incoherent);
-        assert!(incoherent.source_pattern.is_empty());
+        assert_eq!(incoherent.source_pattern, []);
     }
 }

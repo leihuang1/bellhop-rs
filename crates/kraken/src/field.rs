@@ -404,7 +404,7 @@ fn integrate(
     let w = if next == segment {
         0.0
     } else {
-        (0.5 * (right + left) - ranges[segment]) / (ranges[next] - ranges[segment])
+        (right.midpoint(left) - ranges[segment]) / (ranges[next] - ranges[segment])
     };
     for (m, sum) in integral.iter_mut().enumerate() {
         let k = interpolate(
@@ -440,9 +440,9 @@ fn coupled(
     let mut previous = 0.0;
     for (ir, &range) in first.receiver_ranges_m.iter().enumerate() {
         while segment + 1 < modes.len()
-            && range > 0.5 * (case.ranges_m[segment] + case.ranges_m[segment + 1])
+            && range > case.ranges_m[segment].midpoint(case.ranges_m[segment + 1])
         {
-            let boundary = 0.5 * (case.ranges_m[segment] + case.ranges_m[segment + 1]);
+            let boundary = case.ranges_m[segment].midpoint(case.ranges_m[segment + 1]);
             advance(&mut a, &modes[segment], boundary - previous);
             a = project(
                 &case.profiles[segment],
@@ -512,7 +512,11 @@ fn gamma(case: &Case, mode: &crate::NormalMode, top: bool) -> Complex32 {
     single(crate::complex_modes::pekeris_root(double(k * k - kb)))
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::too_many_lines,
+    clippy::manual_midpoint
+)] // preserve PLeft's f32 density-quadrature grouping
 fn project(
     left: &Case,
     right: &Case,

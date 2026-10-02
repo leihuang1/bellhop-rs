@@ -1280,7 +1280,7 @@ fn parse_environment_with_solver(
 
 #[allow(clippy::float_cmp, clippy::too_many_lines, clippy::needless_borrow)]
 fn read_environment(
-    mut reader: &mut Reader,
+    reader: &mut Reader,
     mode_solver: ModeSolver,
 ) -> Result<Environment, DiagnosticReport> {
     let path = reader.path.clone();
@@ -1398,7 +1398,7 @@ fn read_environment(
             ));
         }
         read_half_space(
-            &mut reader,
+            reader,
             "surface_half_space",
             0.0,
             [0.0, 1500.0, 0.0, 1.0, 0.0, 0.0],
@@ -1425,7 +1425,7 @@ fn read_environment(
     let mut profile_points = 0;
     for index in 0..medium_count {
         let (medium, power, last, point_count) = read_finite_layer(
-            &mut reader,
+            reader,
             interpolation,
             option(2),
             frequency_hz,
@@ -1575,7 +1575,7 @@ fn read_environment(
         } else {
             1
         };
-        bottom = read_half_space(&mut reader, "bottom_half_space", top, defaults, minimum)?;
+        bottom = read_half_space(reader, "bottom_half_space", top, defaults, minimum)?;
         if bottom[2] > 0.0 {
             bottom_boundary = crate::Boundary::ElasticHalfSpace {
                 shear_sound_speed_mps: bottom[2],
@@ -1585,8 +1585,8 @@ fn read_environment(
     }
     let limits = reader.numbers("phase_speed_limits", 2)?;
     let max_range_m = reader.scalar("max_range_km")? * 1000.0;
-    let source_depths = read_vector(&mut reader, "mode_source_depths_m", true)?;
-    let receiver_depths = read_vector(&mut reader, "mode_receiver_depths_m", true)?;
+    let source_depths = read_vector(reader, "mode_source_depths_m", true)?;
+    let receiver_depths = read_vector(reader, "mode_receiver_depths_m", true)?;
     let broadband = option(5) == b'B';
     let frequencies_hz = if broadband {
         let count = reader.count("frequencies_hz.count")?;
@@ -1599,7 +1599,7 @@ fn read_environment(
             ));
         }
         // Unlike ReadVector, ReadfreqVec/SubTab preserves frequency order.
-        let frequencies = read_vector_values(&mut reader, "frequencies_hz", count, false)?;
+        let frequencies = read_vector_values(reader, "frequencies_hz", count, false)?;
         if frequencies.iter().any(|&f| f <= 0.0) {
             return Err(reader_error(
                 &reader,

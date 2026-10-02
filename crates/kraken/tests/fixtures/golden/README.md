@@ -1021,7 +1021,7 @@ ff6c4c3516e0f7471793f9ac2e7708d61d84db0db84fd1ab513383b40214fa07  tests/TLslices
 | LayeredFluidThreeWide | both | 5 | 63 |
 | LayeredFluidPlane | both | 6 | 63 |
 | LayeredFluidPower (75/50/62.5/50 Hz) | both | 8/5/7/5 | 252 |
-| LayeredFluidLeaky (75/50/62.5/50 Hz) | KRAKENC | 11/8/9/8 | 252 |
+| LayeredFluidLeaky (75/50/62.5/50 Hz) | KRAKENC | 11/7/9/7 | 252 |
 | LayeredFluidBio (500 Hz) | both | 53 | 63 |
 | LayeredFluidFractional | both | 5 | 63 |
 | LayeredDoubleRefined | both | 42 | 501 |

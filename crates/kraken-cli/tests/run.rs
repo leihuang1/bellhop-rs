@@ -295,6 +295,40 @@ fn cli_round_trips_elastic_half_spaces() {
 }
 
 #[test]
+fn elastic_metadata_checks_the_last_frequency() {
+    let root = directory("elastic-metadata-corruption");
+    let env = fixture("ElasticHalfPower.env");
+    let output = root.join("power.h5");
+    let process = run(&env, &output, "krakenc", &[]);
+    assert!(
+        process.status.success(),
+        "{}",
+        String::from_utf8_lossy(&process.stderr)
+    );
+    // Avoid a read-to-write reopen: parallel CLI children can inherit native read handles.
+    let file = File::open_rw(&output).unwrap();
+    assert_product(&output, &env, &env.with_extension("flp"), "krakenc");
+    file.group("frequencies/3")
+        .unwrap()
+        .attr("bottom_shear_sound_speed_mps")
+        .unwrap()
+        .write_scalar(&1999.0_f64)
+        .unwrap();
+    file.flush().unwrap();
+    assert!(
+        std::panic::catch_unwind(|| assert_product(
+            &output,
+            &env,
+            &env.with_extension("flp"),
+            "krakenc"
+        ))
+        .is_err()
+    );
+    drop(file);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn elastic_failures_preserve_output_and_remove_scratch() {
     let root = directory("elastic-failures");
     let output = root.join("previous.h5");

@@ -48,9 +48,10 @@ validated range-independent `N/C/P/S` fluid stacks and single-layer fixed analyt
 Munk `A` profiles, smooth V/R/A outer boundaries, material/volume attenuation,
 and coherent line- or point-source FIELD. A separate, narrow
 KRAKENC path supports complex modes and coherent line-/point-source FIELD for
-complex `N/C/P/S` or lossless fixed-Munk-A water over a fluid bottom with Richardson
+complex `N/C/P/S` or lossless fixed-Munk-A fluid stacks with Richardson
 mesh extrapolation, covering trapped and leaky spectral intervals. Legacy
-N/M/m/F/W/Q/L loss units and T/F/B volume loss are supported; density gradients within a layer and elastic media remain excluded. Fluid
+N/M/m/F/W/Q/L loss units and T/F/B volume loss are supported; density gradients
+within a layer and finite elastic layers remain excluded. Fluid
 interfaces may have density, sound-speed and loss jumps; each layer has its own
 mesh, with all budgets shared across the stack. Both backends accept smooth V/R/A top and
 bottom combinations; KRAKENC also accepts a propagating, single-frequency N/C
@@ -69,6 +70,11 @@ A [known wide three-layer KRAKENC refinement gap](docs/kraken-layered-refinement
 remains outside acceptance as a non-blocking release exception: Rust can return
 five modes where the pinned reference returns four. CLI success is not a guarantee
 of arbitrary-input reference parity; the extra mode may affect coherent FIELD.
+[Elastic half-spaces](docs/kraken-elastic-halfspaces.md) now cover KRAKENC top/bottom
+and KRAKEN bottom A boundaries: 27 full API/CLI-HDF5 workflows, including original
+TLslices `scholte/normal/flused` (415 modes, 4,707 pressures). KRAKEN elastic top
+is explicitly rejected; KRAKEN retains the reference's elastic-loss omission,
+so use KRAKENC for elastic attenuation. Finite solids remain the next block.
 Analytic Munk and F/P/TRC boundaries remain single-layer.
 `legacy::load_frequency_cases` supports discrete multi-frequency KRAKEN/KRAKENC
 runs; original `BroadBand/MunkK` passes through KRAKEN at 50 and 500 Hz (102/1,023 modes,

@@ -21,8 +21,8 @@ builds it using the existing static HDF5 dependency.
 - `--solver kraken|krakenc` defaults to `kraken`; the engine is not guessed.
 - Both backends accept 1..500 contiguous constant-density fluid layers with
   independent meshes, N/C/P/S interpolation and material/volume attenuation.
-  Density/speed/loss may jump at interfaces; density gradients and shear remain
-  unsupported. Analytic Munk and F/P/TRC table combinations remain single-layer.
+  Density/speed/loss may jump at interfaces; density gradients and finite-layer
+  shear remain unsupported. Analytic Munk and F/P/TRC combinations remain single-layer.
   Mesh/profile/shape/work budgets are totals for the stack, not per layer.
 - Both backends accept smooth V/R/A boundaries; real KRAKEN stays trapped
   at each A half-space. KRAKENC supports complex N/C/P/S or lossless fixed-Munk-A,
@@ -33,6 +33,12 @@ builds it using the existing static HDF5 dependency.
   at 500 Hz still exceeds KRAKENC's 300M root-work ceiling: exit 3 preserves the
   previous output, even after 50 Hz was written to scratch. KRAKEN acceptance
   of the same pair is unchanged.
+- N/C/P/S fluid stacks also support [elastic A half-spaces](kraken-elastic-halfspaces.md):
+  bottom through both engines, top through KRAKENC only. KRAKEN elastic top is
+  rejected (exit 2); finite solids and elastic/table/analytic combinations remain
+  unsupported. KRAKEN retains the reference's cs cutoff and **omitted elastic
+  material attenuation**; use KRAKENC for elastic attenuation. Requested P/S loss
+  and the real/complex model are recorded separately in additive HDF5 metadata.
 - KRAKENC `F`/`P` bottoms additionally consume same-stem `.brc`/`.irc`; this
   slice is single-frequency, RMax=0, lossless N/C water and vacuum top. Missing,
   malformed or unaccepted table combinations fail explicitly. Rust does not
@@ -48,7 +54,8 @@ builds it using the existing static HDF5 dependency.
   of inputs are rejected as destinations even with that flag.
 - Exit codes: `0` success, `2` input/argument failure, `3` numerical failure,
   `4` output/quota/I/O failure. Numerical errors identify the zero-based
-  frequency index and Hz value. Unsupported physics is rejected, not approximated.
+  frequency index and Hz value. Unsupported combinations are rejected; the
+  pinned KRAKEN elastic-loss limitation above is explicitly retained.
 
 Exit 0 and successful HDF5 publication certify completion, not fixed-oracle
 parity for arbitrary inputs. The documented
@@ -142,6 +149,20 @@ Each `/frequencies/i` group has attributes:
 - `surface_boundary`: UTF-8 `V`, `R`, `A` or `F` (additive v1 metadata);
 - `bottom_boundary`: UTF-8 `V`, `A`, `R`, `F` or `P` (additive v1 metadata).
 
+An elastic A boundary additionally records optional per-frequency attributes,
+with prefix `surface_` or `bottom_`:
+
+- `half_space_material`: UTF-8 `elastic` (the boundary code stays `A`);
+- `sound_speed_mps`, `shear_sound_speed_mps`, `density_g_cm3`: float64 material;
+- `attenuation_db_per_wavelength`, `shear_attenuation_db_per_wavelength`: float64
+  requested losses converted for this solve frequency, not inferred mode losses;
+- `elastic_attenuation_model`: UTF-8 `reference_real` (KRAKEN's ignored elastic
+  material attenuation) or `complex` (KRAKENC).
+
+These additive v1 attributes do not change datasets, schema identity or BELLHOP
+v3. Older v1 files and nonelastic boundaries may omit them. They are material
+provenance, not certification of arbitrary-input numerical parity.
+
 Each frequency also has `/frequencies/i/media/0`, `/1`, ... in depth order.
 Each layer group carries float64 `top_depth_m`, `bottom_depth_m`, `density_g_cm3`
 and uint64 `requested_mesh_points`. These are finite layers, not the A half-spaces;
@@ -164,8 +185,9 @@ attribute:
 | `eigenfunction_real`, `eigenfunction_imaginary` | `[M,D]` | `reference_normalized` |
 
 `eigenfunction_axis_order` is `mode,sample_depth`. `normalization` identifies
-the pinned AT density-weighted normalization, including a fluid half-space
-where present; eigenvectors retain their arbitrary unit phase. The
+the pinned AT density-weighted normalization, including the fluid/elastic
+boundary-admittance derivative where present; eigenvectors retain their arbitrary
+unit phase. Samples are fluid pressure, not solid displacement or strain. The
 `reference_normalized` unit is not an absolute pressure unit. Stored shape
 values preserve the Rust result, including its reference complex32 sampling
 rounding; float64 storage does not restore precision already rounded away.

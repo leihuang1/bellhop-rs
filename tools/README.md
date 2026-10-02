@@ -253,6 +253,15 @@ failure, not a skipped passing workflow. Finite solid layers remain excluded.
 See [scope/provenance](../docs/kraken-elastic-halfspaces.md) and
 `golden/elastic-halfspace.sha256` (117 input/artifact records).
 
+Homogeneous finite caps additionally use 25 pairs / 33 full workflows / 36
+frequency blocks (827 modes, 9,276 pressures), including byte-identical original
+TLslices elsed/ice with official fieldbat.flp. Their 149-record
+`golden/finite-elastic.sha256` locks input/artifact provenance. The existing
+multi-frequency comparator now checks absolute fluid intervals and all finite
+solid HDF5 material attributes; finite loss uses the existing lossy tolerance,
+not a relaxed comparison. KRAKENC supports fluid stacks; KRAKEN finite solids
+explicitly require one fluid. See [finite-cap limits and real-stiffness semantics](../docs/kraken-finite-elastic-layers.md).
+
 `python3 tools/reference/probe-layered-refinement.py` is a **diagnostic-only**
 experiment for the open three-layer refinement gap. It runs the unmodified
 oracle, a zero-perturbation control and ±256-ULP seed probes in a disposable

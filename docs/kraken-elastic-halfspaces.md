@@ -99,9 +99,10 @@ probe also failed the strict checks (KRAKEN inverse iteration; KRAKENC print
 precision). Neither probe is a committed/accepted fixture; the comparator was
 not relaxed and neither proves low-speed interface-wave acceptance.
 
-Next elastic blocks must implement and independently validate finite solid
-compound-matrix transfer and any KRAKEN top search change. Original `elsed` and
-`ice` remain rejected for finite shear media. Multi-profile FIELD, JSON/HTTP,
+The subsequent [homogeneous finite-cap block](kraken-finite-elastic-layers.md)
+now validates compound-matrix transfer and original `elsed/ice` through both
+engines, FIELD and actual CLI/HDF5. Graded/interleaved solids and KRAKEN
+elastic-top-half-space isolation remain later work. Multi-profile FIELD, JSON/HTTP,
 BOUNCE generation and time-domain synthesis remain later work. The existing
 [wide layered refinement exception](kraken-layered-refinement-gap.md) is unchanged
 and is not a waiver for new elastic failures.

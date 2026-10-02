@@ -35,3 +35,5 @@
 | `Kraken/BCImpedance{c}Mod.f90` elastic A half-space formula | `kraken::elastic::half_space` | KRAKEN bottom / KRAKENC top+bottom, full modes/FIELD/CLI-HDF5 differential verified |
 | `Kraken/kraken.f90::{FUNCT,AcousticLayers}` elastic-bottom mode count | `kraken::modes::Mesh::elastic_count` | Verified half-space subset; KRAKEN elastic top explicitly rejected |
 | `Kraken/kraken{c}.f90::Normalize` half-space admittance derivative | `kraken::{modes,complex_modes}` | Real/complex elastic half-space normalization verified; pinned group/loss limitations retained |
+| `KrakenField/EvaluateMod.f90::Evaluate` | `kraken::solver::synthesize_field` | Single-profile X/R/S and coherent/incoherent addition verified |
+| `misc/beampattern.f90::ReadPat` + `interp1` | `kraken::legacy` + `kraken::solver` | SBP parsing, dB conversion and take-off-angle shading verified |

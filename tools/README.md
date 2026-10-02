@@ -77,6 +77,21 @@ for case in MunkKleaky MunkKwb MunkKbb sductK calibK; do
 done
 ```
 
+Reproduce the three fixed single-profile FIELD-extension paths (the helper
+copies `.sbp` along with other same-stem resources):
+
+```sh
+for mapping in 'FieldScaled kraken' 'FieldPattern krakenc' 'FieldIncoherent krakenc'; do
+  set -- $mapping
+  tools/reference/run-kraken-case.sh "$2" "crates/kraken/tests/fixtures/$1.env"
+  KRAKEN_FREQUENCY_SOLVER="$2" \
+  KRAKEN_DIFFERENTIAL_ENV="$PWD/crates/kraken/tests/fixtures/$1.env" \
+  KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/$1-$2/$1" \
+    cargo test --release -p kraken --test differential_reference \
+      multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+done
+```
+
 KRAKENC P/S/fixed-Munk-A interpolation uses the same lossless `Profile`; four
 cubic/analytic fixtures above compare full modes and FIELD. `MunkS.env` is an
 upstream **SCOOTER environment**, not an original KRAKENC/FIELD pair. It and

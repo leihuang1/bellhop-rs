@@ -57,12 +57,27 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     }
     let mut table: Vec<Vec<f64>> = Vec::new();
     let mut modes = Vec::new();
+    let mut seed_meshes = Vec::new();
     let mut work = 0_usize;
     for set in 0..5 {
         let multiplier = 1 << set;
         let layers = crate::layers::mesh_layers(case, multiplier)?;
-        let mesh = Mesh::new(case, &profiles, layers, omega, bottom_k2, bottom_complex_k2)?;
-        let roots = mesh.roots(&mut work)?;
+        let mut mesh = Mesh::new(case, &profiles, layers, omega, bottom_k2, bottom_complex_k2)?;
+        mesh.top_solids = crate::elastic::SolidMesh::build(case, multiplier, true, true)?;
+        mesh.bottom_solids = crate::elastic::SolidMesh::build(case, multiplier, false, true)?;
+        let roots = if crate::elastic::has_layers(case) {
+            mesh.solid_roots(&seed_meshes, &mut work)?
+        } else {
+            mesh.roots(&mut work)?
+        };
+        if crate::elastic::has_layers(case) {
+            seed_meshes.push((
+                mesh.top_solids
+                    .first()
+                    .map_or(mesh.h, crate::elastic::SolidMesh::spacing),
+                roots.iter().map(|&x| Complex64::new(x, 0.0)).collect(),
+            ));
+        }
         if set == 0 {
             modes = roots
                 .iter()
@@ -138,6 +153,8 @@ struct Mesh<'a> {
     b1c: Vec<f64>,
     layers: Vec<crate::layers::MeshLayer>,
     min_speed: f64,
+    top_solids: Vec<crate::elastic::SolidMesh>,
+    bottom_solids: Vec<crate::elastic::SolidMesh>,
 }
 
 impl<'a> Mesh<'a> {
@@ -222,6 +239,8 @@ impl<'a> Mesh<'a> {
             b1c,
             layers,
             min_speed,
+            top_solids: Vec::new(),
+            bottom_solids: Vec::new(),
         })
     }
 
@@ -230,6 +249,10 @@ impl<'a> Mesh<'a> {
     }
 
     fn bottom_admittance(&self, x: f64) -> f64 {
+        if !self.bottom_solids.is_empty() {
+            let (f, g, _) = self.solid_boundary(x, false);
+            return (f / g).re;
+        }
         if matches!(
             self.case.bottom_boundary,
             BottomBoundary::ElasticHalfSpace { .. }
@@ -252,6 +275,10 @@ impl<'a> Mesh<'a> {
     }
 
     fn surface_admittance(&self, x: f64) -> f64 {
+        if !self.top_solids.is_empty() {
+            let (f, g, _) = self.solid_boundary(x, true);
+            return -(f / g).re;
+        }
         if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
             self.surface_gamma(x).re / self.case.surface_density_g_cm3
         } else {
@@ -303,6 +330,225 @@ impl<'a> Mesh<'a> {
         } else {
             diagonal
         }
+    }
+
+    fn solid_boundary(&self, x: f64, top: bool) -> (Complex64, Complex64, i32) {
+        let (boundary, cp, density, loss, meshes) = if top {
+            (
+                &self.case.surface_boundary,
+                self.case.surface_sound_speed_mps,
+                self.case.surface_density_g_cm3,
+                self.case.surface_attenuation_db_per_wavelength,
+                &self.top_solids,
+            )
+        } else {
+            (
+                &self.case.bottom_boundary,
+                self.case.bottom_sound_speed_mps,
+                self.case.bottom_density_g_cm3,
+                self.case.bottom_attenuation_db_per_wavelength,
+                &self.bottom_solids,
+            )
+        };
+        if !meshes.is_empty() {
+            return crate::elastic::cap_impedance(
+                boundary,
+                x.into(),
+                self.omega,
+                cp,
+                density,
+                loss,
+                meshes,
+                top,
+                true,
+            );
+        }
+        let (f, g) = match boundary {
+            BottomBoundary::Vacuum => (1.0.into(), 0.0.into()),
+            BottomBoundary::Rigid => (0.0.into(), 1.0.into()),
+            BottomBoundary::ElasticHalfSpace { .. } => {
+                crate::elastic::half_space(boundary, x.into(), self.omega, cp, density, loss, true)
+            }
+            BottomBoundary::FluidHalfSpace => (
+                if top {
+                    self.surface_gamma(x).re
+                } else {
+                    self.bottom_gamma(x).re
+                }
+                .into(),
+                density.into(),
+            ),
+            _ => unreachable!("solid boundary is validated"),
+        };
+        (f, if top { -g } else { g }, 0)
+    }
+
+    fn solid_dispersion(&self, x: f64, roots: &[f64]) -> (f64, i32) {
+        let (f, g, mut power) = self.solid_boundary(x, false);
+        let (mut f, mut g) = (f.re, g.re);
+        for layer in self.layers.iter().rev() {
+            let shift = layer.h * layer.h * x;
+            let mut p0 = 0.0;
+            let mut p1 = -2.0 * g;
+            let mut p2 = (self.b1[layer.coefficient_start + layer.intervals] - shift) * g
+                - 2.0 * layer.h * f * layer.density;
+            for &b in self.b1[layer.coefficient_start..layer.coefficient_start + layer.intervals]
+                .iter()
+                .rev()
+            {
+                p0 = p1;
+                p1 = p2;
+                p2 = (shift - b) * p1 - p0;
+                while p2.is_finite() && p2.abs() > 1e50 {
+                    p0 *= 1e-50;
+                    p1 *= 1e-50;
+                    p2 *= 1e-50;
+                    power += 50;
+                }
+            }
+            f = -(p2 - p0) / (2.0 * layer.h * layer.density);
+            g = -p1;
+        }
+        let (ft, gt, top_power) = self.solid_boundary(x, true);
+        power += top_power;
+        let mut value = f * gt.re - g * ft.re;
+        for &root in roots {
+            value /= x - root;
+            while value.is_finite() && value.abs() > 1e50 {
+                value *= 1e-50;
+                power += 50;
+            }
+            while value.abs() < 1e-50 && value != 0.0 {
+                value *= 1e50;
+                power -= 50;
+            }
+        }
+        (value, power)
+    }
+
+    #[allow(clippy::cast_precision_loss, clippy::too_many_lines)]
+    fn solid_roots(
+        &self,
+        seeds: &[(f64, Vec<Complex64>)],
+        work: &mut usize,
+    ) -> Result<Vec<f64>, DiagnosticReport> {
+        let c_high = crate::elastic::maximum_speed(self.case);
+        let c_low = self
+            .case
+            .c_low_mps
+            .max(crate::elastic::minimum_speed(self.case, self.min_speed));
+        if c_low >= c_high {
+            return Err(error(
+                "KR0301",
+                "phase-speed limits contain no supported modes",
+                "phase_speed_limits",
+            ));
+        }
+        let low = (self.omega / c_high).powi(2);
+        let points: usize = self
+            .top_solids
+            .iter()
+            .chain(&self.bottom_solids)
+            .map(crate::elastic::SolidMesh::points)
+            .sum();
+        let mut roots = Vec::new();
+        let mut x = (self.omega / c_low).powi(2);
+        for _ in 0..MAX_MODE_LIMIT {
+            x *= f64::from(1.000_01_f32);
+            x = crate::complex_modes::refinement_seed(
+                seeds,
+                roots.len(),
+                self.top_solids
+                    .first()
+                    .map_or(self.h, crate::elastic::SolidMesh::spacing),
+            )
+            .map_or(x, |v| v.re);
+            let tolerance = x.abs() * (self.b1.len() + points) as f64 * 1e-14;
+            let mut evaluate = |x| {
+                *work += self.b1.len() + 5 * points + roots.len();
+                if *work > MAX_WORK {
+                    return Err(error(
+                        "KR0302",
+                        "modal mesh-work limit exceeded",
+                        "mesh_points",
+                    ));
+                }
+                let value = self.solid_dispersion(x, &roots);
+                if !value.0.is_finite() {
+                    return Err(error(
+                        "KR0303",
+                        "non-finite elastic dispersion",
+                        "elastic_layers",
+                    ));
+                }
+                Ok(value)
+            };
+            let mut previous = x + 10.0 * tolerance;
+            let (mut fp, mut pp) = evaluate(previous)?;
+            let mut converged = false;
+            for _ in 0..2000 {
+                let (f, p) = evaluate(x)?;
+                let numerator = f * (x - previous);
+                let denominator = f - fp * 10_f64.powi(pp - p);
+                let shift = if numerator.abs() >= (denominator * x).abs() {
+                    0.1 * tolerance
+                } else {
+                    numerator / denominator
+                };
+                let next = x - shift;
+                if !next.is_finite() {
+                    break;
+                }
+                if (next - x).abs() + (next - previous).abs() < tolerance {
+                    x = next;
+                    converged = true;
+                    break;
+                }
+                previous = x;
+                fp = f;
+                pp = p;
+                x = next;
+            }
+            if !converged {
+                return Err(error(
+                    "KR0303",
+                    "elastic real secant did not converge",
+                    "phase_speed_limits",
+                ));
+            }
+            if x < low {
+                if roots.is_empty() {
+                    return Err(error(
+                        "KR0301",
+                        "no elastic modes inside spectral limits",
+                        "phase_speed_limits",
+                    ));
+                }
+                if roots.len() * self.case.mode_sample_depths_m.len() > MAX_SHAPES {
+                    return Err(error(
+                        "KR0302",
+                        "mode shape sample limit exceeded",
+                        "mode_sample_depths_m",
+                    ));
+                }
+                return Ok(roots);
+            }
+            if roots.iter().any(|&r: &f64| {
+                (r - x).abs() < x.abs().max(r.abs()) * (self.b1.len() + points) as f64 * 1e-14
+            }) {
+                return Err(error(
+                    "KR0303",
+                    "elastic real root search repeated a mode",
+                    "phase_speed_limits",
+                ));
+            }
+            roots.push(x);
+        }
+        Err(error(
+            "KR0302",
+            "elastic real root limit exceeded",
+            "phase_speed_limits",
+        ))
     }
 
     // Inertia of the symmetric tridiagonal acoustic operator A(x): number of roots above x.
@@ -564,13 +810,13 @@ impl<'a> Mesh<'a> {
             }
         }
         e[n] = 1.0 / (last.h * last.density);
-        if self.case.surface_boundary == SurfaceBoundary::Vacuum {
+        if self.case.surface_boundary == SurfaceBoundary::Vacuum && self.top_solids.is_empty() {
             d[0] = 1.0;
             e[1] = 0.0;
         } else if self.layers.len() == 1 {
             d[0] = self.surface_diagonal(x) / h_rho;
         }
-        if self.case.bottom_boundary == BottomBoundary::Vacuum {
+        if self.case.bottom_boundary == BottomBoundary::Vacuum && self.bottom_solids.is_empty() {
             d[n - 1] = 1.0;
             e[n - 1] = 0.0;
         } else if self.layers.len() == 1 {
@@ -596,6 +842,12 @@ impl<'a> Mesh<'a> {
                     / (self.omega * self.omega * layer.h * layer.h);
             }
         }
+        if !self.top_solids.is_empty() {
+            let x1 = 0.999_999_9 * x;
+            let x2 = 1.000_000_1 * x;
+            norm += (self.surface_admittance(x2) - self.surface_admittance(x1)) / (x2 - x1)
+                * phi[0].powi(2);
+        }
         if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
             let gamma = (x - self.surface_complex_k2.re).sqrt();
             let x1 = 0.999_999_9 * x;
@@ -609,25 +861,28 @@ impl<'a> Mesh<'a> {
                     * self.case.surface_density_g_cm3
                     * self.case.surface_sound_speed_mps.powi(2));
         }
-        if self.case.bottom_boundary.is_half_space() {
+        if self.case.bottom_boundary.is_half_space() || !self.bottom_solids.is_empty() {
             let gamma = (x - self.bottom_complex_k2.re).sqrt();
             let x1 = 0.999_999_9 * x;
             let x2 = 1.000_000_1 * x;
-            let derivative = if matches!(
-                self.case.bottom_boundary,
-                BottomBoundary::ElasticHalfSpace { .. }
-            ) {
+            let derivative = if !self.bottom_solids.is_empty()
+                || matches!(
+                    self.case.bottom_boundary,
+                    BottomBoundary::ElasticHalfSpace { .. }
+                ) {
                 (self.bottom_admittance(x2) - self.bottom_admittance(x1)) / (x2 - x1)
             } else {
                 (self.bottom_gamma(x2).re - self.bottom_gamma(x1).re)
                     / (self.case.bottom_density_g_cm3 * (x2 - x1))
             };
             norm += derivative * phi[n - 1].powi(2);
-            slow += phi[n - 1].powi(2)
-                / (2.0
-                    * gamma
-                    * self.case.bottom_density_g_cm3
-                    * self.case.bottom_sound_speed_mps.powi(2));
+            if self.case.bottom_boundary.is_half_space() {
+                slow += phi[n - 1].powi(2)
+                    / (2.0
+                        * gamma
+                        * self.case.bottom_density_g_cm3
+                        * self.case.bottom_sound_speed_mps.powi(2));
+            }
         }
         if norm <= 0.0 || !norm.is_finite() || !slow.is_finite() {
             return Err(error("KR0303", "invalid mode normalization", "modes"));
@@ -649,7 +904,7 @@ impl<'a> Mesh<'a> {
             *value *= scale;
         }
         // Vector.f90 stores a single-precision mesh and interpolates into complex32 .mod samples.
-        let grid_depths = crate::layers::grid(&self.layers);
+        let grid_depths = crate::layers::grid(&self.layers, self.case.fluid_top_depth_m());
         let eigenfunction = self
             .case
             .mode_sample_depths_m

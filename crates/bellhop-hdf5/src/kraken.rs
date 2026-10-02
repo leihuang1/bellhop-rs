@@ -383,6 +383,7 @@ fn write_frequency(
         },
     )?;
     write_elastic_half_spaces(group, case)?;
+    write_elastic_layers(group, case)?;
     write_scalar_attribute(
         group,
         "mesh_reference_frequency_hz",
@@ -408,7 +409,7 @@ fn write_frequency(
         &((1 + case.additional_fluid_layers.len()) as u64),
     )?;
     let media = group.create_group("media").map_err(hdf5_error)?;
-    let mut top_depth = 0.0;
+    let mut top_depth = case.fluid_top_depth_m();
     for index in 0..=case.additional_fluid_layers.len() {
         let (bottom_depth, density, mesh_points) = if index == 0 {
             (
@@ -430,6 +431,68 @@ fn write_frequency(
 
     write_modes(group, result, budget)?;
     write_field(group, result, budget)
+}
+
+fn write_elastic_layers(group: &Group, case: &Case) -> Result<(), String> {
+    write_scalar_attribute(
+        group,
+        "finite_elastic_layer_count",
+        &((case.top_elastic_layers.len() + case.bottom_elastic_layers.len()) as u64),
+    )?;
+    if case.top_elastic_layers.is_empty() && case.bottom_elastic_layers.is_empty() {
+        return Ok(());
+    }
+    let media = group.create_group("elastic_media").map_err(hdf5_error)?;
+    for (name, layers, mut top) in [
+        ("top", &case.top_elastic_layers, 0.0),
+        (
+            "bottom",
+            &case.bottom_elastic_layers,
+            case.fluid_bottom_depth_m(),
+        ),
+    ] {
+        let side = media.create_group(name).map_err(hdf5_error)?;
+        for (index, material) in layers.iter().enumerate() {
+            let layer = side.create_group(&index.to_string()).map_err(hdf5_error)?;
+            write_string_attribute(&layer, "material", "elastic")?;
+            write_string_attribute(
+                &layer,
+                "attenuation_model",
+                if case.mode_solver == ModeSolver::Kraken {
+                    "reference_real_stiffness"
+                } else {
+                    "complex"
+                },
+            )?;
+            for (attribute, value) in [
+                ("top_depth_m", top),
+                ("bottom_depth_m", material.bottom_depth_m),
+                (
+                    "compressional_sound_speed_mps",
+                    material.compressional_sound_speed_mps,
+                ),
+                ("shear_sound_speed_mps", material.shear_sound_speed_mps),
+                ("density_g_cm3", material.density_g_cm3),
+                (
+                    "compressional_attenuation_db_per_wavelength",
+                    material.compressional_attenuation_db_per_wavelength,
+                ),
+                (
+                    "shear_attenuation_db_per_wavelength",
+                    material.shear_attenuation_db_per_wavelength,
+                ),
+            ] {
+                write_scalar_attribute(&layer, attribute, &value)?;
+            }
+            write_scalar_attribute(
+                &layer,
+                "requested_mesh_points",
+                &(material.mesh_points as u64),
+            )?;
+            top = material.bottom_depth_m;
+        }
+    }
+    Ok(())
 }
 
 fn write_elastic_half_spaces(group: &Group, case: &Case) -> Result<(), String> {

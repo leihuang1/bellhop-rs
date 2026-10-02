@@ -22,7 +22,8 @@ builds it using the existing static HDF5 dependency.
 - Both backends accept 1..500 contiguous constant-density fluid layers with
   independent meshes, N/C/P/S interpolation and material/volume attenuation.
   Density/speed/loss may jump at interfaces; density gradients and finite-layer
-  shear remain unsupported. Analytic Munk and F/P/TRC combinations remain single-layer.
+  shear inside fluid media remain unsupported. Finite homogeneous solid caps are
+  separate materials; analytic Munk and F/P/TRC combinations remain single-layer.
   Mesh/profile/shape/work budgets are totals for the stack, not per layer.
 - Both backends accept smooth V/R/A boundaries; real KRAKEN stays trapped
   at each A half-space. KRAKENC supports complex N/C/P/S or lossless fixed-Munk-A,
@@ -35,10 +36,15 @@ builds it using the existing static HDF5 dependency.
   of the same pair is unchanged.
 - N/C/P/S fluid stacks also support [elastic A half-spaces](kraken-elastic-halfspaces.md):
   bottom through both engines, top through KRAKENC only. KRAKEN elastic top is
-  rejected (exit 2); finite solids and elastic/table/analytic combinations remain
-  unsupported. KRAKEN retains the reference's cs cutoff and **omitted elastic
+  rejected (exit 2); elastic/table/analytic combinations remain unsupported. KRAKEN retains the reference's cs cutoff and **omitted elastic
   material attenuation**; use KRAKENC for elastic attenuation. Requested P/S loss
   and the real/complex model are recorded separately in additive HDF5 metadata.
+- [Finite homogeneous solid caps](kraken-finite-elastic-layers.md) are supported
+  above/below contiguous N/C/P/S fluids: KRAKENC fluid stacks, KRAKEN one fluid.
+  Multi-fluid finite-elastic KRAKEN inputs explicitly fail (exit 2). Original
+  elsed/ice pass both engines; graded/interleaved solids remain excluded.
+  KRAKEN finite stiffness uses Re(c²) but omits elastic absorption perturbation.
+  Modal/FIELD samples stay inside the absolute fluid interval, not in solids.
 - KRAKENC `F`/`P` bottoms additionally consume same-stem `.brc`/`.irc`; this
   slice is single-frequency, RMax=0, lossless N/C water and vacuum top. Missing,
   malformed or unaccepted table combinations fail explicitly. Rust does not
@@ -162,6 +168,19 @@ with prefix `surface_` or `bottom_`:
 These additive v1 attributes do not change datasets, schema identity or BELLHOP
 v3. Older v1 files and nonelastic boundaries may omit them. They are material
 provenance, not certification of arbitrary-input numerical parity.
+
+Finite homogeneous solids additionally record `finite_elastic_layer_count`
+(uint64) and `/frequencies/i/elastic_media/{top|bottom}/{index}`. Indices are
+ordered from shallow to deep within each side. Each group has `material=elastic`,
+`attenuation_model=reference_real_stiffness|complex`, float64 `top_depth_m`,
+`bottom_depth_m`, `compressional_sound_speed_mps`, `shear_sound_speed_mps`,
+`density_g_cm3`, `compressional_attenuation_db_per_wavelength`,
+`shear_attenuation_db_per_wavelength`, and uint64 `requested_mesh_points`.
+Requested solve-frequency losses are not inferred modal attenuation. The real
+model retains Re(c²) stiffness without elastic absorption. These additive v1
+attributes/groups may be absent in older files. `media` remains **fluid only**;
+its first top depth can now be nonzero below a solid cap. Existing datasets,
+schema identity and BELLHOP v3 are unchanged.
 
 Each frequency also has `/frequencies/i/media/0`, `/1`, ... in depth order.
 Each layer group carries float64 `top_depth_m`, `bottom_depth_m`, `density_g_cm3`

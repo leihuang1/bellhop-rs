@@ -151,7 +151,8 @@ reject mode-count changes instead of clipping. `LayeredDoubleRefined` doubles
 NG to 200/400/400 and passes 42 modes/501 pressures per engine; it is derived,
 not acceptance of original `double`. `LayeredNormalization` removes shear only
 from the original `normal.env` bottom and is also explicitly derived. Original
-`normal/flused/elsed` need elastic support; Gulf's sequence needs multi-profile
+`normal/flused` now pass the half-space checkpoint and `elsed/ice` the finite-cap
+checkpoint below; Gulf's sequence needs multi-profile
 FIELD. None is claimed as accepted by the fluid-stack stage. The wider-spectrum
 three-layer experiment described in the compatibility/golden provenance remains
 unaccepted; a matched subset is not advertised as full original acceptance.
@@ -163,9 +164,18 @@ shared fieldbat.flp are byte copies of the pinned TLslices sources; no shear is
 removed and NG is unchanged. All .mod/.shd agree in three runs; local maximum
 pressure error is 6.67e-8 at unchanged tolerances. The 117-record
 `golden/elastic-halfspace.sha256` manifest and fresh CI source-byte comparisons
-lock provenance. KRAKEN elastic top is explicitly rejected; finite solids,
-original elsed/ice and failed slow-interface probes remain outside acceptance.
+lock provenance. KRAKEN elastic top-half-space and failed slow-interface probes remain outside
+acceptance. Original elsed/ice now pass the distinct finite-cap checkpoint.
 See the [scope and evidence](kraken-elastic-halfspaces.md); no new parity waiver.
+
+Homogeneous finite elasticity adds 25 pairs (23 constructed/derived, two
+unmodified originals): 33 workflows, 36 blocks, 827 modes, 9,276 pressures,
+triplicate identical MOD/SHD, full API and actual CLI/HDF5 comparisons at unchanged
+tolerances (local max |dp| 4.22e-8). Original elsed/ice and official fieldbat.flp
+retain every byte and NG; the 149-record `golden/finite-elastic.sha256` locks new
+provenance. KRAKENC supports contiguous layered fluids; KRAKEN finite solids
+currently require one fluid. Multi-fluid KRAKEN failures are explicitly rejected,
+not added to the existing parity exception. See [finite-cap scope](kraken-finite-elastic-layers.md).
 
 ## Pinned Linux x86-64 oracle
 

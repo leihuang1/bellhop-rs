@@ -18,9 +18,25 @@ pub(crate) struct Layer<'a> {
 }
 
 impl CaseDefinition {
-    /// Bottom of the entire finite fluid stack, excluding the half-space.
+    /// Top of the contiguous finite fluid stack.
+    #[must_use]
+    pub fn fluid_top_depth_m(&self) -> f64 {
+        self.top_elastic_layers
+            .last()
+            .map_or(0.0, |layer| layer.bottom_depth_m)
+    }
+
+    /// Bottom of the entire finite stack, excluding the half-space.
     #[must_use]
     pub fn total_depth_m(&self) -> f64 {
+        self.bottom_elastic_layers
+            .last()
+            .map_or(self.fluid_bottom_depth_m(), |layer| layer.bottom_depth_m)
+    }
+
+    /// Bottom of the contiguous finite fluid stack.
+    #[must_use]
+    pub fn fluid_bottom_depth_m(&self) -> f64 {
         self.additional_fluid_layers
             .last()
             .map_or(self.water_depth_m, |layer| layer.bottom_depth_m)
@@ -29,7 +45,7 @@ impl CaseDefinition {
 
 pub(crate) fn iter(case: &CaseDefinition) -> impl Iterator<Item = Layer<'_>> {
     std::iter::once(Layer {
-        top: 0.0,
+        top: case.fluid_top_depth_m(),
         bottom: case.water_depth_m,
         density: case.water_density_g_cm3,
         points: &case.sound_speed_profile,
@@ -57,14 +73,21 @@ pub(crate) fn iter(case: &CaseDefinition) -> impl Iterator<Item = Layer<'_>> {
 
 #[allow(clippy::float_cmp)]
 pub(crate) fn validate(case: &CaseDefinition, diagnostics: &mut DiagnosticReport) {
-    if case.additional_fluid_layers.len() >= MAX_LAYERS {
+    if case.additional_fluid_layers.len()
+        + case.top_elastic_layers.len()
+        + case.bottom_elastic_layers.len()
+        >= MAX_LAYERS
+    {
         diagnostics.push(error(
             "additional_fluid_layers",
-            "at most 500 finite fluid layers",
+            "at most 500 total finite media",
         ));
     }
-    let profile_values: usize = iter(case).map(|layer| layer.points.len()).sum();
-    let loss_values: usize = iter(case).map(|layer| layer.loss.len()).sum();
+    let elastic_points = 2 * (case.top_elastic_layers.len() + case.bottom_elastic_layers.len());
+    let profile_values: usize =
+        iter(case).map(|layer| layer.points.len()).sum::<usize>() + elastic_points;
+    let loss_values: usize =
+        iter(case).map(|layer| layer.loss.len()).sum::<usize>() + 2 * elastic_points;
     if profile_values > MAX_VECTOR_LENGTH || loss_values > MAX_VECTOR_LENGTH {
         diagnostics.push(error(
             "additional_fluid_layers",
@@ -170,7 +193,7 @@ pub(crate) fn mesh_intervals(
         .mesh_reference_frequency_hz
         .unwrap_or(case.frequency_hz);
     let mut intervals = Vec::new();
-    let mut total = 0;
+    let mut total = crate::elastic::mesh_points(case, multiplier)?;
     for (index, layer) in iter(case).enumerate() {
         let field = if index == 0 {
             "mesh_points".into()
@@ -212,7 +235,7 @@ pub(crate) fn mesh_intervals(
         if total > MAX_MESH_POINTS {
             return Err(solver::error(
                 "KR0302",
-                "total fluid mesh exceeds the mesh limit",
+                "total finite mesh exceeds the mesh limit",
                 "mesh_points",
             ));
         }
@@ -252,8 +275,8 @@ pub(crate) fn mesh_layers(
 }
 
 #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-pub(crate) fn grid(layers: &[MeshLayer]) -> Vec<f32> {
-    let mut grid = vec![0.0];
+pub(crate) fn grid(layers: &[MeshLayer], top: f64) -> Vec<f32> {
+    let mut grid = vec![top as f32];
     for layer in layers {
         let top = grid[layer.node_start];
         grid.extend((1..=layer.intervals).map(|i| top + (i as f64 * layer.h) as f32));

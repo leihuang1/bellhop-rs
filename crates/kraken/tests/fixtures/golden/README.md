@@ -1087,6 +1087,46 @@ All 117 records (36 inputs + 81 artifacts) are in
 [`elastic-halfspace.sha256`](elastic-halfspace.sha256), paths relative to the
 fixture directory; verify with `shasum -a 256 -c golden/elastic-halfspace.sha256`.
 No earlier golden or tolerance was changed. KRAKEN elastic top is explicitly
-rejected; finite solids (including original elsed/ice) and failed constructed
-slow-interface probes are **not** accepted. The existing layered exception does
-not waive any elastic failure. See the [checkpoint and open work](../../../../../docs/kraken-elastic-halfspaces.md).
+rejected; finite solids are outside this half-space checkpoint and failed
+constructed slow-interface probes are **not** accepted. Original elsed/ice now
+pass the separate finite-cap checkpoint below. The existing layered exception
+does not waive any elastic failure. See the [half-space checkpoint](../../../../../docs/kraken-elastic-halfspaces.md).
+
+## Homogeneous finite elastic layers
+
+25 pairs (23 derived/constructed, two originals), 33 workflows / 36 blocks /
+827 modes / 9,276 pressures. Every mode, shape and pressure passes API and actual
+CLI/HDF5 comparison at unchanged tolerances; local max |dp|=4.2146848510894035e-8.
+MOD/SHD are byte-identical across three independent unmodified pinned runs.
+PRT timings remain intact; only trailing whitespace is removed. Rust HDF5 is
+never a reference artifact. Verify all 149 input/artifact records from fixtures:
+`shasum -a 256 -c golden/finite-elastic.sha256`.
+
+**Original:** OriginalElasticSediment.env = TLslices elsed.env (46 modes per
+engine); OriginalElasticIce.env = ice.env (44 per engine). No title, NG, shear,
+loss or source edit. Both FLPs are exact fieldbat.flp (501 pressures per engine),
+selected by the official runtests.m. Installed pinned-source byte checks:
+
+```text
+71df9c66a6bc394f727f41cc9bd3afdd397ffb49318d86fdad4e2c7594cbc0d5  tests/TLslices/elsed.env
+cf71bb25552e641b94d8514ea5d0c85722ec458a900c4478d2651142b38119e5  tests/TLslices/ice.env
+17365befbd165b21fa3b89d80d7805dd5a51f240af491c8dd30bf27a7a399f2d  tests/TLslices/fieldbat.flp
+```
+
+**Derived:** FiniteSingleIce/Sediment C/P/S change only title/interpolation of
+the originals. KRAKEN and KRAKENC pass all six. **Constructed:**
+FiniteElasticBottom/Top/Both N/C/P/S originate from LayeredFluidN/C/P/S,
+retaining layered-fluid SSP/loss/geometry, with finite homogeneous sediment
+140..170 m cp2200/cs900/rho1.8 (.15/.3 W), cap 0..20 m cp3000/cs1400/rho1
+(.3/1 W), or both. Where present, the outer elastic A is cp4000/cs2000/rho2
+(.25/.4 W); bottom-only outer top remains vacuum. The modal interval starts
+in the fluid, not at physical depth zero. ShearOnly sets water/P losses to zero
+and retains only solid shear loss. Power preserves 75/50/62.5/50 Hz and
+per-medium m power laws/fractional NG scaling. Vacuum/Rigid replace only the
+outer bottom A and its record. Stack splits both caps into two independently
+meshed/materially distinct solids, not a fluid average. These 17 constructed
+pairs pass KRAKENC only; multi-fluid finite-elastic KRAKEN inputs explicitly
+reject at validation because new secant count failures are not accepted/waived.
+See [finite-cap scope and stiffness semantics](../../../../../docs/kraken-finite-elastic-layers.md).
+
+Existing half-space, layered and single-fluid goldens/tolerances are unchanged.

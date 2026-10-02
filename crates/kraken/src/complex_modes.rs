@@ -103,8 +103,14 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             k2: bottom_k2,
             surface_k2,
             water_k2: (omega * omega / (inside_c * inside_c)).re,
+            top_solids: crate::elastic::SolidMesh::build(case, multiplier, true, false)?,
+            lower_solids: crate::elastic::SolidMesh::build(case, multiplier, false, false)?,
         };
-        let elastic = crate::elastic::has_half_space(case);
+        let seed_h = bottom
+            .top_solids
+            .first()
+            .map_or(h, crate::elastic::SolidMesh::spacing);
+        let elastic = crate::elastic::has_half_space(case) || crate::elastic::has_layers(case);
         if elastic {
             min_speed = crate::elastic::minimum_speed(case, min_speed);
         }
@@ -160,7 +166,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             };
             // Solve2 seeds refined meshes with unmodified EVMat roots, then
             // Neville interpolation in h²; restarting from above can skip roots.
-            let guess = refinement_seed(&seed_meshes, index - 1, h).unwrap_or(guess);
+            let guess = refinement_seed(&seed_meshes, index - 1, seed_h).unwrap_or(guess);
             let root = secant(guess, &roots, &b, &layers, &bottom, &mut work)?;
             if ((tabulated || elastic) && root.sqrt().re < omega / case.c_high_mps)
                 || (!(tabulated || elastic) && root.re <= low_k2)
@@ -188,7 +194,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
                 "phase_speed_limits",
             ));
         }
-        seed_meshes.push((h, roots.clone()));
+        seed_meshes.push((seed_h, roots.clone()));
         let mut selected: Vec<_> = roots.into_iter().filter(|x| x.re <= high_k2).collect();
         if tabulated || elastic {
             selected.sort_by(|a, b| b.re.total_cmp(&a.re));
@@ -271,7 +277,11 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     ))
 }
 
-fn refinement_seed(meshes: &[(f64, Vec<Complex64>)], index: usize, h: f64) -> Option<Complex64> {
+pub(crate) fn refinement_seed(
+    meshes: &[(f64, Vec<Complex64>)],
+    index: usize,
+    h: f64,
+) -> Option<Complex64> {
     // Solve2 leaves the upper/previous-root scan in place on mesh 2.
     // Neville seeds start only on mesh 3, after two raw-root meshes exist.
     if meshes.len() < 2 {
@@ -305,10 +315,25 @@ struct Bottom<'a> {
     k2: Complex64,
     surface_k2: Complex64,
     water_k2: f64,
+    top_solids: Vec<crate::elastic::SolidMesh>,
+    lower_solids: Vec<crate::elastic::SolidMesh>,
 }
 
 impl Bottom<'_> {
     fn evaluate(&self, x: Complex64) -> (Complex64, Complex64, i32) {
+        if !self.lower_solids.is_empty() {
+            return crate::elastic::cap_impedance(
+                &self.case.bottom_boundary,
+                x,
+                2.0 * PI * self.case.frequency_hz,
+                self.case.bottom_sound_speed_mps,
+                self.case.bottom_density_g_cm3,
+                self.case.bottom_attenuation_db_per_wavelength,
+                &self.lower_solids,
+                false,
+                false,
+            );
+        }
         boundary_impedance(
             &self.case.bottom_boundary,
             x,
@@ -327,6 +352,19 @@ impl Bottom<'_> {
     }
 
     fn surface(&self, x: Complex64) -> (Complex64, Complex64, i32) {
+        if !self.top_solids.is_empty() {
+            return crate::elastic::cap_impedance(
+                &self.case.surface_boundary,
+                x,
+                2.0 * PI * self.case.frequency_hz,
+                self.case.surface_sound_speed_mps,
+                self.case.surface_density_g_cm3,
+                self.case.surface_attenuation_db_per_wavelength,
+                &self.top_solids,
+                true,
+                false,
+            );
+        }
         let (f, g, power) = boundary_impedance(
             &self.case.surface_boundary,
             x,
@@ -380,7 +418,7 @@ fn dispersion(
     layers: &[crate::layers::MeshLayer],
     bottom: &Bottom<'_>,
 ) -> (Complex64, i32) {
-    if layers.len() > 1 {
+    if layers.len() > 1 || crate::elastic::has_layers(bottom.case) {
         return layered_dispersion(x, roots, b, layers, bottom);
     }
     let h = layers[0].h;
@@ -519,7 +557,13 @@ fn secant(
                 _ => 0,
             })
             .sum();
-        *work += b.len() + roots.len() + table_work;
+        let solid_points: usize = bottom
+            .top_solids
+            .iter()
+            .chain(&bottom.lower_solids)
+            .map(crate::elastic::SolidMesh::points)
+            .sum();
+        *work += b.len() + roots.len() + table_work + 5 * solid_points;
         if *work > MAX_ROOT_WORK {
             return Err(error(
                 "KR0302",
@@ -541,7 +585,13 @@ fn secant(
         }
         Ok(value)
     };
-    let tolerance = x.norm() * b.len() as f64 * SECANT_RELATIVE_TOLERANCE;
+    let solid_points: usize = bottom
+        .top_solids
+        .iter()
+        .chain(&bottom.lower_solids)
+        .map(crate::elastic::SolidMesh::points)
+        .sum();
+    let tolerance = x.norm() * (b.len() + solid_points) as f64 * SECANT_RELATIVE_TOLERANCE;
     let mut previous = x + 100.0 * tolerance;
     let (mut f_previous, mut previous_power) = evaluate(previous)?;
     for _ in 0..1000 {
@@ -748,7 +798,9 @@ fn mode(
     } else {
         (ft2 / gt2 - ft1 / gt1) / (x2 - x1)
     };
-    let derivative = if case.bottom_boundary == BottomBoundary::Vacuum
+    let derivative = if !bottom.lower_solids.is_empty() {
+        (bottom.admittance(x2) - bottom.admittance(x1)) / (x2 - x1)
+    } else if case.bottom_boundary == BottomBoundary::Vacuum
         || case.bottom_boundary == BottomBoundary::Rigid
     {
         Complex64::new(0.0, 0.0)
@@ -778,7 +830,7 @@ fn mode(
         *value *= scale;
     }
     let group_speed = (Complex64::new(1.0, 0.0) / (scale * scale * slow * omega / x.sqrt())).re;
-    let grid = crate::layers::grid(layers);
+    let grid = crate::layers::grid(layers, case.fluid_top_depth_m());
     let eigenfunction: Vec<Complex64> = case
         .mode_sample_depths_m
         .iter()

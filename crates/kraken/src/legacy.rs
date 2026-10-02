@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use crate::attenuation::{VolumeLoss, db_per_wavelength};
 use crate::{
     BottomBoundary, Case, CaseDefinition, Diagnostic, DiagnosticReport, FluidLayer, Interpolation,
-    MAX_VECTOR_LENGTH, ModeSolver, SoundSpeedPoint, SourceGeometry, SurfaceBoundary,
+    MAX_VECTOR_LENGTH, ModeAddition, ModeSolver, SoundSpeedPoint, SourceGeometry,
+    SourcePatternPoint, SurfaceBoundary,
 };
 
 /// Maximum byte length of each legacy input, including source-based loading.
@@ -21,21 +22,21 @@ const MAX_FREQUENCY_INPUT_VALUES: usize = 5_000_000;
 /// # Errors
 ///
 /// Returns structured parse, validation, and input-file diagnostics.
+#[allow(clippy::missing_panics_doc)] // parser guarantees exactly one case
 pub fn load_case(
     env_path: impl AsRef<Path>,
     flp_path: impl AsRef<Path>,
 ) -> Result<Case, DiagnosticReport> {
-    let env_path = env_path.as_ref();
-    let flp_path = flp_path.as_ref();
-    parse_case(
-        &read_file(env_path)?,
-        &read_file(flp_path)?,
-        env_path,
-        flp_path,
+    load_file_cases(
+        env_path.as_ref(),
+        flp_path.as_ref(),
+        ModeSolver::Kraken,
+        true,
     )
+    .map(|mut cases| cases.pop().unwrap())
 }
 
-/// Load a KRAKENC environment and coherent, range-independent FIELD geometry.
+/// Load a KRAKENC environment and supported range-independent FIELD geometry.
 ///
 /// # Errors
 ///
@@ -45,24 +46,11 @@ pub fn load_complex_case(
     env_path: impl AsRef<Path>,
     flp_path: impl AsRef<Path>,
 ) -> Result<Case, DiagnosticReport> {
-    let env_path = env_path.as_ref();
-    let flp_path = flp_path.as_ref();
-    let env = read_file(env_path)?;
-    let flp = read_file(flp_path)?;
-    let table = bottom_table_extension(&env, env_path, ModeSolver::Krakenc)?
-        .map(|ext| read_file(&env_path.with_extension(ext)))
-        .transpose()?;
-    let surface = surface_table_extension(&env, env_path, ModeSolver::Krakenc)?
-        .map(|ext| read_file(&env_path.with_extension(ext)))
-        .transpose()?;
-    parse_frequency_cases_with_tables(
-        &env,
-        &flp,
-        env_path,
-        flp_path,
+    load_file_cases(
+        env_path.as_ref(),
+        flp_path.as_ref(),
         ModeSolver::Krakenc,
         true,
-        [surface.as_deref(), table.as_deref()],
     )
     .map(|mut cases| cases.pop().unwrap())
 }
@@ -80,24 +68,35 @@ pub fn load_frequency_cases(
     flp_path: impl AsRef<Path>,
     mode_solver: ModeSolver,
 ) -> Result<Vec<Case>, DiagnosticReport> {
-    let env_path = env_path.as_ref();
-    let flp_path = flp_path.as_ref();
+    load_file_cases(env_path.as_ref(), flp_path.as_ref(), mode_solver, false)
+}
+
+fn load_file_cases(
+    env_path: &Path,
+    flp_path: &Path,
+    mode_solver: ModeSolver,
+    single_frequency: bool,
+) -> Result<Vec<Case>, DiagnosticReport> {
     let env = read_file(env_path)?;
     let flp = read_file(flp_path)?;
-    let table = bottom_table_extension(&env, env_path, mode_solver)?
-        .map(|ext| read_file(&env_path.with_extension(ext)))
+    let bottom = bottom_table_extension(&env, env_path, mode_solver)?
+        .map(|extension| read_file(&env_path.with_extension(extension)))
         .transpose()?;
     let surface = surface_table_extension(&env, env_path, mode_solver)?
-        .map(|ext| read_file(&env_path.with_extension(ext)))
+        .map(|extension| read_file(&env_path.with_extension(extension)))
         .transpose()?;
-    load_frequency_cases_with_boundary_tables(
+    let pattern = source_pattern_extension(&flp, flp_path)?
+        .map(|extension| read_file(&flp_path.with_extension(extension)))
+        .transpose()?;
+    parse_frequency_cases_with_resources(
         &env,
         &flp,
         env_path,
         flp_path,
         mode_solver,
-        surface.as_deref(),
-        table.as_deref(),
+        single_frequency,
+        [surface.as_deref(), bottom.as_deref()],
+        pattern.as_deref(),
     )
 }
 
@@ -129,6 +128,7 @@ pub fn load_frequency_cases_from_sources(
     )
 }
 
+#[cfg(test)]
 fn parse_case(
     env_source: &str,
     flp_source: &str,
@@ -144,6 +144,7 @@ fn parse_case(
     )
 }
 
+#[cfg(test)]
 fn parse_case_with_solver(
     env_source: &str,
     flp_source: &str,
@@ -170,7 +171,7 @@ fn parse_frequency_cases(
     mode_solver: ModeSolver,
     single_frequency: bool,
 ) -> Result<Vec<Case>, DiagnosticReport> {
-    parse_frequency_cases_with_tables(
+    parse_frequency_cases_with_resources(
         env_source,
         flp_source,
         env_path,
@@ -178,6 +179,7 @@ fn parse_frequency_cases(
         mode_solver,
         single_frequency,
         [None, None],
+        None,
     )
 }
 
@@ -209,6 +211,19 @@ pub fn surface_table_extension(
     check_input_size(source, path)?;
     let env = parse_environment_with_solver(source, path, solver)?;
     Ok(matches!(env.surface_boundary, SurfaceBoundary::Reflection(_)).then_some("trc"))
+}
+
+/// Return the same-stem source-pattern resource consumed by this FIELD input.
+/// # Errors
+/// Returns bounded-input and FIELD parse diagnostics.
+pub fn source_pattern_extension(
+    source: &str,
+    path: &Path,
+) -> Result<Option<&'static str>, DiagnosticReport> {
+    check_input_size(source, path)?;
+    Ok(parse_field(source, path)?
+        .source_pattern_requested
+        .then_some("sbp"))
 }
 
 /// Parse exact environment, FIELD and optional bottom-table snapshots.
@@ -246,10 +261,36 @@ pub fn load_frequency_cases_with_boundary_tables(
     surface_table: Option<&str>,
     bottom_table: Option<&str>,
 ) -> Result<Vec<Case>, DiagnosticReport> {
+    load_frequency_cases_with_resources(
+        env_source,
+        flp_source,
+        env_path,
+        flp_path,
+        mode_solver,
+        surface_table,
+        bottom_table,
+        None,
+    )
+}
+
+/// Parse exact `.env`/`.flp` and optional TRC/BRC/IRC/SBP snapshots without rereading them.
+/// # Errors
+/// Returns bounded-input, resource, parse and validation diagnostics.
+#[allow(clippy::too_many_arguments)]
+pub fn load_frequency_cases_with_resources(
+    env_source: &str,
+    flp_source: &str,
+    env_path: &Path,
+    flp_path: &Path,
+    mode_solver: ModeSolver,
+    surface_table: Option<&str>,
+    bottom_table: Option<&str>,
+    source_pattern: Option<&str>,
+) -> Result<Vec<Case>, DiagnosticReport> {
     for (source, path) in [(env_source, env_path), (flp_source, flp_path)] {
         check_input_size(source, path)?;
     }
-    parse_frequency_cases_with_tables(
+    parse_frequency_cases_with_resources(
         env_source,
         flp_source,
         env_path,
@@ -257,11 +298,12 @@ pub fn load_frequency_cases_with_boundary_tables(
         mode_solver,
         false,
         [surface_table, bottom_table],
+        source_pattern,
     )
 }
 
-#[allow(clippy::float_cmp, clippy::too_many_lines)]
-fn parse_frequency_cases_with_tables(
+#[allow(clippy::float_cmp, clippy::too_many_arguments, clippy::too_many_lines)]
+fn parse_frequency_cases_with_resources(
     env_source: &str,
     flp_source: &str,
     env_path: &Path,
@@ -269,6 +311,7 @@ fn parse_frequency_cases_with_tables(
     mode_solver: ModeSolver,
     single_frequency: bool,
     tables: [Option<&str>; 2],
+    source_pattern: Option<&str>,
 ) -> Result<Vec<Case>, DiagnosticReport> {
     let [surface_table, bottom_table] = tables;
     let mut environment = parse_environment_with_solver(env_source, env_path, mode_solver)?;
@@ -349,6 +392,30 @@ fn parse_frequency_cases_with_tables(
         ));
     }
     let mut field = parse_field(flp_source, flp_path)?;
+    let pattern_path = flp_path.with_extension("sbp");
+    if field.source_pattern_requested {
+        let source = source_pattern.ok_or_else(|| {
+            one(
+                "KR0001",
+                "required source pattern snapshot is missing",
+                "source_pattern",
+                &pattern_path,
+                1,
+                1,
+            )
+        })?;
+        check_input_size(source, &pattern_path)?;
+        field.source_pattern = parse_source_pattern(source, &pattern_path)?;
+    } else if source_pattern.is_some() {
+        return Err(one(
+            "KR0202",
+            "unexpected source pattern",
+            "source_pattern",
+            &pattern_path,
+            1,
+            1,
+        ));
+    }
     // ReadSzRz stores depths in single precision. Keep samples at either fluid
     // interface on the exact f64 boundary, whether the f32 spelling rounds up or down.
     let bottom_depth = environment
@@ -416,6 +483,8 @@ fn parse_frequency_cases_with_tables(
         bottom_density_g_cm3: environment.bottom_density,
         bottom_attenuation_db_per_wavelength: environment.bottom_attenuation,
         source_geometry: field.source_geometry,
+        mode_addition: field.mode_addition,
+        source_pattern: field.source_pattern,
         mesh_points: environment.mesh_points,
         c_low_mps: environment.c_low,
         c_high_mps: environment.c_high,
@@ -439,6 +508,7 @@ fn parse_frequency_cases_with_tables(
     let values = 7 * (definition.top_elastic_layers.len() + definition.bottom_elastic_layers.len())
         + table_values
         + surface_values
+        + 2 * definition.source_pattern.len()
         + environment.water_attenuation.len()
         + definition
             .additional_fluid_layers
@@ -612,6 +682,12 @@ fn parse_frequency_cases_with_tables(
                 })
                 .map_err(|mut report| {
                     for diagnostic in &mut report.diagnostics {
+                        if diagnostic.field == "source_pattern" {
+                            diagnostic.path.clone_from(&pattern_path);
+                            diagnostic.line = 1;
+                            diagnostic.column = 1;
+                            continue;
+                        }
                         let layer_record = diagnostic
                             .field
                             .rsplit_once('.')
@@ -1799,11 +1875,53 @@ fn parse_bottom_table(
 struct Field {
     mode_limit: usize,
     source_geometry: SourceGeometry,
+    mode_addition: ModeAddition,
+    source_pattern_requested: bool,
+    source_pattern: Vec<SourcePatternPoint>,
     source_depths: Vec<f64>,
     receiver_depths: Vec<f64>,
     receiver_ranges_m: Vec<f64>,
     receiver_offsets_m: Vec<f64>,
     locations: HashMap<String, (usize, usize)>,
+}
+
+fn parse_source_pattern(
+    source: &str,
+    path: &Path,
+) -> Result<Vec<SourcePatternPoint>, DiagnosticReport> {
+    let mut reader = Reader::new(source, path)?;
+    let count = reader.count("source_pattern.count")?;
+    if count < 2 {
+        return Err(reader_error(
+            &reader,
+            "KR0201",
+            "source pattern requires at least two points",
+            "source_pattern.count",
+        ));
+    }
+    let mut points = Vec::with_capacity(count);
+    for _ in 0..count {
+        let values = reader.numbers("source_pattern", 2)?;
+        let amplitude = 10.0_f64.powf(values[1] / 20.0);
+        if !amplitude.is_finite()
+            || points
+                .last()
+                .is_some_and(|point: &SourcePatternPoint| values[0] <= point.angle_degrees)
+        {
+            return Err(reader_error(
+                &reader,
+                "KR0201",
+                "source pattern requires increasing finite angles and finite dB levels",
+                "source_pattern",
+            ));
+        }
+        points.push(SourcePatternPoint {
+            angle_degrees: values[0],
+            amplitude,
+        });
+    }
+    reader.finish()?;
+    Ok(points)
 }
 
 fn parse_field(source: &str, path: &Path) -> Result<Field, DiagnosticReport> {
@@ -1813,15 +1931,15 @@ fn parse_field(source: &str, path: &Path) -> Result<Field, DiagnosticReport> {
     let options = reader.text("field_options")?;
     let chars: Vec<char> = options.text.chars().collect();
     let option = |index| chars.get(index).copied().unwrap_or(' ');
-    if !matches!(option(0), 'X' | 'R')
+    if !matches!(option(0), 'X' | 'R' | 'S')
         || !matches!(option(1), ' ' | 'A')
-        || !matches!(option(2), ' ' | 'O')
-        || !matches!(option(3), ' ' | 'C')
+        || !matches!(option(2), ' ' | 'O' | '*')
+        || !matches!(option(3), ' ' | 'C' | 'I')
         || chars.iter().skip(4).any(|ch| !ch.is_whitespace())
     {
         return Err(one(
             "KR0202",
-            "requires a coherent, omnidirectional line or point source",
+            "requires line, point or scaled-cylindrical geometry; omni or tabulated pattern; and coherent or incoherent addition",
             "field_options",
             path,
             options.line,
@@ -1847,11 +1965,18 @@ fn parse_field(source: &str, path: &Path) -> Result<Field, DiagnosticReport> {
 
     Ok(Field {
         mode_limit,
-        source_geometry: if option(0) == 'X' {
-            SourceGeometry::Line
-        } else {
-            SourceGeometry::Point
+        source_geometry: match option(0) {
+            'X' => SourceGeometry::Line,
+            'R' => SourceGeometry::Point,
+            _ => SourceGeometry::ScaledCylindrical,
         },
+        mode_addition: if option(3) == 'I' {
+            ModeAddition::Incoherent
+        } else {
+            ModeAddition::Coherent
+        },
+        source_pattern_requested: option(2) == '*',
+        source_pattern: Vec::new(),
         source_depths,
         receiver_depths,
         receiver_ranges_m: ranges_km.into_iter().map(|range| range * 1000.0).collect(),
@@ -2300,11 +2425,50 @@ mod tests {
             "bottom_attenuation_db_per_wavelength"
         );
 
-        let flp = include_str!("../tests/fixtures/Pekeris.flp").replace("'X OC'", "'S OC'");
+        let flp = include_str!("../tests/fixtures/Pekeris.flp").replace("'X OC'", "'T OC'");
         let error = parse_field(&flp, Path::new("Pekeris.flp"))
             .err()
-            .expect("scaled source should be rejected in this slice");
+            .expect("unknown FIELD geometry should be rejected");
         assert_eq!(error.diagnostics()[0].field, "field_options");
         assert_eq!(error.diagnostics()[0].line, 2);
+    }
+
+    #[test]
+    fn parses_single_profile_field_extensions_and_source_pattern() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let scaled = super::load_case(
+            fixtures.join("FieldScaled.env"),
+            fixtures.join("FieldScaled.flp"),
+        )
+        .unwrap();
+        assert_eq!(
+            scaled.source_geometry,
+            crate::SourceGeometry::ScaledCylindrical
+        );
+
+        let pattern = super::load_complex_case(
+            fixtures.join("FieldPattern.env"),
+            fixtures.join("FieldPattern.flp"),
+        )
+        .unwrap();
+        assert_eq!(pattern.mode_addition, crate::ModeAddition::Coherent);
+        assert_eq!(pattern.source_pattern.len(), 7);
+        assert!((pattern.source_pattern[2].amplitude - 10.0_f64.powf(-3.0 / 20.0)).abs() < 1e-15);
+        assert_eq!(
+            super::source_pattern_extension(
+                include_str!("../tests/fixtures/FieldPattern.flp"),
+                Path::new("FieldPattern.flp")
+            )
+            .unwrap(),
+            Some("sbp")
+        );
+
+        let incoherent = super::load_complex_case(
+            fixtures.join("FieldIncoherent.env"),
+            fixtures.join("FieldIncoherent.flp"),
+        )
+        .unwrap();
+        assert_eq!(incoherent.mode_addition, crate::ModeAddition::Incoherent);
+        assert_eq!(incoherent.source_pattern, []);
     }
 }

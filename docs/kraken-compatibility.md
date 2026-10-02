@@ -5,9 +5,11 @@ The numerical reference is Acoustics Toolbox `v2023.5`, commit
 Fortran 12.2 environment described in [`reference.md`](reference.md).
 
 **Status:** `crates/kraken` supports range-independent, layered-fluid
-trapped or confined modes with material/volume and fluid-half-space attenuation,
-and coherent line- or point-source FIELD. KRAKENC computes trapped and leaky
-modes and coherent FIELD for complex `N/C/P/S` or lossless fixed-Munk-A water.
+trapped or confined modes with material/volume and fluid-half-space attenuation.
+Range-independent FIELD supports line, point and scaled-cylindrical sources,
+omnidirectional or tabulated patterns, and coherent or incoherent mode addition.
+KRAKENC computes trapped and leaky modes and the same FIELD options for complex
+`N/C/P/S` or lossless fixed-Munk-A water.
 Both backends accept smooth V/R/A top and bottom combinations, with bounded
 Richardson refinement; KRAKEN half-spaces must remain trapped. Legacy material
 units N/M/m/F/W/Q/L and added T/F/B volume attenuation are supported as detailed below. Unmodified
@@ -66,8 +68,9 @@ The KRAKEN `load_case`/`solve` path currently accepts a narrow legacy
   nonnegative absorption; analytic A remains lossless. Homogeneous finite solids outside the contiguous
   fluid interval are supported separately; graded/interleaved solids and rough
   boundaries remain unsupported;
-- a coherent, omnidirectional line (`X`) or point (`R`) source (`O`, `C`),
-  with one range-independent FIELD profile at 0 km;
+- a line (`X`), point (`R`) or scaled-cylindrical (`S`) source; omnidirectional
+  (`O`) or same-stem tabulated (`*`, `.sbp`) pattern; coherent (`C`) or
+  incoherent (`I`) mode addition; one range-independent FIELD profile at 0 km;
 - finite, in-water source/receiver depths. FIELD normally interpolates the
   `.env` modal samples; it may extend either sampled endpoint by at most
   `1500 / frequency_hz` metres using the nearest two complex32 samples.
@@ -491,6 +494,30 @@ FIELD and nonzero IRC powers in committed goldens and fresh CI. Hashes and
 source/compiler records are [with the goldens](../crates/kraken/tests/fixtures/golden/README.md).
 Rust BOUNCE generation remains excluded. CLI schema-v1 additive metadata records
 the exact consumed table snapshot alongside `.env/.flp`.
+
+### Single-profile FIELD extensions
+
+The range-independent FIELD path now implements the remaining single-profile
+options from the initial target: scaled-cylindrical geometry, tabulated source
+patterns and incoherent mode addition. `S` uses point-source modal normalization
+but omits the final cylindrical `1/sqrt(range + offset)` spreading. `.sbp`
+levels are converted from dB to linear pressure amplitude and interpolated at
+the pinned FIELD take-off angle (`c0 = 1500 m/s`). As in v2023.5 FIELD, one
+pattern table shades the first source-depth block. `I` suppresses modal phase
+and returns the complex square root of the sum of squared complex modal
+contributions used by `EvaluateMod.f90`; it is not replaced by an absolute-value
+intensity model.
+
+Three small derived pairs are the fixed representative acceptance paths, not a
+new option Cartesian product: `FieldScaled` through KRAKEN (3 modes/9 pressures),
+`FieldPattern` through KRAKENC (4/9), and `FieldIncoherent` through KRAKENC
+(4/9). Their MOD/SHD outputs are byte-identical in three pinned runs. Complete
+modes, shapes and pressures pass the existing tolerances through the API and
+actual CLI/HDF5; local maximum pressure error is 3.34e-8. The 16-record
+`golden/single-profile-field.sha256` manifest locks inputs and reference files.
+HDF5 records addition/pattern metadata and the exact consumed SBP snapshot.
+Multi-profile adiabatic/coupled propagation remains the separate next FIELD
+stage; no newly observed option combination is added to this checkpoint.
 
 ### Multiple frequencies
 

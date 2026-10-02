@@ -177,6 +177,16 @@ provenance. KRAKENC supports contiguous layered fluids; KRAKEN finite solids
 currently require one fluid. Multi-fluid KRAKEN failures are explicitly rejected,
 not added to the existing parity exception. See [finite-cap scope](kraken-finite-elastic-layers.md).
 
+The single-profile FIELD checkpoint adds three explicitly derived representative
+pairs, without expanding them into an option Cartesian product: `FieldScaled`
+through KRAKEN (3 modes/9 pressures), and `FieldPattern` / `FieldIncoherent`
+through KRAKENC (4/9 each). The pattern case consumes a committed seven-point
+`.sbp`. Three pinned runs produced byte-identical MOD/SHD for every pair; all
+modes, shapes and pressures pass direct and actual CLI-HDF5 comparison at the
+unchanged tolerances, with local maximum pressure error 3.34e-8. Inputs and
+reference outputs are locked by `golden/single-profile-field.sha256`; Rust HDF5
+is not a golden. Multi-profile FIELD remains outside this checkpoint.
+
 ## Pinned Linux x86-64 oracle
 
 `tools/reference` provides the reproducible differential environment:

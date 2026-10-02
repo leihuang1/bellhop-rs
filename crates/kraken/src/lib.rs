@@ -125,6 +125,20 @@ pub enum ModeSolver {
 pub enum SourceGeometry {
     Line,
     Point,
+    ScaledCylindrical,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModeAddition {
+    Coherent,
+    Incoherent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SourcePatternPoint {
+    pub angle_degrees: f64,
+    /// Linear pressure amplitude.
+    pub amplitude: f64,
 }
 
 /// Smooth boundary; compressional material values live in the corresponding case fields.
@@ -254,6 +268,9 @@ pub struct CaseDefinition {
     /// Bottom half-space attenuation in dB per wavelength (0 for lossless, rigid or table).
     pub bottom_attenuation_db_per_wavelength: f64,
     pub source_geometry: SourceGeometry,
+    pub mode_addition: ModeAddition,
+    /// Empty for an omnidirectional source; otherwise ordered angle/amplitude samples.
+    pub source_pattern: Vec<SourcePatternPoint>,
     /// Mesh intervals at the reference frequency, or 0 for 20 per last-SSP wavelength.
     pub mesh_points: usize,
     pub c_low_mps: f64,
@@ -542,6 +559,23 @@ impl Case {
                 format!("mode limit must be in 1..={MAX_MODE_LIMIT}"),
             ));
         }
+        if !definition.source_pattern.is_empty()
+            && (!(2..=MAX_VECTOR_LENGTH).contains(&definition.source_pattern.len())
+                || definition.source_pattern.iter().any(|point| {
+                    !point.angle_degrees.is_finite()
+                        || !point.amplitude.is_finite()
+                        || point.amplitude < 0.0
+                })
+                || definition
+                    .source_pattern
+                    .windows(2)
+                    .any(|pair| pair[1].angle_degrees <= pair[0].angle_degrees))
+        {
+            diagnostics.push(error(
+                "source_pattern",
+                "source pattern requires 2..=100000 increasing finite angles and finite nonnegative amplitudes",
+            ));
+        }
         if definition.mode_sample_depths_m.is_empty()
             || definition.mode_sample_depths_m.len() > MAX_VECTOR_LENGTH
             || definition.mode_sample_depths_m.iter().any(|depth| {
@@ -719,7 +753,7 @@ pub struct SimulationResult {
     pub field: PressureField,
 }
 
-/// Compute normal modes and the coherent range-independent line- or point-source field.
+/// Compute normal modes and a supported range-independent FIELD.
 ///
 /// # Errors
 ///

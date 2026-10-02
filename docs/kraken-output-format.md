@@ -3,7 +3,7 @@
 This is a product adapter for the **currently accepted numerical subset** in
 [kraken-compatibility.md](kraken-compatibility.md), not completion of its planned
 matrix. It supports legacy `.env/.flp` inputs, KRAKEN or KRAKENC, and discrete
-single/multiple-frequency modes plus coherent FIELD. JSON, HTTP, modes-only CLI
+single/multiple-frequency modes plus supported range-independent FIELD. JSON, HTTP, modes-only CLI
 runs, reflection-table generation, ray arrivals and time-domain synthesis are
 not provided. Original BroadBand/MunkK is accepted through KRAKEN; KRAKENC
 now supports its S profile but still rejects 500 Hz at the unchanged work ceiling.
@@ -53,7 +53,8 @@ builds it using the existing static HDF5 dependency.
   blank restart/no B, smooth bottom and cLow >= last SSP-node speed.
   Evanescent top-table roots, top P and simultaneous top/bottom tables are rejected.
 - `.flp` defaults to the environment's same-stem file. It remains required:
-  `.env` controls modal samples; `.flp` controls FIELD geometry and mode limit.
+  `.env` controls modal samples; `.flp` controls FIELD geometry, mode addition,
+  source-pattern selection and mode limit. `*` consumes the `.flp` stem's `.sbp`.
 - Output defaults to `<case-stem>.h5` in the current directory. Its parent
   directory must already exist.
 - Existing destinations require `--overwrite`. Input paths and symlink aliases
@@ -78,7 +79,7 @@ has no production HDF5 dependency.
 
 Input limits are unchanged: 1 MiB per UTF-8 file, 1,000 frequencies, and
 5,000,000 total copied case-vector entries. Inputs are read once into bounded
-snapshots, parsed through `legacy::load_frequency_cases_with_boundary_tables`, and
+snapshots, parsed through `legacy::load_frequency_cases_with_resources`, and
 hashed from those exact bytes. Metadata is never obtained by rereading an
 input after solving.
 
@@ -129,8 +130,9 @@ This is independent of [BELLHOP schema v3](output-format.md); the common
 `/frequency_hz` is float64 `[F]`, unit `Hz`, in input order. Descending and
 repeated frequencies are retained. `/inputs/env` and `/inputs/flp` have UTF-8
 `filename` (the supplied path), uint64 `size_bytes`, and UTF-8 `sha256`
-attributes. Bottom F/P adds `/inputs/brc` or `/inputs/irc`; top F adds `/inputs/trc`
-with the same attributes, hashed from the **actual parsed snapshot**. Unused
+attributes. Bottom F/P adds `/inputs/brc` or `/inputs/irc`; top F adds `/inputs/trc`;
+a tabulated source pattern adds `/inputs/sbp`. Each is hashed from the **actual
+parsed snapshot**. Unused
 same-stem resources are neither read nor recorded. Input contents are not embedded.
 These groups and the `surface_boundary`/`bottom_boundary` attributes below are additive schema-v1
 metadata; existing dataset layouts, types, units and schema identity are unchanged.
@@ -151,7 +153,10 @@ Each `/frequencies/i` group has attributes:
 - `finite_fluid_layer_count`: uint64 number of finite fluid layers (additive v1 metadata);
 - `max_range_m`: float64 extrapolation control;
 - `field_mode_limit`: uint64 requested FIELD cap (not the total stored mode count);
-- `source_geometry`: UTF-8 `line` or `point`;
+- `source_geometry`: UTF-8 `line`, `point` or `scaled_cylindrical`;
+- `mode_addition`: UTF-8 `coherent` or `incoherent` (additive v1 metadata);
+- `source_pattern`: UTF-8 `omnidirectional` or `tabulated`, plus uint64
+  `source_pattern_point_count` (additive v1 metadata);
 - `surface_boundary`: UTF-8 `V`, `R`, `A` or `F` (additive v1 metadata);
 - `bottom_boundary`: UTF-8 `V`, `A`, `R`, `F` or `P` (additive v1 metadata).
 
@@ -230,8 +235,10 @@ Under `/frequencies/i/field`, geometry is float64:
 range varying fastest in row-major storage. It is **not** the flattened,
 range-major BELLHOP field layout. Offsets are separate per-depth values; the
 solver's effective range is range plus offset. Pressure is relative complex
-pressure, not calibrated pascals. FIELD arithmetic and storage remain single
-precision; writing adds no new numerical rounding.
+pressure, not calibrated pascals. Incoherent FIELD retains the pinned
+`EvaluateMod` complex square-root convention rather than changing the result
+model to intensity. FIELD arithmetic and storage remain single precision;
+writing adds no new numerical rounding.
 
 ## Acceptance
 
@@ -249,8 +256,9 @@ pressures), plus four small table derivatives and all three original TabRefCoef
 geo/brc/irc workflows with BOUNCE-generated resources, four cubic/analytic
 KRAKENC derivatives, broadband PCHIP Munk and original MunkS/MunkAnalytic
 environments with **derived** FIELD geometry, 27 water-material workflows and
-24 derived smooth-boundary/TRC workflows, and 41 derived layered-fluid workflows
-(50 frequency blocks, 530 modes, 4,902 pressures). Layer metadata, fractional
+24 derived smooth-boundary/TRC workflows, 41 derived layered-fluid workflows
+(50 frequency blocks, 530 modes, 4,902 pressures), and the three fixed
+single-profile FIELD-extension workflows. Layer metadata, fractional
 interfaces, cross-layer sources/receivers, repeated frequencies and cumulative
 budgets are checked; original coarse `double` and a later-frequency root-work
 failure preserve old output and remove scratch. Every mode, shape and

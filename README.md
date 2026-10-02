@@ -46,8 +46,9 @@ layer inputs needed to produce a table.
 The workspace also contains a separate KRAKEN rewrite: `kraken` currently covers
 validated range-independent `N/C/P/S` fluid stacks and single-layer fixed analytic
 Munk `A` profiles, smooth V/R/A outer boundaries, material/volume attenuation,
-and coherent line- or point-source FIELD. A separate, narrow
-KRAKENC path supports complex modes and coherent line-/point-source FIELD for
+and range-independent FIELD with line, point or scaled-cylindrical sources,
+omnidirectional/tabulated patterns, and coherent/incoherent mode addition. A
+separate, narrow KRAKENC path supports complex modes and the same FIELD options for
 complex `N/C/P/S` or lossless fixed-Munk-A fluid stacks with Richardson
 mesh extrapolation, covering trapped and leaky spectral intervals. Legacy
 N/M/m/F/W/Q/L loss units and T/F/B volume loss are supported; density gradients
@@ -94,7 +95,9 @@ cargo run --release -p kraken-cli -- run crates/kraken/tests/fixtures/PekerisCom
 ```
 
 The `kraken` binary reads `.env` plus the same-stem `.flp` (or `--flp PATH`),
-and the selected `.brc/.irc` bottom or `.trc` top resource for KRAKENC, then writes [KRAKEN HDF5 schema v1](docs/kraken-output-format.md). Frequencies
+the selected `.brc/.irc` bottom or `.trc` top resource for KRAKENC, and a
+same-stem `.sbp` when the FIELD input requests a source pattern, then writes
+[KRAKEN HDF5 schema v1](docs/kraken-output-format.md). Frequencies
 are solved and written sequentially in input order, including duplicates;
 existing outputs require `--overwrite`. The default cumulative output quota is
 256 MiB (`--max-output-bytes`). This adapter does **not** expand the numerical
@@ -106,7 +109,7 @@ matrix or provide JSON/HTTP or time-domain products. BELLHOP schema v3 is unchan
 - `bellhop-hdf5`: separate BELLHOP v3 and KRAKEN v1 HDF5 adapters
 - `bellhop-cli`: local validation, conversion, and simulation
 - `bellhop-server`: synchronous JSON/HDF5 HTTP service
-- `kraken`: layered-fluid 2D KRAKEN/KRAKENC modes and coherent FIELD
+- `kraken`: layered-fluid 2D KRAKEN/KRAKENC modes and FIELD
 - `kraken-cli`: supported legacy KRAKEN/KRAKENC pairs to atomic, bounded HDF5 output
 
 ## License

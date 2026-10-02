@@ -7,7 +7,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use hdf5::{File, Group, H5Type};
-use kraken::{Case, DiagnosticReport, ModeSolver, SimulationResult, SourceGeometry};
+use kraken::{Case, DiagnosticReport, ModeAddition, ModeSolver, SimulationResult, SourceGeometry};
 use sha2::{Digest, Sha256};
 
 use super::{hdf5_error, write_scalar_attribute, write_string_attribute};
@@ -100,7 +100,15 @@ pub fn run_legacy(
             Ok::<_, RunError>((extension, path, source))
         })
         .transpose()?;
-    let cases = kraken::legacy::load_frequency_cases_with_boundary_tables(
+    let source_pattern = kraken::legacy::source_pattern_extension(&flp_source, flp_path)
+        .map_err(|report| RunError::Input(report.to_string()))?
+        .map(|extension| {
+            let path = flp_path.with_extension(extension);
+            let source = read_source(&path)?;
+            Ok::<_, RunError>((extension, path, source))
+        })
+        .transpose()?;
+    let cases = kraken::legacy::load_frequency_cases_with_resources(
         &env_source,
         &flp_source,
         env_path,
@@ -108,14 +116,20 @@ pub fn run_legacy(
         solver,
         surface_table.as_ref().map(|(_, _, source)| source.as_str()),
         bottom_table.as_ref().map(|(_, _, source)| source.as_str()),
+        source_pattern
+            .as_ref()
+            .map(|(_, _, source)| source.as_str()),
     )
     .map_err(|report| RunError::Input(report.to_string()))?;
     let mut inputs = vec![
         ("env", env_path, env_source.as_str()),
         ("flp", flp_path, flp_source.as_str()),
     ];
-    for table in [&surface_table, &bottom_table].into_iter().flatten() {
-        inputs.push((table.0, table.1.as_path(), table.2.as_str()));
+    for resource in [&surface_table, &bottom_table, &source_pattern]
+        .into_iter()
+        .flatten()
+    {
+        inputs.push((resource.0, resource.1.as_path(), resource.2.as_str()));
     }
     protect_inputs(
         output_path,
@@ -400,7 +414,30 @@ fn write_frequency(
         match case.source_geometry {
             SourceGeometry::Line => "line",
             SourceGeometry::Point => "point",
+            SourceGeometry::ScaledCylindrical => "scaled_cylindrical",
         },
+    )?;
+    write_string_attribute(
+        group,
+        "mode_addition",
+        match case.mode_addition {
+            ModeAddition::Coherent => "coherent",
+            ModeAddition::Incoherent => "incoherent",
+        },
+    )?;
+    write_string_attribute(
+        group,
+        "source_pattern",
+        if case.source_pattern.is_empty() {
+            "omnidirectional"
+        } else {
+            "tabulated"
+        },
+    )?;
+    write_scalar_attribute(
+        group,
+        "source_pattern_point_count",
+        &(case.source_pattern.len() as u64),
     )?;
 
     write_scalar_attribute(

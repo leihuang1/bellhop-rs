@@ -252,6 +252,25 @@ fn validation_collects_errors_and_bounds_allocations() {
     input.receiver_ranges_m = vec![0.0];
     input.receiver_offsets_m = vec![-1.0; input.receiver_depths_m.len()];
     assert!(Case::from_definition(input).is_err());
+
+    let mut input = definition();
+    input.source_pattern = vec![
+        kraken::SourcePatternPoint {
+            angle_degrees: 0.0,
+            amplitude: 1.0,
+        },
+        kraken::SourcePatternPoint {
+            angle_degrees: 0.0,
+            amplitude: -1.0,
+        },
+    ];
+    assert!(
+        Case::from_definition(input)
+            .unwrap_err()
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.field == "source_pattern")
+    );
 }
 
 #[test]

@@ -27,7 +27,7 @@ const ROOT_STEPS: usize = 64;
 )]
 pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let omega = 2.0 * PI * case.frequency_hz;
-    let (bottom_k2, bottom_complex_k2) = if case.bottom_boundary == BottomBoundary::FluidHalfSpace {
+    let (bottom_k2, bottom_complex_k2) = if case.bottom_boundary.is_half_space() {
         // AttenMod::CRCI converts dB/wavelength to a positive imaginary sound speed.
         let bottom_c = Complex64::new(
             case.bottom_sound_speed_mps,
@@ -187,20 +187,19 @@ impl<'a> Mesh<'a> {
                 "mesh_points",
             ));
         }
-        let (surface_k2, surface_complex_k2) =
-            if case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
-                let c = Complex64::new(
-                    case.surface_sound_speed_mps,
-                    case.surface_attenuation_db_per_wavelength * case.surface_sound_speed_mps
-                        / (8.685_889_6 * 2.0 * PI),
-                );
-                (
-                    (omega / case.surface_sound_speed_mps).powi(2),
-                    (Complex64::new(omega, 0.0) / c).powi(2),
-                )
-            } else {
-                (0.0, Complex64::new(0.0, 0.0))
-            };
+        let (surface_k2, surface_complex_k2) = if case.surface_boundary.is_half_space() {
+            let c = Complex64::new(
+                case.surface_sound_speed_mps,
+                case.surface_attenuation_db_per_wavelength * case.surface_sound_speed_mps
+                    / (8.685_889_6 * 2.0 * PI),
+            );
+            (
+                (omega / case.surface_sound_speed_mps).powi(2),
+                (Complex64::new(omega, 0.0) / c).powi(2),
+            )
+        } else {
+            (0.0, Complex64::new(0.0, 0.0))
+        };
         if !surface_k2.is_finite()
             || !surface_complex_k2.re.is_finite()
             || !surface_complex_k2.im.is_finite()
@@ -230,6 +229,36 @@ impl<'a> Mesh<'a> {
         (Complex64::new(x, 0.0) - self.bottom_complex_k2).sqrt()
     }
 
+    fn bottom_admittance(&self, x: f64) -> f64 {
+        if matches!(
+            self.case.bottom_boundary,
+            BottomBoundary::ElasticHalfSpace { .. }
+        ) {
+            let (f, g) = crate::elastic::half_space(
+                &self.case.bottom_boundary,
+                x.into(),
+                self.omega,
+                self.case.bottom_sound_speed_mps,
+                self.case.bottom_density_g_cm3,
+                self.case.bottom_attenuation_db_per_wavelength,
+                true,
+            );
+            (f / g).re
+        } else if self.case.bottom_boundary.is_half_space() {
+            self.bottom_gamma(x).re / self.case.bottom_density_g_cm3
+        } else {
+            0.0
+        }
+    }
+
+    fn surface_admittance(&self, x: f64) -> f64 {
+        if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+            self.surface_gamma(x).re / self.case.surface_density_g_cm3
+        } else {
+            0.0
+        }
+    }
+
     fn bottom_diagonal(&self, x: f64) -> f64 {
         let diagonal = (self.b1.last().unwrap() - self.h * self.h * x) * 0.5;
         if self.case.bottom_boundary == BottomBoundary::FluidHalfSpace {
@@ -237,7 +266,7 @@ impl<'a> Mesh<'a> {
                 - self.h * self.case.water_density_g_cm3 / self.case.bottom_density_g_cm3
                     * self.bottom_gamma(x).re
         } else {
-            diagonal
+            diagonal - self.h * self.case.water_density_g_cm3 * self.bottom_admittance(x)
         }
     }
 
@@ -252,7 +281,7 @@ impl<'a> Mesh<'a> {
                 - self.h * self.case.water_density_g_cm3 / self.case.surface_density_g_cm3
                     * self.surface_gamma(x).re
         } else {
-            diagonal
+            diagonal - self.h * self.case.water_density_g_cm3 * self.surface_admittance(x)
         }
     }
 
@@ -261,12 +290,7 @@ impl<'a> Mesh<'a> {
         let diagonal = (self.b1[layer.coefficient_start + i] - layer.h * layer.h * x)
             / (layer.h * layer.density);
         if medium == 0 && i == 0 {
-            diagonal * 0.5
-                - if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
-                    self.surface_gamma(x).re / self.case.surface_density_g_cm3
-                } else {
-                    0.0
-                }
+            diagonal * 0.5 - self.surface_admittance(x)
         } else if i == layer.intervals {
             if let Some(next) = self.layers.get(medium + 1) {
                 diagonal.midpoint(
@@ -274,12 +298,7 @@ impl<'a> Mesh<'a> {
                         / (next.h * next.density),
                 )
             } else {
-                diagonal * 0.5
-                    - if self.case.bottom_boundary == BottomBoundary::FluidHalfSpace {
-                        self.bottom_gamma(x).re / self.case.bottom_density_g_cm3
-                    } else {
-                        0.0
-                    }
+                diagonal * 0.5 - self.bottom_admittance(x)
             }
         } else {
             diagonal
@@ -288,6 +307,9 @@ impl<'a> Mesh<'a> {
 
     // Inertia of the symmetric tridiagonal acoustic operator A(x): number of roots above x.
     fn count(&self, x: f64) -> usize {
+        if crate::elastic::has_half_space(self.case) {
+            return self.elastic_count(x);
+        }
         if self.layers.len() > 1 {
             let mut pivot: f64 = 0.0;
             let mut count = 0;
@@ -344,11 +366,102 @@ impl<'a> Mesh<'a> {
         count
     }
 
+    // AcousticLayers/FUNCT includes the elastic impedance poles in ModeCount;
+    // acoustic-matrix inertia alone misses the Scholte/interface branch.
+    fn elastic_count(&self, x: f64) -> usize {
+        let mut count = 0;
+        let impedance = |boundary: &BottomBoundary, cp, density: f64, loss, k2: Complex64| {
+            if matches!(boundary, BottomBoundary::ElasticHalfSpace { .. }) {
+                crate::elastic::half_space(boundary, x.into(), self.omega, cp, density, loss, true)
+            } else if boundary.is_half_space() {
+                (
+                    (Complex64::new(x, 0.0) - k2).sqrt().re.into(),
+                    density.into(),
+                )
+            } else if *boundary == BottomBoundary::Vacuum {
+                (1.0.into(), 0.0.into())
+            } else {
+                (0.0.into(), 1.0.into())
+            }
+        };
+        let (f, g) = impedance(
+            &self.case.bottom_boundary,
+            self.case.bottom_sound_speed_mps,
+            self.case.bottom_density_g_cm3,
+            self.case.bottom_attenuation_db_per_wavelength,
+            self.bottom_complex_k2,
+        );
+        if matches!(
+            self.case.bottom_boundary,
+            BottomBoundary::ElasticHalfSpace { .. }
+        ) && g.re > 0.0
+        {
+            count += 1;
+        }
+        let (mut f, mut g) = (f.re, g.re);
+        for layer in self.layers.iter().rev() {
+            let shift = layer.h * layer.h * x;
+            let mut p0 = 0.0;
+            let mut p1 = -2.0 * g;
+            let mut p2 = (self.b1[layer.coefficient_start + layer.intervals] - shift) * g
+                - 2.0 * layer.h * f * layer.density;
+            for &coefficient in self.b1
+                [layer.coefficient_start..layer.coefficient_start + layer.intervals]
+                .iter()
+                .rev()
+            {
+                p0 = p1;
+                p1 = p2;
+                p2 = (shift - coefficient) * p1 - p0;
+                if p0 * p1 <= 0.0 {
+                    count += 1;
+                }
+                if p2.abs() > 1e50 {
+                    p0 *= 1e-50;
+                    p1 *= 1e-50;
+                    p2 *= 1e-50;
+                }
+            }
+            f = -(p2 - p0) / (2.0 * layer.h) / layer.density;
+            g = -p1;
+        }
+        let (ft, gt) = impedance(
+            &self.case.surface_boundary,
+            self.case.surface_sound_speed_mps,
+            self.case.surface_density_g_cm3,
+            self.case.surface_attenuation_db_per_wavelength,
+            self.surface_complex_k2,
+        );
+        if matches!(
+            self.case.surface_boundary,
+            BottomBoundary::ElasticHalfSpace { .. }
+        ) && gt.re > 0.0
+        {
+            count += 1;
+        }
+        let delta = -f * gt.re - g * ft.re;
+        if g * delta > 0.0 {
+            count += 1;
+        }
+        count
+    }
+
     #[allow(clippy::float_cmp)]
     fn roots(&self, work: &mut usize) -> Result<Vec<f64>, DiagnosticReport> {
         // Preserve Solve1's lower search guard, including its cutoff exclusion.
-        let low = 1.00001 * (self.omega / self.case.c_high_mps).powi(2);
-        let mut high = (self.omega / self.case.c_low_mps.max(self.min_speed)).powi(2);
+        let elastic = crate::elastic::has_half_space(self.case);
+        let c_high = if elastic {
+            crate::elastic::maximum_speed(self.case)
+        } else {
+            self.case.c_high_mps
+        };
+        let minimum = if elastic {
+            crate::elastic::minimum_speed(self.case, self.min_speed)
+        } else {
+            self.min_speed
+        };
+        let low = 1.00001 * (self.omega / c_high).powi(2);
+        let mut high = (self.omega / self.case.c_low_mps.max(minimum)).powi(2);
         if self.case.surface_boundary == SurfaceBoundary::Rigid
             && self.case.bottom_boundary == BottomBoundary::Rigid
             && self.case.c_low_mps <= self.min_speed
@@ -496,12 +609,19 @@ impl<'a> Mesh<'a> {
                     * self.case.surface_density_g_cm3
                     * self.case.surface_sound_speed_mps.powi(2));
         }
-        if self.case.bottom_boundary == BottomBoundary::FluidHalfSpace {
+        if self.case.bottom_boundary.is_half_space() {
             let gamma = (x - self.bottom_complex_k2.re).sqrt();
             let x1 = 0.999_999_9 * x;
             let x2 = 1.000_000_1 * x;
-            let derivative = (self.bottom_gamma(x2).re - self.bottom_gamma(x1).re)
-                / (self.case.bottom_density_g_cm3 * (x2 - x1));
+            let derivative = if matches!(
+                self.case.bottom_boundary,
+                BottomBoundary::ElasticHalfSpace { .. }
+            ) {
+                (self.bottom_admittance(x2) - self.bottom_admittance(x1)) / (x2 - x1)
+            } else {
+                (self.bottom_gamma(x2).re - self.bottom_gamma(x1).re)
+                    / (self.case.bottom_density_g_cm3 * (x2 - x1))
+            };
             norm += derivative * phi[n - 1].powi(2);
             slow += phi[n - 1].powi(2)
                 / (2.0

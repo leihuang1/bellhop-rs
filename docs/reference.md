@@ -156,6 +156,17 @@ FIELD. None is claimed as accepted by the fluid-stack stage. The wider-spectrum
 three-layer experiment described in the compatibility/golden provenance remains
 unaccepted; a matched subset is not advertised as full original acceptance.
 
+Elastic-half-space acceptance adds 15 derived and three original input pairs:
+27 workflows, 33 frequency blocks, 415 modes and 4,707 pressures, through API and
+actual CLI/HDF5. The original scholte/normal/flused environments and official
+shared fieldbat.flp are byte copies of the pinned TLslices sources; no shear is
+removed and NG is unchanged. All .mod/.shd agree in three runs; local maximum
+pressure error is 6.67e-8 at unchanged tolerances. The 117-record
+`golden/elastic-halfspace.sha256` manifest and fresh CI source-byte comparisons
+lock provenance. KRAKEN elastic top is explicitly rejected; finite solids,
+original elsed/ice and failed slow-interface probes remain outside acceptance.
+See the [scope and evidence](kraken-elastic-halfspaces.md); no new parity waiver.
+
 ## Pinned Linux x86-64 oracle
 
 `tools/reference` provides the reproducible differential environment:

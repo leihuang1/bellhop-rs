@@ -24,6 +24,11 @@ output and atomic publication. JSON/HTTP remain unimplemented. This is not
 the full matrix below; unsupported physics is rejected. Numerical parity is
 verified for the complete workflows below, not promised for every arbitrary
 branch-sensitive secant spectrum.
+[Elastic A half-spaces](kraken-elastic-halfspaces.md) additionally support
+KRAKENC top/bottom and KRAKEN bottom boundaries over N/C/P/S fluid stacks.
+Original TLslices scholte/normal/flused now pass both engines, FIELD and CLI/HDF5.
+KRAKEN elastic top is explicitly rejected; finite solids remain unsupported.
+KRAKEN retains the pinned elastic-loss omission; use KRAKENC for that attenuation.
 
 ## Products
 
@@ -48,13 +53,16 @@ The KRAKEN `load_case`/`solve` path currently accepts a narrow legacy
   (not-a-knot cubic spline) interpolation; each layer has constant density,
   its own SSP/loss nodes and mesh, with material jumps at interfaces.
   `A` (the fixed 5000 m analytic Munk profile from upstream `misc/munk.f90`)
-  remains single-layer and lossless. Density gradients and shear are rejected;
+  remains single-layer and lossless. Density gradients and finite-layer shear are rejected;
 - smooth vacuum (`V`), rigid (`R`) or acoustic fluid half-space (`A`) at either
   end. A boundaries carry material/volume attenuation; V/R have no half-space
   record or material properties. Real KRAKEN requires cHigh no larger than
-  either A-half-space speed; KRAKENC also accepts radiating/leaky half-spaces.
-  N/C/P/S water supports nonnegative absorption; analytic A remains lossless.
-  Elastic layers and rough boundaries are not supported;
+  either fluid A-half-space speed; KRAKENC also accepts radiating/leaky half-spaces.
+  N/C/P/S water additionally accepts elastic A bottoms (both engines) or elastic
+  tops (KRAKENC only), as detailed below. KRAKEN caps elastic cHigh at cs and
+  retains the reference's omitted elastic attenuation. N/C/P/S water supports
+  nonnegative absorption; analytic A remains lossless. Finite elastic layers
+  and rough boundaries are not supported;
 - a coherent, omnidirectional line (`X`) or point (`R`) source (`O`, `C`),
   with one range-independent FIELD profile at 0 km;
 - finite, in-water source/receiver depths. FIELD normally interpolates the
@@ -283,8 +291,8 @@ Smooth V/R/A boundaries, trapped KRAKEN, trapped/leaky KRAKENC, repeated
 frequencies, up to five refinement meshes and coherent line-/point-source FIELD
 extend to fluid stacks. Analytic Munk A, F/P bottoms and top TRC **remain
 single-layer**; no new table/analytic combination is enabled. Density variation
-inside a layer, shear/elasticity, roughness and multiple FIELD profiles remain
-unsupported. At most 500 finite layers, 100,000 total SSP nodes and 100,000
+inside a layer, finite-layer shear, roughness and multiple FIELD profiles remain
+unsupported. Elastic half-spaces are added by the separate checkpoint below. At most 500 finite layers, 100,000 total SSP nodes and 100,000
 total loss values are retained. Mesh intervals, shape values, copied frequency
 inputs and numerical work use the previous ceilings **for the entire stack**.
 HDF5 v1 adds ordered finite-layer metadata without changing datasets or BELLHOP v3.
@@ -305,7 +313,8 @@ as `OriginalLayeredDouble`. Pinned KRAKEN changes 43 to 42 modes on meshes 1/2;
 both Rust backends reject changing mode counts. `LayeredDoubleRefined` explicitly
 doubles NG to 200/400/400, with 42 modes/501 pressures per engine. Likewise
 `LayeredNormalization` removes the original `normal.env` bottom's shear speed
-and is labelled derived; original normal/flused/elsed require elastic support.
+and is labelled derived. Original normal/flused now pass the elastic half-space
+checkpoint below; original elsed needs finite elastic support and remains rejected.
 Gulf's multi-profile environment is left for the later FIELD stage.
 
 The three-layer accepted refined fixture uses cHigh=1700 (all four reference
@@ -328,6 +337,36 @@ The affected calculation can still return five modes and CLI exit 0 without a
 warning: successful execution/HDF5 publication is not a parity certificate.
 The fifth mode may materially affect coherent FIELD; exact legacy reproduction
 must exclude this workflow and independently validate other unverified inputs.
+
+### Elastic half-spaces
+
+The [half-space checkpoint](kraken-elastic-halfspaces.md) ports real/complex P/S
+impedance and its normalization derivative without substituting acoustic material.
+`Boundary::ElasticHalfSpace` stores positive shear speed and canonical
+solve-frequency dB/wavelength shear loss; the existing boundary speed/density/loss
+fields carry compressional material. Validation requires positive bulk modulus
+(cp² > 4/3 cs²), finite nonnegative losses and Im(c) <= Re(c). N/C/P/S finite
+layers remain fluid, constant-density and independently meshed. Analytic Munk,
+F/P/TRC, rough interfaces and finite solid layers are not enabled.
+
+KRAKEN accepts elastic bottoms only, with the pinned cs cutoff and 0.85*cMin
+adjustment for interface waves. Its real elastic impedance **ignores elastic
+material attenuation** as in Fortran; water loss still acts. KRAKENC accepts
+elastic top/bottom and complex attenuation/radiating shear roots. Both follow
+the reference's compressional half-space group-speed expression, not an
+independently verified full elastic energy/group-dispersion calculation.
+KRAKEN elastic tops explicitly fail validation instead of publishing unverified
+roots; the reference's top search cannot be reproduced by the current isolation.
+
+15 derived pairs plus original TLslices scholte/normal/flused with official shared
+fieldbat.flp pass 27 complete workflows: 33 frequency blocks, 415 modes, 4,707
+pressures, triplicate byte-identical .mod/.shd, API and actual CLI/HDF5 at unchanged
+tolerances. The original environments are byte-identical (no shear removal or NG
+change); normal's bottom keeps cs=2000. Maximum local pressure error is 6.67e-8.
+The new metadata distinguishes requested loss from the reference real/complex
+attenuation model. Original elsed/ice, new failed slow-interface probes and
+KRAKEN elastic top remain outside acceptance; the layered release exception
+is not extended to any of them.
 
 ### Smooth boundaries and top reflection tables
 

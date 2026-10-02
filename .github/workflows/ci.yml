@@ -162,6 +162,37 @@ jobs:
           done
           cargo test --release -p kraken-cli --test run \
             layered_failures_preserve_output_and_remove_scratch -- --exact --nocapture
+      - name: Elastic half-space modes, FIELD and actual CLI HDF5 differential
+        run: |
+          (cd crates/kraken/tests/fixtures && sha256sum -c golden/elastic-halfspace.sha256)
+          mkdir -p target/reference/elastic-original-inputs
+          docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/elastic-original-inputs:/out" \
+            --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 \
+            -c 'cp /opt/acoustics-toolbox/tests/TLslices/scholte.env /opt/acoustics-toolbox/tests/TLslices/normal.env /opt/acoustics-toolbox/tests/TLslices/flused.env /opt/acoustics-toolbox/tests/TLslices/fieldbat.flp /out/'
+          for mapping in 'scholte OriginalElasticScholte' 'normal OriginalElasticNormal' 'flused OriginalElasticFlused'; do
+            set -- $mapping
+            cmp "target/reference/elastic-original-inputs/$1.env" "crates/kraken/tests/fixtures/$2.env"
+            cmp target/reference/elastic-original-inputs/fieldbat.flp "crates/kraken/tests/fixtures/$2.flp"
+          done
+          cargo build --release -p kraken-cli
+          for engine in kraken krakenc; do
+            for case in ElasticHalfBottomN ElasticHalfBottomC ElasticHalfBottomP ElasticHalfBottomS ElasticHalfTopN ElasticHalfTopC ElasticHalfTopP ElasticHalfTopS ElasticHalfBothN ElasticHalfBothC ElasticHalfBothP ElasticHalfBothS ElasticHalfLeaky ElasticHalfPower ElasticHalfShearOnly OriginalElasticScholte OriginalElasticNormal OriginalElasticFlused; do
+              if [ "$engine" = kraken ] && { [[ "$case" == ElasticHalfTop* ]] || [[ "$case" == ElasticHalfBoth* ]] || [ "$case" = ElasticHalfLeaky ]; }; then continue; fi
+              env="$PWD/crates/kraken/tests/fixtures/$case.env"
+              reference="$PWD/target/reference/$case-$engine/$case"
+              tools/reference/run-kraken-case.sh "$engine" "$env"
+              KRAKEN_FREQUENCY_SOLVER="$engine" KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
+                cargo test --release -p kraken --test differential_reference \
+                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+              target/release/kraken run "$env" --solver "$engine" --output "$reference.h5"
+              KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_FREQUENCY_SOLVER="$engine" \
+              KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
+                cargo test --release -p kraken --test differential_reference \
+                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+            done
+          done
+          cargo test --release -p kraken-cli --test run \
+            elastic_failures_preserve_output_and_remove_scratch -- --exact --nocapture
       - name: KRAKEN CLI HDF5 numerical differential
         run: |
           cargo build --release -p kraken-cli

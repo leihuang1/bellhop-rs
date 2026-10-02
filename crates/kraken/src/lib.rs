@@ -9,6 +9,7 @@ use num_complex::Complex64;
 
 mod attenuation;
 mod complex_modes;
+mod elastic;
 mod layers;
 pub mod legacy;
 mod modes;
@@ -126,11 +127,19 @@ pub enum SourceGeometry {
     Point,
 }
 
-/// Smooth fluid boundary; material values live in the corresponding case fields.
+/// Smooth boundary; compressional material values live in the corresponding case fields.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Boundary {
     Vacuum,
     FluidHalfSpace,
+    /// An elastic A half-space; compressional material uses the existing case fields.
+    /// Top elasticity requires KRAKENC. Real KRAKEN retains the reference's
+    /// elastic-loss omission and shear-speed cutoff.
+    ElasticHalfSpace {
+        shear_sound_speed_mps: f64,
+        /// Solve-frequency shear loss, in dB/wavelength.
+        shear_attenuation_db_per_wavelength: f64,
+    },
     Rigid,
     /// KRAKENC F (top TRC or bottom BRC): magnitude and unwrapped phase versus grazing angle.
     Reflection(Vec<ReflectionPoint>),
@@ -162,6 +171,12 @@ pub type SurfaceBoundary = Boundary;
 pub type BottomBoundary = Boundary;
 
 impl Boundary {
+    /// Whether this A boundary carries acoustic or elastic half-space material.
+    #[must_use]
+    pub fn is_half_space(&self) -> bool {
+        matches!(self, Self::FluidHalfSpace | Self::ElasticHalfSpace { .. })
+    }
+
     pub(crate) fn is_tabulated(&self) -> bool {
         matches!(self, Self::Reflection(_) | Self::Impedance { .. })
     }
@@ -199,9 +214,9 @@ pub struct CaseDefinition {
     pub water_depth_m: f64,
     pub interpolation: Interpolation,
     pub surface_boundary: SurfaceBoundary,
-    /// Zero unless the surface is a fluid half-space.
+    /// Zero unless the surface is an A half-space.
     pub surface_sound_speed_mps: f64,
-    /// Zero unless the surface is a fluid half-space.
+    /// Zero unless the surface is an A half-space.
     pub surface_density_g_cm3: f64,
     /// Surface half-space loss at the solve frequency, in dB/wavelength.
     pub surface_attenuation_db_per_wavelength: f64,
@@ -213,9 +228,9 @@ pub struct CaseDefinition {
     pub water_attenuation_db_per_wavelength: Vec<f64>,
     pub additional_fluid_layers: Vec<FluidLayer>,
     pub bottom_boundary: BottomBoundary,
-    /// Zero for a rigid or tabulated bottom (no half-space material).
+    /// Zero for a non-A bottom (no half-space material).
     pub bottom_sound_speed_mps: f64,
-    /// Zero for a rigid or tabulated bottom (no half-space material).
+    /// Zero for a non-A bottom (no half-space material).
     pub bottom_density_g_cm3: f64,
     /// Bottom half-space attenuation in dB per wavelength (0 for lossless, rigid or table).
     pub bottom_attenuation_db_per_wavelength: f64,
@@ -393,7 +408,8 @@ impl Case {
         if let Err(message) = reflection::validate_surface(&definition) {
             diagnostics.push(error("surface_boundary", message));
         }
-        if definition.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+        elastic::validate(&definition, &mut diagnostics);
+        if definition.surface_boundary.is_half_space() {
             if definition.surface_sound_speed_mps <= 0.0 || definition.surface_density_g_cm3 <= 0.0
             {
                 diagnostics.push(error(
@@ -410,6 +426,7 @@ impl Case {
                 ));
             }
             if definition.mode_solver == ModeSolver::Kraken
+                && definition.surface_boundary == SurfaceBoundary::FluidHalfSpace
                 && definition.c_high_mps > definition.surface_sound_speed_mps
             {
                 diagnostics.push(error(
@@ -437,7 +454,7 @@ impl Case {
                 }
             }
         }
-        if definition.bottom_boundary != BottomBoundary::FluidHalfSpace {
+        if !definition.bottom_boundary.is_half_space() {
             for (field, value) in [
                 ("bottom_sound_speed_mps", definition.bottom_sound_speed_mps),
                 ("bottom_density_g_cm3", definition.bottom_density_g_cm3),
@@ -474,7 +491,7 @@ impl Case {
         if definition.water_density_g_cm3 <= 0.0 {
             diagnostics.push(error("water_density_g_cm3", "density must be positive"));
         }
-        if definition.bottom_boundary == BottomBoundary::FluidHalfSpace {
+        if definition.bottom_boundary.is_half_space() {
             if definition.bottom_sound_speed_mps <= 0.0 {
                 diagnostics.push(error(
                     "bottom_sound_speed_mps",

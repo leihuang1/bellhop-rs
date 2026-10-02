@@ -58,7 +58,7 @@ fn half_space_materials_and_legacy_power_law_limits_are_explicit() {
             .contains("no defined reference power-law")
     );
     let bogus = include_str!("fixtures/FluidBoundaryAA.env")
-        .replace("0.0 1900.0 0.0 1.1 0.3", "0.0 1900.0 100.0 1.1 0.3");
+        .replace("0.0 1900.0 0.0 1.1 0.3", "0.0 1900.0 2000.0 1.1 0.3");
     assert!(cases(&bogus).is_err());
 }
 

@@ -30,3 +30,6 @@
 | `Bellhop/influence.f90::{BranchCut,Hermite}` | `bellhop::solver::influence::{branch_cut,hermite}` | Golden verified |
 | `Bellhop/influence.f90::{ApplyContribution,ScalePressure}` | `bellhop::solver::influence::{apply_contribution,scale_pressure}` | Golden verified |
 | `Bellhop/ArrMod.f90::AddArr` | `bellhop::solver::influence::add_arrival` | Golden verified |
+| `Kraken/BCImpedance{c}Mod.f90` elastic A half-space formula | `kraken::elastic::half_space` | KRAKEN bottom / KRAKENC top+bottom, full modes/FIELD/CLI-HDF5 differential verified |
+| `Kraken/kraken.f90::{FUNCT,AcousticLayers}` elastic-bottom mode count | `kraken::modes::Mesh::elastic_count` | Verified half-space subset; KRAKEN elastic top explicitly rejected |
+| `Kraken/kraken{c}.f90::Normalize` half-space admittance derivative | `kraken::{modes,complex_modes}` | Real/complex elastic half-space normalization verified; pinned group/loss limitations retained |

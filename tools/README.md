@@ -241,6 +241,18 @@ checks failure after three successful frequency blocks and old-output protection
 Analytic Munk and F/P/TRC remain single-layer. The test-only `.mod` reader walks
 all finite fluid media and has a last-medium corruption regression.
 
+Elastic half-spaces use the same full comparator and actual-CLI-HDF5 commands
+(for example, `case=ElasticHalfPower`). Eighteen pairs give 27 workflows:
+15 derived inputs plus original TLslices scholte/normal/flused with the official
+shared fieldbat.flp. CI verifies those originals against the installed fixed
+source, then compares every mode/pressure and elastic P/S material record.
+The HDF5 reader checks solve-frequency shear-loss and attenuation-model metadata.
+KRAKENC accepts top/bottom elasticity; KRAKEN accepts bottom only and retains
+pinned real elastic-loss omission. KRAKEN elastic top is an explicit validation
+failure, not a skipped passing workflow. Finite solid layers remain excluded.
+See [scope/provenance](../docs/kraken-elastic-halfspaces.md) and
+`golden/elastic-halfspace.sha256` (117 input/artifact records).
+
 `python3 tools/reference/probe-layered-refinement.py` is a **diagnostic-only**
 experiment for the open three-layer refinement gap. It runs the unmodified
 oracle, a zero-perturbation control and ±256-ULP seed probes in a disposable

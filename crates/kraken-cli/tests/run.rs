@@ -250,6 +250,122 @@ fn cli_round_trips_layered_fluids() {
 }
 
 #[test]
+fn cli_round_trips_elastic_half_spaces() {
+    let root = directory("elastic-half-spaces");
+    for name in [
+        "ElasticHalfBottomN",
+        "ElasticHalfBottomC",
+        "ElasticHalfBottomP",
+        "ElasticHalfBottomS",
+        "ElasticHalfTopN",
+        "ElasticHalfTopC",
+        "ElasticHalfTopP",
+        "ElasticHalfTopS",
+        "ElasticHalfBothN",
+        "ElasticHalfBothC",
+        "ElasticHalfBothP",
+        "ElasticHalfBothS",
+        "ElasticHalfLeaky",
+        "ElasticHalfPower",
+        "ElasticHalfShearOnly",
+        "OriginalElasticScholte",
+        "OriginalElasticNormal",
+        "OriginalElasticFlused",
+    ] {
+        for engine in ["kraken", "krakenc"] {
+            if engine == "kraken"
+                && (name.starts_with("ElasticHalfTop")
+                    || name.starts_with("ElasticHalfBoth")
+                    || name == "ElasticHalfLeaky")
+            {
+                continue;
+            }
+            let env = fixture(name).with_extension("env");
+            let output = root.join(format!("{name}-{engine}.h5"));
+            let process = run(&env, &output, engine, &[]);
+            assert!(
+                process.status.success(),
+                "{}",
+                String::from_utf8_lossy(&process.stderr)
+            );
+            assert_product(&output, &env, &env.with_extension("flp"), engine);
+        }
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn elastic_metadata_checks_the_last_frequency() {
+    let root = directory("elastic-metadata-corruption");
+    let env = fixture("ElasticHalfPower.env");
+    let output = root.join("power.h5");
+    let process = run(&env, &output, "krakenc", &[]);
+    assert!(
+        process.status.success(),
+        "{}",
+        String::from_utf8_lossy(&process.stderr)
+    );
+    // Avoid a read-to-write reopen: parallel CLI children can inherit native read handles.
+    let file = File::open_rw(&output).unwrap();
+    assert_product(&output, &env, &env.with_extension("flp"), "krakenc");
+    file.group("frequencies/3")
+        .unwrap()
+        .attr("bottom_shear_sound_speed_mps")
+        .unwrap()
+        .write_scalar(&1999.0_f64)
+        .unwrap();
+    file.flush().unwrap();
+    assert!(
+        std::panic::catch_unwind(|| assert_product(
+            &output,
+            &env,
+            &env.with_extension("flp"),
+            "krakenc"
+        ))
+        .is_err()
+    );
+    drop(file);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn elastic_failures_preserve_output_and_remove_scratch() {
+    let root = directory("elastic-failures");
+    let output = root.join("previous.h5");
+    fs::write(&output, b"old elastic output").unwrap();
+    let process = run(
+        &fixture("ElasticHalfTopN.env"),
+        &output,
+        "kraken",
+        &["--overwrite"],
+    );
+    assert_failure(&process, 2, &output, b"old elastic output");
+    assert!(String::from_utf8_lossy(&process.stderr).contains("elastic top requires KRAKENC"));
+
+    let env = root.join("outside.env");
+    fs::write(
+        &env,
+        fs::read_to_string(fixture("ElasticHalfBottomN.env"))
+            .unwrap()
+            .replace("1400.0 1800.0", "2500.0 3000.0"),
+    )
+    .unwrap();
+    fs::copy(fixture("ElasticHalfBottomN.flp"), env.with_extension("flp")).unwrap();
+    let process = run(&env, &output, "kraken", &["--overwrite"]);
+    assert_failure(&process, 3, &output, b"old elastic output");
+    assert!(String::from_utf8_lossy(&process.stderr).contains("phase-speed limits"));
+
+    let process = run(
+        &fixture("ElasticHalfBothN.env"),
+        &output,
+        "krakenc",
+        &["--overwrite", "--max-output-bytes", "1"],
+    );
+    assert_failure(&process, 4, &output, b"old elastic output");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn layered_failures_preserve_output_and_remove_scratch() {
     let root = directory("layered-failures");
     let output = root.join("previous.h5");
@@ -424,7 +540,8 @@ fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
             match &case.surface_boundary {
                 kraken::SurfaceBoundary::Vacuum => "V",
                 kraken::SurfaceBoundary::Rigid => "R",
-                kraken::SurfaceBoundary::FluidHalfSpace => "A",
+                kraken::SurfaceBoundary::FluidHalfSpace
+                | kraken::SurfaceBoundary::ElasticHalfSpace { .. } => "A",
                 kraken::SurfaceBoundary::Reflection(_) => "F",
                 kraken::SurfaceBoundary::Impedance { .. } => "P",
             }
@@ -433,12 +550,66 @@ fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
             attribute(&group, "bottom_boundary"),
             match &case.bottom_boundary {
                 kraken::BottomBoundary::Vacuum => "V",
-                kraken::BottomBoundary::FluidHalfSpace => "A",
+                kraken::BottomBoundary::FluidHalfSpace
+                | kraken::BottomBoundary::ElasticHalfSpace { .. } => "A",
                 kraken::BottomBoundary::Rigid => "R",
                 kraken::BottomBoundary::Reflection(_) => "F",
                 kraken::BottomBoundary::Impedance { .. } => "P",
             }
         );
+        for (name, boundary, cp, density, loss) in [
+            (
+                "surface",
+                &case.surface_boundary,
+                case.surface_sound_speed_mps,
+                case.surface_density_g_cm3,
+                case.surface_attenuation_db_per_wavelength,
+            ),
+            (
+                "bottom",
+                &case.bottom_boundary,
+                case.bottom_sound_speed_mps,
+                case.bottom_density_g_cm3,
+                case.bottom_attenuation_db_per_wavelength,
+            ),
+        ] {
+            if let kraken::Boundary::ElasticHalfSpace {
+                shear_sound_speed_mps,
+                shear_attenuation_db_per_wavelength,
+            } = boundary
+            {
+                assert_eq!(
+                    attribute(&group, &format!("{name}_half_space_material")),
+                    "elastic"
+                );
+                assert_eq!(
+                    attribute(&group, &format!("{name}_elastic_attenuation_model")),
+                    if engine == ModeSolver::Kraken {
+                        "reference_real"
+                    } else {
+                        "complex"
+                    }
+                );
+                for (name, value) in [
+                    (format!("{name}_sound_speed_mps"), cp),
+                    (format!("{name}_density_g_cm3"), density),
+                    (format!("{name}_attenuation_db_per_wavelength"), loss),
+                    (
+                        format!("{name}_shear_sound_speed_mps"),
+                        *shear_sound_speed_mps,
+                    ),
+                    (
+                        format!("{name}_shear_attenuation_db_per_wavelength"),
+                        *shear_attenuation_db_per_wavelength,
+                    ),
+                ] {
+                    assert_eq!(
+                        group.attr(&name).unwrap().read_scalar::<f64>().unwrap(),
+                        value
+                    );
+                }
+            }
+        }
         let layer_count = 1 + case.additional_fluid_layers.len();
         assert_eq!(
             group

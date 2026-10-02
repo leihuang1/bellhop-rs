@@ -195,6 +195,51 @@ fn layered_fluid_modes_and_field_match_pinned_goldens() {
 }
 
 #[test]
+fn finite_elastic_layers_match_pinned_goldens() {
+    for name in [
+        "FiniteElasticBothC",
+        "FiniteElasticBothN",
+        "FiniteElasticBothP",
+        "FiniteElasticBothS",
+        "FiniteElasticBottomC",
+        "FiniteElasticBottomN",
+        "FiniteElasticBottomP",
+        "FiniteElasticBottomS",
+        "FiniteElasticPower",
+        "FiniteElasticRigid",
+        "FiniteElasticShearOnly",
+        "FiniteElasticStack",
+        "FiniteElasticTopC",
+        "FiniteElasticTopN",
+        "FiniteElasticTopP",
+        "FiniteElasticTopS",
+        "FiniteElasticVacuum",
+        "FiniteSingleIceC",
+        "FiniteSingleIceP",
+        "FiniteSingleIceS",
+        "FiniteSingleSedimentC",
+        "FiniteSingleSedimentP",
+        "FiniteSingleSedimentS",
+        "OriginalElasticIce",
+        "OriginalElasticSediment",
+    ] {
+        for (engine, solver) in [
+            ("kraken", kraken::ModeSolver::Kraken),
+            ("krakenc", kraken::ModeSolver::Krakenc),
+        ] {
+            if engine == "kraken" && name.starts_with("FiniteElastic") {
+                continue;
+            }
+            compare_frequencies(
+                &fixtures().join(name).with_extension("env"),
+                &fixtures().join("golden").join(format!("{name}-{engine}")),
+                solver,
+            );
+        }
+    }
+}
+
+#[test]
 fn elastic_half_spaces_match_pinned_goldens() {
     for name in [
         "ElasticHalfBottomN",
@@ -479,6 +524,7 @@ fn result_for_comparison(case: &Case, index: usize, frequencies: usize) -> Simul
     );
     let group = file.group(&format!("frequencies/{index}")).unwrap();
     compare_elastic_hdf5_materials(&group, case);
+    compare_finite_elastic_hdf5(&group, case);
     let frequency_hz = group
         .attr("frequency_hz")
         .unwrap()
@@ -572,6 +618,93 @@ fn compare_elastic_hdf5_materials(group: &hdf5::Group, case: &Case) {
             }
         }
     }
+}
+
+fn compare_finite_elastic_hdf5(group: &hdf5::Group, case: &Case) {
+    let count = case.top_elastic_layers.len() + case.bottom_elastic_layers.len();
+    if count == 0 {
+        return;
+    }
+    assert_eq!(
+        group
+            .attr("finite_elastic_layer_count")
+            .unwrap()
+            .read_scalar::<u64>()
+            .unwrap(),
+        count as u64
+    );
+    let media = group.group("elastic_media").unwrap();
+    for (name, materials, mut top) in [
+        ("top", &case.top_elastic_layers, 0.0),
+        (
+            "bottom",
+            &case.bottom_elastic_layers,
+            case.fluid_bottom_depth_m(),
+        ),
+    ] {
+        let side = media.group(name).unwrap();
+        assert_eq!(side.member_names().unwrap().len(), materials.len());
+        for (index, material) in materials.iter().enumerate() {
+            let layer = side.group(&index.to_string()).unwrap();
+            assert_eq!(hdf5_attribute(&layer, "material"), "elastic");
+            assert_eq!(
+                hdf5_attribute(&layer, "attenuation_model"),
+                if case.mode_solver == kraken::ModeSolver::Kraken {
+                    "reference_real_stiffness"
+                } else {
+                    "complex"
+                }
+            );
+            assert_eq!(
+                layer
+                    .attr("requested_mesh_points")
+                    .unwrap()
+                    .read_scalar::<u64>()
+                    .unwrap(),
+                material.mesh_points as u64
+            );
+            for (attribute, value) in [
+                ("top_depth_m", top),
+                ("bottom_depth_m", material.bottom_depth_m),
+                (
+                    "compressional_sound_speed_mps",
+                    material.compressional_sound_speed_mps,
+                ),
+                ("shear_sound_speed_mps", material.shear_sound_speed_mps),
+                ("density_g_cm3", material.density_g_cm3),
+                (
+                    "compressional_attenuation_db_per_wavelength",
+                    material.compressional_attenuation_db_per_wavelength,
+                ),
+                (
+                    "shear_attenuation_db_per_wavelength",
+                    material.shear_attenuation_db_per_wavelength,
+                ),
+            ] {
+                let attr = layer.attr(attribute).unwrap();
+                assert!(attr.dtype().unwrap().is::<f64>());
+                close(
+                    attr.read_scalar::<f64>().unwrap(),
+                    value,
+                    0.0,
+                    "HDF5 finite elastic material",
+                );
+            }
+            top = material.bottom_depth_m;
+        }
+    }
+    close(
+        group
+            .group("media/0")
+            .unwrap()
+            .attr("top_depth_m")
+            .unwrap()
+            .read_scalar::<f64>()
+            .unwrap(),
+        case.fluid_top_depth_m(),
+        0.0,
+        "HDF5 first fluid top",
+    );
 }
 
 fn hdf5_modes(group: &hdf5::Group, frequency_hz: f64, depths: usize) -> ModeSet {
@@ -672,7 +805,7 @@ fn compare_modes_at(
         actual.sampled_depths_m.len(),
         "fluid mode shape size"
     );
-    let mut top = 0.0;
+    let mut top = case.fluid_top_depth_m();
     for medium in 0..layer_count {
         assert!(
             (10..=1_000_000).contains(&count(file.record(1), 12 * medium)),
@@ -868,7 +1001,9 @@ fn compare_modes_at(
         max_binary_loss = max_binary_loss.max(close(
             f64::from(mode.horizontal_wavenumber_rad_per_m.im as f32),
             stored.im,
-            if case.bottom_attenuation_db_per_wavelength > 0.0
+            if case.top_elastic_layers.iter().chain(&case.bottom_elastic_layers).any(|layer|
+                layer.compressional_attenuation_db_per_wavelength > 0.0 || layer.shear_attenuation_db_per_wavelength > 0.0)
+                || case.bottom_attenuation_db_per_wavelength > 0.0
                 || case.surface_attenuation_db_per_wavelength > 0.0
                 || [&case.surface_boundary, &case.bottom_boundary].iter().any(|boundary| matches!(boundary,
                     kraken::Boundary::ElasticHalfSpace { shear_attenuation_db_per_wavelength, .. } if *shear_attenuation_db_per_wavelength > 0.0))

@@ -250,6 +250,101 @@ fn cli_round_trips_layered_fluids() {
 }
 
 #[test]
+fn cli_round_trips_finite_elastic_layers() {
+    let root = directory("finite-elastic-products");
+    for name in [
+        "FiniteElasticBothC",
+        "FiniteElasticBothN",
+        "FiniteElasticBothP",
+        "FiniteElasticBothS",
+        "FiniteElasticBottomC",
+        "FiniteElasticBottomN",
+        "FiniteElasticBottomP",
+        "FiniteElasticBottomS",
+        "FiniteElasticPower",
+        "FiniteElasticRigid",
+        "FiniteElasticShearOnly",
+        "FiniteElasticStack",
+        "FiniteElasticTopC",
+        "FiniteElasticTopN",
+        "FiniteElasticTopP",
+        "FiniteElasticTopS",
+        "FiniteElasticVacuum",
+        "FiniteSingleIceC",
+        "FiniteSingleIceP",
+        "FiniteSingleIceS",
+        "FiniteSingleSedimentC",
+        "FiniteSingleSedimentP",
+        "FiniteSingleSedimentS",
+        "OriginalElasticIce",
+        "OriginalElasticSediment",
+    ] {
+        for solver in ["kraken", "krakenc"] {
+            if solver == "kraken" && name.starts_with("FiniteElastic") {
+                continue;
+            }
+            let env = fixture(&format!("{name}.env"));
+            let output = root.join(format!("{name}-{solver}.h5"));
+            let process = run(&env, &output, solver, &[]);
+            assert!(
+                process.status.success(),
+                "{}",
+                String::from_utf8_lossy(&process.stderr)
+            );
+            assert_product(&output, &env, &env.with_extension("flp"), solver);
+        }
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn finite_elastic_failures_preserve_output_and_remove_scratch() {
+    let root = directory("finite-elastic-failures");
+    let output = root.join("old.h5");
+    let old = b"old finite elastic output";
+    fs::write(&output, old).unwrap();
+    let process = run(
+        &fixture("FiniteElasticBothN.env"),
+        &output,
+        "kraken",
+        &["--overwrite"],
+    );
+    assert_failure(&process, 2, &output, old);
+    assert!(String::from_utf8_lossy(&process.stderr).contains("multi-fluid elastic secant parity"));
+    let env = root.join("bad.env");
+    fs::write(
+        &env,
+        fs::read_to_string(fixture("OriginalElasticSediment.env"))
+            .unwrap()
+            .replace("1300.0  2000.0", "2500.0  3000.0"),
+    )
+    .unwrap();
+    fs::copy(
+        fixture("OriginalElasticSediment.flp"),
+        env.with_extension("flp"),
+    )
+    .unwrap();
+    assert_failure(
+        &run(&env, &output, "kraken", &["--overwrite"]),
+        3,
+        &output,
+        old,
+    );
+    assert_failure(
+        &run(
+            &fixture("OriginalElasticIce.env"),
+            &output,
+            "krakenc",
+            &["--overwrite", "--max-output-bytes", "1"],
+        ),
+        4,
+        &output,
+        old,
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn cli_round_trips_elastic_half_spaces() {
     let root = directory("elastic-half-spaces");
     for name in [
@@ -291,6 +386,40 @@ fn cli_round_trips_elastic_half_spaces() {
             assert_product(&output, &env, &env.with_extension("flp"), engine);
         }
     }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn finite_elastic_metadata_checks_the_last_frequency() {
+    let root = directory("finite-elastic-metadata-corruption");
+    let env = fixture("FiniteElasticPower.env");
+    let output = root.join("power.h5");
+    let process = run(&env, &output, "krakenc", &[]);
+    assert!(
+        process.status.success(),
+        "{}",
+        String::from_utf8_lossy(&process.stderr)
+    );
+    // Retain one RW handle; parallel children must not force a native lock upgrade.
+    let file = File::open_rw(&output).unwrap();
+    assert_product(&output, &env, &env.with_extension("flp"), "krakenc");
+    file.group("frequencies/3/elastic_media/bottom/0")
+        .unwrap()
+        .attr("shear_attenuation_db_per_wavelength")
+        .unwrap()
+        .write_scalar(&0.25_f64)
+        .unwrap();
+    file.flush().unwrap();
+    assert!(
+        std::panic::catch_unwind(|| assert_product(
+            &output,
+            &env,
+            &env.with_extension("flp"),
+            "krakenc"
+        ))
+        .is_err()
+    );
+    drop(file);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -402,6 +531,78 @@ fn layered_failures_preserve_output_and_remove_scratch() {
     );
     assert_failure(&process, 4, &output, b"old layered output");
     fs::remove_dir_all(root).unwrap();
+}
+
+fn assert_finite_elastic_metadata(group: &hdf5::Group, case: &kraken::Case) {
+    let count = case.top_elastic_layers.len() + case.bottom_elastic_layers.len();
+    assert_eq!(
+        group
+            .attr("finite_elastic_layer_count")
+            .unwrap()
+            .read_scalar::<u64>()
+            .unwrap(),
+        count as u64
+    );
+    if count == 0 {
+        return;
+    }
+    for (side, layers, mut top) in [
+        ("top", &case.top_elastic_layers, 0.0),
+        (
+            "bottom",
+            &case.bottom_elastic_layers,
+            case.fluid_bottom_depth_m(),
+        ),
+    ] {
+        let media = group.group(&format!("elastic_media/{side}")).unwrap();
+        assert_eq!(media.member_names().unwrap().len(), layers.len());
+        for (index, layer) in layers.iter().enumerate() {
+            let material = media.group(&index.to_string()).unwrap();
+            assert_eq!(attribute(&material, "material"), "elastic");
+            assert_eq!(
+                attribute(&material, "attenuation_model"),
+                if case.mode_solver == ModeSolver::Kraken {
+                    "reference_real_stiffness"
+                } else {
+                    "complex"
+                }
+            );
+            assert_eq!(
+                material
+                    .attr("requested_mesh_points")
+                    .unwrap()
+                    .read_scalar::<u64>()
+                    .unwrap(),
+                layer.mesh_points as u64
+            );
+            for (name, expected) in [
+                ("top_depth_m", top),
+                ("bottom_depth_m", layer.bottom_depth_m),
+                (
+                    "compressional_sound_speed_mps",
+                    layer.compressional_sound_speed_mps,
+                ),
+                ("shear_sound_speed_mps", layer.shear_sound_speed_mps),
+                ("density_g_cm3", layer.density_g_cm3),
+                (
+                    "compressional_attenuation_db_per_wavelength",
+                    layer.compressional_attenuation_db_per_wavelength,
+                ),
+                (
+                    "shear_attenuation_db_per_wavelength",
+                    layer.shear_attenuation_db_per_wavelength,
+                ),
+            ] {
+                let attr = material.attr(name).unwrap();
+                assert!(attr.dtype().unwrap().is::<f64>());
+                assert_eq!(
+                    attr.read_scalar::<f64>().unwrap().to_bits(),
+                    expected.to_bits()
+                );
+            }
+            top = layer.bottom_depth_m;
+        }
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -610,6 +811,7 @@ fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
                 }
             }
         }
+        assert_finite_elastic_metadata(&group, case);
         let layer_count = 1 + case.additional_fluid_layers.len();
         assert_eq!(
             group
@@ -621,7 +823,7 @@ fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
         );
         let media = group.group("media").unwrap();
         assert_eq!(media.member_names().unwrap().len(), layer_count);
-        let mut top_depth = 0.0;
+        let mut top_depth = case.fluid_top_depth_m();
         for index in 0..layer_count {
             let (bottom_depth, density, mesh) = if index == 0 {
                 (

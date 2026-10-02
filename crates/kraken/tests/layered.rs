@@ -133,7 +133,7 @@ fn layer_validation_keeps_interfaces_and_materials_explicit() {
         Case::from_definition(input)
             .unwrap_err()
             .to_string()
-            .contains("500 finite fluid layers")
+            .contains("500 total finite media")
     );
     let mut input = base;
     input.interpolation = Interpolation::AnalyticMunk;
@@ -152,7 +152,7 @@ fn mesh_and_profile_budgets_are_shared_across_layers() {
     input.additional_fluid_layers[0].mesh_points = 500_000;
     let report = solve(&Case::from_definition(input).unwrap()).unwrap_err();
     assert_eq!(report.diagnostics()[0].code, "KR0302");
-    assert!(report.to_string().contains("total fluid mesh exceeds"));
+    assert!(report.to_string().contains("total finite mesh exceeds"));
     let mut input = definition();
     input.water_attenuation_db_per_wavelength.clear();
     input.additional_fluid_layers[0]
@@ -202,7 +202,7 @@ fn legacy_layer_diagnostics_point_to_the_offending_medium() {
         cases(&base.replace("50.0\n2", "50.0\n501"), ModeSolver::Krakenc)
             .unwrap_err()
             .to_string()
-            .contains("500 finite fluid layers")
+            .contains("500 total finite media")
     );
     for source in [
         base.replace("'NVW'", "'AVW'"),

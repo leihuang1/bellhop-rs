@@ -201,7 +201,21 @@ pub struct FluidLayer {
     pub mesh_points: usize,
 }
 
-/// Unvalidated fluid stack with smooth boundaries. The existing water fields
+/// A homogeneous finite elastic layer outside the contiguous fluid stack.
+/// Depths are absolute metres; losses are solve-frequency dB/wavelength.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ElasticLayer {
+    pub bottom_depth_m: f64,
+    pub compressional_sound_speed_mps: f64,
+    pub shear_sound_speed_mps: f64,
+    pub density_g_cm3: f64,
+    pub compressional_attenuation_db_per_wavelength: f64,
+    pub shear_attenuation_db_per_wavelength: f64,
+    /// Nominal mesh intervals, 0 for the reference automatic shear mesh.
+    pub mesh_points: usize,
+}
+
+/// Unvalidated contiguous fluid stack with smooth boundaries and optional homogeneous solid caps. The water fields
 /// define its first layer; `additional_fluid_layers` contains only subsequent layers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CaseDefinition {
@@ -211,6 +225,7 @@ pub struct CaseDefinition {
     /// Nominal frequency for scaling the mesh; `None` uses `frequency_hz`.
     /// Legacy broadband inputs retain freq0 here, including for automatic meshes.
     pub mesh_reference_frequency_hz: Option<f64>,
+    /// Absolute bottom depth of the first fluid, possibly below an elastic cap.
     pub water_depth_m: f64,
     pub interpolation: Interpolation,
     pub surface_boundary: SurfaceBoundary,
@@ -220,13 +235,17 @@ pub struct CaseDefinition {
     pub surface_density_g_cm3: f64,
     /// Surface half-space loss at the solve frequency, in dB/wavelength.
     pub surface_attenuation_db_per_wavelength: f64,
-    /// Empty for `AnalyticMunk`; otherwise depths from the surface to the interface.
+    /// Empty for `AnalyticMunk`; otherwise absolute depths from the first fluid top to its bottom.
     pub sound_speed_profile: Vec<SoundSpeedPoint>,
     pub water_density_g_cm3: f64,
     /// Empty for lossless water, otherwise one dB/wavelength value per SSP node.
     /// Values are evaluated at `frequency_hz` before complex SSP interpolation.
     pub water_attenuation_db_per_wavelength: Vec<f64>,
     pub additional_fluid_layers: Vec<FluidLayer>,
+    /// Ordered homogeneous elastic caps above the first fluid (top starts at 0).
+    pub top_elastic_layers: Vec<ElasticLayer>,
+    /// Ordered homogeneous elastic layers below the last fluid.
+    pub bottom_elastic_layers: Vec<ElasticLayer>,
     pub bottom_boundary: BottomBoundary,
     /// Zero for a non-A bottom (no half-space material).
     pub bottom_sound_speed_mps: f64,
@@ -323,7 +342,9 @@ impl Case {
                         || !point.sound_speed_mps.is_finite()
                         || point.sound_speed_mps <= 0.0
                 })
-                || profile.first().is_none_or(|point| point.depth_m != 0.0)
+                || profile
+                    .first()
+                    .is_none_or(|point| point.depth_m != definition.fluid_top_depth_m())
                 || profile
                     .last()
                     .is_none_or(|point| point.depth_m != definition.water_depth_m)
@@ -337,7 +358,7 @@ impl Case {
                 if analytic {
                     "analytic Munk profile has no point records"
                 } else {
-                    "require finite increasing depths from 0 to water depth and positive sound speeds"
+                    "require finite increasing depths from the first fluid top to its bottom and positive sound speeds"
                 },
             ));
         }
@@ -524,7 +545,9 @@ impl Case {
         if definition.mode_sample_depths_m.is_empty()
             || definition.mode_sample_depths_m.len() > MAX_VECTOR_LENGTH
             || definition.mode_sample_depths_m.iter().any(|depth| {
-                !depth.is_finite() || *depth < 0.0 || *depth > definition.total_depth_m()
+                !depth.is_finite()
+                    || *depth < definition.fluid_top_depth_m()
+                    || *depth > definition.fluid_bottom_depth_m()
             })
             || definition
                 .mode_sample_depths_m
@@ -548,9 +571,10 @@ impl Case {
                 diagnostics.push(error(field, "values must be finite"));
             }
             if field != "receiver_ranges_m"
-                && values
-                    .iter()
-                    .any(|depth| *depth < 0.0 || *depth > definition.total_depth_m())
+                && values.iter().any(|depth| {
+                    *depth < definition.fluid_top_depth_m()
+                        || *depth > definition.fluid_bottom_depth_m()
+                })
             {
                 diagnostics.push(error(field, "depths must lie in water"));
             }

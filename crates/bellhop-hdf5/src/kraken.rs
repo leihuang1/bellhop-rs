@@ -364,7 +364,8 @@ fn write_frequency(
         match &case.surface_boundary {
             kraken::SurfaceBoundary::Vacuum => "V",
             kraken::SurfaceBoundary::Rigid => "R",
-            kraken::SurfaceBoundary::FluidHalfSpace => "A",
+            kraken::SurfaceBoundary::FluidHalfSpace
+            | kraken::SurfaceBoundary::ElasticHalfSpace { .. } => "A",
             kraken::SurfaceBoundary::Reflection(_) => "F",
             kraken::SurfaceBoundary::Impedance { .. } => "P",
         },
@@ -374,12 +375,14 @@ fn write_frequency(
         "bottom_boundary",
         match &case.bottom_boundary {
             kraken::BottomBoundary::Vacuum => "V",
-            kraken::BottomBoundary::FluidHalfSpace => "A",
+            kraken::BottomBoundary::FluidHalfSpace
+            | kraken::BottomBoundary::ElasticHalfSpace { .. } => "A",
             kraken::BottomBoundary::Rigid => "R",
             kraken::BottomBoundary::Reflection(_) => "F",
             kraken::BottomBoundary::Impedance { .. } => "P",
         },
     )?;
+    write_elastic_half_spaces(group, case)?;
     write_scalar_attribute(
         group,
         "mesh_reference_frequency_hz",
@@ -429,6 +432,55 @@ fn write_frequency(
     write_field(group, result, budget)
 }
 
+fn write_elastic_half_spaces(group: &Group, case: &Case) -> Result<(), String> {
+    for (name, boundary, cp, density, loss) in [
+        (
+            "surface",
+            &case.surface_boundary,
+            case.surface_sound_speed_mps,
+            case.surface_density_g_cm3,
+            case.surface_attenuation_db_per_wavelength,
+        ),
+        (
+            "bottom",
+            &case.bottom_boundary,
+            case.bottom_sound_speed_mps,
+            case.bottom_density_g_cm3,
+            case.bottom_attenuation_db_per_wavelength,
+        ),
+    ] {
+        if let kraken::Boundary::ElasticHalfSpace {
+            shear_sound_speed_mps,
+            shear_attenuation_db_per_wavelength,
+        } = boundary
+        {
+            write_string_attribute(group, &format!("{name}_half_space_material"), "elastic")?;
+            write_string_attribute(
+                group,
+                &format!("{name}_elastic_attenuation_model"),
+                if case.mode_solver == ModeSolver::Kraken {
+                    "reference_real"
+                } else {
+                    "complex"
+                },
+            )?;
+            for (attribute, value) in [
+                ("sound_speed_mps", cp),
+                ("density_g_cm3", density),
+                ("attenuation_db_per_wavelength", loss),
+                ("shear_sound_speed_mps", *shear_sound_speed_mps),
+                (
+                    "shear_attenuation_db_per_wavelength",
+                    *shear_attenuation_db_per_wavelength,
+                ),
+            ] {
+                write_scalar_attribute(group, &format!("{name}_{attribute}"), &value)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn write_modes(
     group: &Group,
     result: &SimulationResult,
@@ -441,7 +493,7 @@ fn write_modes(
     write_string_attribute(
         &modes,
         "normalization",
-        "pinned AT density-weighted normalization; fluid half-space contribution when present; arbitrary unit phase",
+        "pinned AT density-weighted normalization; fluid/elastic boundary-admittance derivative when present; arbitrary unit phase",
     )?;
     dataset(
         &modes,

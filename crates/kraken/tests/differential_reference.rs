@@ -195,6 +195,48 @@ fn layered_fluid_modes_and_field_match_pinned_goldens() {
 }
 
 #[test]
+fn elastic_half_spaces_match_pinned_goldens() {
+    for name in [
+        "ElasticHalfBottomN",
+        "ElasticHalfBottomC",
+        "ElasticHalfBottomP",
+        "ElasticHalfBottomS",
+        "ElasticHalfTopN",
+        "ElasticHalfTopC",
+        "ElasticHalfTopP",
+        "ElasticHalfTopS",
+        "ElasticHalfBothN",
+        "ElasticHalfBothC",
+        "ElasticHalfBothP",
+        "ElasticHalfBothS",
+        "ElasticHalfLeaky",
+        "ElasticHalfPower",
+        "ElasticHalfShearOnly",
+        "OriginalElasticScholte",
+        "OriginalElasticNormal",
+        "OriginalElasticFlused",
+    ] {
+        for (engine, solver) in [
+            ("kraken", kraken::ModeSolver::Kraken),
+            ("krakenc", kraken::ModeSolver::Krakenc),
+        ] {
+            if engine == "kraken"
+                && (name.starts_with("ElasticHalfTop")
+                    || name.starts_with("ElasticHalfBoth")
+                    || name == "ElasticHalfLeaky")
+            {
+                continue;
+            }
+            compare_frequencies(
+                &fixtures().join(name).with_extension("env"),
+                &fixtures().join("golden").join(format!("{name}-{engine}")),
+                solver,
+            );
+        }
+    }
+}
+
+#[test]
 fn tabulated_bottom_modes_and_field_match_pinned_goldens() {
     for name in ["TabRefBrcN", "TabRefBrcC", "TabRefIrcN", "TabRefIrcC"] {
         let env = fixtures().join(name).with_extension("env");
@@ -436,6 +478,7 @@ fn result_for_comparison(case: &Case, index: usize, frequencies: usize) -> Simul
         "HDF5 frequency",
     );
     let group = file.group(&format!("frequencies/{index}")).unwrap();
+    compare_elastic_hdf5_materials(&group, case);
     let frequency_hz = group
         .attr("frequency_hz")
         .unwrap()
@@ -469,6 +512,65 @@ fn result_for_comparison(case: &Case, index: usize, frequencies: usize) -> Simul
                 .map(|(r, i)| Complex64::new(f64::from(r), f64::from(i)))
                 .collect(),
         },
+    }
+}
+
+fn compare_elastic_hdf5_materials(group: &hdf5::Group, case: &Case) {
+    for (name, boundary, cp, density, loss) in [
+        (
+            "surface",
+            &case.surface_boundary,
+            case.surface_sound_speed_mps,
+            case.surface_density_g_cm3,
+            case.surface_attenuation_db_per_wavelength,
+        ),
+        (
+            "bottom",
+            &case.bottom_boundary,
+            case.bottom_sound_speed_mps,
+            case.bottom_density_g_cm3,
+            case.bottom_attenuation_db_per_wavelength,
+        ),
+    ] {
+        if let kraken::Boundary::ElasticHalfSpace {
+            shear_sound_speed_mps,
+            shear_attenuation_db_per_wavelength,
+        } = boundary
+        {
+            assert_eq!(
+                hdf5_attribute(group, &format!("{name}_half_space_material")),
+                "elastic"
+            );
+            assert_eq!(
+                hdf5_attribute(group, &format!("{name}_elastic_attenuation_model")),
+                if case.mode_solver == kraken::ModeSolver::Kraken {
+                    "reference_real"
+                } else {
+                    "complex"
+                }
+            );
+            for (attribute, value) in [
+                ("sound_speed_mps", cp),
+                ("density_g_cm3", density),
+                ("attenuation_db_per_wavelength", loss),
+                ("shear_sound_speed_mps", *shear_sound_speed_mps),
+                (
+                    "shear_attenuation_db_per_wavelength",
+                    *shear_attenuation_db_per_wavelength,
+                ),
+            ] {
+                close(
+                    group
+                        .attr(&format!("{name}_{attribute}"))
+                        .unwrap()
+                        .read_scalar::<f64>()
+                        .unwrap(),
+                    value,
+                    0.0,
+                    "HDF5 elastic half-space material",
+                );
+            }
+        }
     }
 }
 
@@ -626,6 +728,66 @@ fn compare_modes_at(
     }
     let mode_count = count(file.record(first), 0);
     assert_eq!(mode_count, actual.modes.len(), "mode count");
+    for (offset, boundary, cp, density, loss, depth) in [
+        (
+            0,
+            &case.surface_boundary,
+            case.surface_sound_speed_mps,
+            case.surface_density_g_cm3,
+            case.surface_attenuation_db_per_wavelength,
+            0.0,
+        ),
+        (
+            25,
+            &case.bottom_boundary,
+            case.bottom_sound_speed_mps,
+            case.bottom_density_g_cm3,
+            case.bottom_attenuation_db_per_wavelength,
+            case.total_depth_m(),
+        ),
+    ] {
+        if let kraken::Boundary::ElasticHalfSpace {
+            shear_sound_speed_mps,
+            shear_attenuation_db_per_wavelength,
+        } = boundary
+        {
+            let record = file.record(first + 1);
+            assert_eq!(record[offset], b'A', "elastic half-space boundary");
+            for (at, speed, attenuation) in [
+                (offset + 1, cp, loss),
+                (
+                    offset + 9,
+                    *shear_sound_speed_mps,
+                    *shear_attenuation_db_per_wavelength,
+                ),
+            ] {
+                complex_close(
+                    complex(record, at),
+                    Complex64::new(
+                        f64::from(speed as f32),
+                        f64::from(
+                            (attenuation * speed / (8.685_889_6 * 2.0 * std::f64::consts::PI))
+                                as f32,
+                        ),
+                    ),
+                    0.0,
+                    "elastic half-space complex speed",
+                );
+            }
+            close(
+                single(record, offset + 17),
+                f64::from(density as f32),
+                0.0,
+                "elastic half-space density",
+            );
+            close(
+                single(record, offset + 21),
+                f64::from(depth as f32),
+                0.0,
+                "elastic half-space depth",
+            );
+        }
+    }
     if frequency_index + 1 == count(header, 84) {
         assert_eq!(
             file.len(),
@@ -708,6 +870,8 @@ fn compare_modes_at(
             stored.im,
             if case.bottom_attenuation_db_per_wavelength > 0.0
                 || case.surface_attenuation_db_per_wavelength > 0.0
+                || [&case.surface_boundary, &case.bottom_boundary].iter().any(|boundary| matches!(boundary,
+                    kraken::Boundary::ElasticHalfSpace { shear_attenuation_db_per_wavelength, .. } if *shear_attenuation_db_per_wavelength > 0.0))
                 || case
                     .water_attenuation_db_per_wavelength
                     .iter()

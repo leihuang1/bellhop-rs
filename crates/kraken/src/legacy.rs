@@ -375,12 +375,12 @@ fn parse_frequency_cases_with_tables(
     mode_sample_depths_m.sort_by(f64::total_cmp);
     mode_sample_depths_m.dedup_by(|left, right| *left == *right);
 
-    let bottom_location = if environment.bottom_boundary == BottomBoundary::FluidHalfSpace {
+    let bottom_location = if environment.bottom_boundary.is_half_space() {
         "bottom_half_space"
     } else {
         "bottom_options"
     };
-    let surface_location = if environment.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+    let surface_location = if environment.surface_boundary.is_half_space() {
         "surface_half_space"
     } else {
         "top_options"
@@ -516,7 +516,7 @@ fn parse_frequency_cases_with_tables(
                     layer.attenuation_db_per_wavelength.clear();
                 }
             }
-            if input.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+            if input.surface_boundary.is_half_space() {
                 input.surface_attenuation_db_per_wavelength = db_per_wavelength(
                     environment.attenuation_unit,
                     &environment.volume_loss,
@@ -527,7 +527,7 @@ fn parse_frequency_cases_with_tables(
                     environment.water_power_law,
                 );
             }
-            if input.bottom_boundary == BottomBoundary::FluidHalfSpace {
+            if input.bottom_boundary.is_half_space() {
                 input.bottom_attenuation_db_per_wavelength = db_per_wavelength(
                     environment.attenuation_unit,
                     &environment.volume_loss,
@@ -538,6 +538,26 @@ fn parse_frequency_cases_with_tables(
                     frequency_hz,
                     environment.bottom_power_law,
                 );
+            }
+            for (boundary, power) in [
+                (&mut input.surface_boundary, environment.water_power_law),
+                (&mut input.bottom_boundary, environment.bottom_power_law),
+            ] {
+                if let crate::Boundary::ElasticHalfSpace {
+                    shear_sound_speed_mps,
+                    shear_attenuation_db_per_wavelength,
+                } = boundary
+                {
+                    *shear_attenuation_db_per_wavelength = db_per_wavelength(
+                        environment.attenuation_unit,
+                        &environment.volume_loss,
+                        *shear_attenuation_db_per_wavelength,
+                        f64::MAX,
+                        *shear_sound_speed_mps,
+                        frequency_hz,
+                        power,
+                    );
+                }
             }
             Case::from_definition(input)
                 .and_then(|case| {
@@ -1169,7 +1189,7 @@ fn parse_environment_with_solver(
         ));
     }
     let bottom_power_law = read_power_law(&reader, &bottom_option, 2, option(2), frequency_hz)?;
-    let bottom_boundary = match bottom_option.tokens[0].text.as_str() {
+    let mut bottom_boundary = match bottom_option.tokens[0].text.as_str() {
         "V" => BottomBoundary::Vacuum,
         "R" => BottomBoundary::Rigid,
         "F" => BottomBoundary::Reflection(Vec::new()),
@@ -1192,6 +1212,12 @@ fn parse_environment_with_solver(
             1
         };
         bottom = read_half_space(&mut reader, "bottom_half_space", top, defaults, minimum)?;
+        if bottom[2] > 0.0 {
+            bottom_boundary = crate::Boundary::ElasticHalfSpace {
+                shear_sound_speed_mps: bottom[2],
+                shear_attenuation_db_per_wavelength: bottom[5],
+            };
+        }
     }
     let limits = reader.numbers("phase_speed_limits", 2)?;
     let max_range_m = reader.scalar("max_range_km")? * 1000.0;
@@ -1235,6 +1261,10 @@ fn parse_environment_with_solver(
             b'V' => SurfaceBoundary::Vacuum,
             b'R' => SurfaceBoundary::Rigid,
             b'F' => SurfaceBoundary::Reflection(Vec::new()),
+            _ if surface[2] > 0.0 => SurfaceBoundary::ElasticHalfSpace {
+                shear_sound_speed_mps: surface[2],
+                shear_attenuation_db_per_wavelength: surface[5],
+            },
             _ => SurfaceBoundary::FluidHalfSpace,
         },
         surface_speed: surface[1],
@@ -1404,19 +1434,20 @@ fn read_half_space(
 ) -> Result<[f64; 6], DiagnosticReport> {
     let record = reader.record(field)?;
     if !(minimum..=6).contains(&record.tokens.len()) || (record.tokens.len() < 6 && !record.slash) {
-        return Err(reader.record_error(&record, field, "expected fluid half-space values, with explicit speed/density for analytic water; trailing defaults require /"));
+        return Err(reader.record_error(&record, field, "expected half-space values, with explicit speed/density for analytic water; trailing defaults require /"));
     }
     for (value, token) in values.iter_mut().zip(&record.tokens) {
         *value = number(token, &reader.path, field)?;
     }
     if values[0] != depth
         || values[1] <= 0.0
-        || values[2] != 0.0
+        || values[2] < 0.0
         || values[3] <= 0.0
         || values[4] < 0.0
-        || values[5] != 0.0
+        || values[5] < 0.0
+        || (values[2] == 0.0 && values[5] != 0.0)
     {
-        return Err(reader.record_error(&record, field, "require fluid half-space at the boundary, positive speed/density and nonnegative absorption (no shear)"));
+        return Err(reader.record_error(&record, field, "require half-space at the boundary, positive compressional speed/density, nonnegative shear speed/loss and no shear loss for a fluid"));
     }
     Ok(values)
 }

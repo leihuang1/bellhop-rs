@@ -34,13 +34,13 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         case.surface_attenuation_db_per_wavelength * case.surface_sound_speed_mps
             / (8.685_889_6 * 2.0 * PI),
     );
-    let surface_k2 = if case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+    let surface_k2 = if case.surface_boundary.is_half_space() {
         (Complex64::new(omega, 0.0) / surface_c).powi(2)
     } else {
         Complex64::new(0.0, 0.0)
     };
     let tabulated = case.bottom_boundary.is_tabulated() || case.surface_boundary.is_tabulated();
-    let bottom_k2 = if case.bottom_boundary == BottomBoundary::FluidHalfSpace {
+    let bottom_k2 = if case.bottom_boundary.is_half_space() {
         (Complex64::new(omega, 0.0) / bottom_c).powi(2)
     } else {
         Complex64::new(0.0, 0.0)
@@ -104,6 +104,10 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             surface_k2,
             water_k2: (omega * omega / (inside_c * inside_c)).re,
         };
+        let elastic = crate::elastic::has_half_space(case);
+        if elastic {
+            min_speed = crate::elastic::minimum_speed(case, min_speed);
+        }
         let water_k2 = (omega / min_speed).powi(2);
         if !water_k2.is_finite() || b.iter().any(|x| !x.re.is_finite() || !x.im.is_finite()) {
             return Err(error(
@@ -116,7 +120,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         // subsequent secants distinct.
         // A wavenumber-dependent table may introduce extra roots; the water-only
         // estimate is not its root bound. Keep the existing 20k/300m ceilings.
-        let guesses = if tabulated || layers.len() > 1 {
+        let guesses = if tabulated || layers.len() > 1 || elastic {
             crate::MAX_MODE_LIMIT
         } else {
             (case.total_depth_m() * (water_k2 - low_k2).max(0.0).sqrt() / PI).ceil() as usize + 1
@@ -135,6 +139,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             // ponytail: wide spectral intervals use the previous-root seed from
             // Fortran; revisit the 10x cutoff if a medium-width spectrum fails.
             let guess = if tabulated
+                || elastic
                 || layers.len() > 1
                 || case.surface_boundary != SurfaceBoundary::Vacuum
                 || case.bottom_boundary != BottomBoundary::FluidHalfSpace
@@ -157,8 +162,8 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             // Neville interpolation in h²; restarting from above can skip roots.
             let guess = refinement_seed(&seed_meshes, index - 1, h).unwrap_or(guess);
             let root = secant(guess, &roots, &b, &layers, &bottom, &mut work)?;
-            if (tabulated && root.sqrt().re < omega / case.c_high_mps)
-                || (!tabulated && root.re <= low_k2)
+            if ((tabulated || elastic) && root.sqrt().re < omega / case.c_high_mps)
+                || (!(tabulated || elastic) && root.re <= low_k2)
             {
                 reached_lower_limit = true;
                 break;
@@ -185,7 +190,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         }
         seed_meshes.push((h, roots.clone()));
         let mut selected: Vec<_> = roots.into_iter().filter(|x| x.re <= high_k2).collect();
-        if tabulated {
+        if tabulated || elastic {
             selected.sort_by(|a, b| b.re.total_cmp(&a.re));
         }
         if selected.is_empty() {
@@ -287,7 +292,7 @@ fn refinement_seed(meshes: &[(f64, Vec<Complex64>)], index: usize, h: f64) -> Op
 }
 
 // The upstream PekerisRoot branch is not the principal complex square root.
-fn pekeris_root(z: Complex64) -> Complex64 {
+pub(crate) fn pekeris_root(z: Complex64) -> Complex64 {
     if z.re >= 0.0 {
         z.sqrt()
     } else {
@@ -310,6 +315,9 @@ impl Bottom<'_> {
             self.k2,
             self.case.bottom_density_g_cm3,
             self.water_k2,
+            self.case.frequency_hz,
+            self.case.bottom_sound_speed_mps,
+            self.case.bottom_attenuation_db_per_wavelength,
         )
     }
 
@@ -325,22 +333,41 @@ impl Bottom<'_> {
             self.surface_k2,
             self.case.surface_density_g_cm3,
             self.water_k2,
+            self.case.frequency_hz,
+            self.case.surface_sound_speed_mps,
+            self.case.surface_attenuation_db_per_wavelength,
         );
         (f, -g, power)
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn boundary_impedance(
     boundary: &BottomBoundary,
     x: Complex64,
     k2: Complex64,
     density: f64,
     water_k2: f64,
+    frequency: f64,
+    cp: f64,
+    loss: f64,
 ) -> (Complex64, Complex64, i32) {
     match boundary {
         BottomBoundary::Vacuum => (1.0.into(), 0.0.into(), 0),
         BottomBoundary::Rigid => (0.0.into(), 1.0.into(), 0),
         BottomBoundary::FluidHalfSpace => (pekeris_root(x - k2), density.into(), 0),
+        BottomBoundary::ElasticHalfSpace { .. } => {
+            let (f, g) = crate::elastic::half_space(
+                boundary,
+                x,
+                2.0 * PI * frequency,
+                cp,
+                density,
+                loss,
+                false,
+            );
+            (f, g, 0)
+        }
         _ => crate::reflection::impedance(boundary, x, water_k2),
     }
 }
@@ -698,7 +725,7 @@ fn mode(
                 mass * (b[layer.coefficient_start + i] + 2.0) / (omega * omega * layer.h * layer.h);
         }
     }
-    if case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+    if case.surface_boundary.is_half_space() {
         let c = Complex64::new(
             case.surface_sound_speed_mps,
             case.surface_attenuation_db_per_wavelength * case.surface_sound_speed_mps
@@ -708,7 +735,7 @@ fn mode(
             / (2.0 * (x - bottom.surface_k2).sqrt())
             / (case.surface_density_g_cm3 * c.powi(2));
     }
-    if case.bottom_boundary == BottomBoundary::FluidHalfSpace {
+    if case.bottom_boundary.is_half_space() {
         let gamma = (x - bottom.k2).sqrt();
         slow += phi[n - 1].powi(2) / (2.0 * gamma * case.bottom_density_g_cm3 * bottom_c.powi(2));
     }
@@ -725,7 +752,12 @@ fn mode(
         || case.bottom_boundary == BottomBoundary::Rigid
     {
         Complex64::new(0.0, 0.0)
-    } else if case.bottom_boundary.is_tabulated() {
+    } else if case.bottom_boundary.is_tabulated()
+        || matches!(
+            case.bottom_boundary,
+            BottomBoundary::ElasticHalfSpace { .. }
+        )
+    {
         (bottom.admittance(x2) - bottom.admittance(x1)) / (x2 - x1)
     } else {
         // Retain the established half-space rounding order.

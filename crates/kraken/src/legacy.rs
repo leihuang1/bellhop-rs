@@ -349,14 +349,18 @@ fn parse_frequency_cases_with_tables(
         ));
     }
     let mut field = parse_field(flp_source, flp_path)?;
-    // ReadSzRz stores depths in single precision. Keep an interface sample on
-    // the exact validated f64 boundary even when the f32 spelling rounds upward.
+    // ReadSzRz stores depths in single precision. Keep samples at either fluid
+    // interface on the exact f64 boundary, whether the f32 spelling rounds up or down.
     let bottom_depth = environment
         .additional_layers
         .last()
         .map_or(environment.water_depth_m, |layer| layer.bottom_depth_m);
+    let top_depth = environment
+        .top_elastic_layers
+        .last()
+        .map_or(0.0, |layer| layer.bottom_depth_m);
     #[allow(clippy::cast_possible_truncation)]
-    let boundary = f64::from(bottom_depth as f32);
+    let boundaries = [bottom_depth, top_depth].map(|depth| (f64::from(depth as f32), depth));
     for depths in [
         &mut environment.source_depths,
         &mut environment.receiver_depths,
@@ -364,8 +368,11 @@ fn parse_frequency_cases_with_tables(
         &mut field.receiver_depths,
     ] {
         for depth in depths {
-            if *depth == boundary {
-                *depth = bottom_depth;
+            for (rounded, exact) in boundaries {
+                if *depth == rounded {
+                    *depth = exact;
+                    break;
+                }
             }
         }
     }

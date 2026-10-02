@@ -61,6 +61,80 @@ fn finite_elastic_layers_keep_the_absolute_fluid_interval() {
 }
 
 #[test]
+#[allow(clippy::cast_possible_truncation)]
+fn legacy_fluid_interface_samples_keep_exact_bounds() {
+    for top in [10.2_f64, 10.3] {
+        let bottom = 100.3_f64;
+        let env = format!(
+            "'fractional cap'\n50\n2\n'NVN'\n50 0 {top}\n0 3000 1400 1 0 0\n{top} 3000 /\n101 0 {bottom}\n{top} 1500 0 1 0 0\n{bottom} 1500 /\n'A' 0\n{bottom} 2000 0 2 0 0\n1400 1900\n0\n2\n{top} {bottom} /\n2\n{top} {bottom} /\n"
+        );
+        let flp = format!(
+            "'fractional FIELD'\n'RAOC'\n9999\n1\n0\n1\n0.5\n2\n{top} {bottom} /\n2\n{top} {bottom} /\n2\n0 0 /\n"
+        );
+        for solver in [ModeSolver::Kraken, ModeSolver::Krakenc] {
+            let load = |env: &str, flp: &str| {
+                legacy::load_frequency_cases_from_sources(
+                    env,
+                    flp,
+                    Path::new("cap.env"),
+                    Path::new("cap.flp"),
+                    solver,
+                )
+            };
+            let case = load(&env, &flp).unwrap().remove(0);
+            for depths in [
+                &case.mode_sample_depths_m,
+                &case.source_depths_m,
+                &case.receiver_depths_m,
+            ] {
+                assert_eq!(
+                    depths.iter().map(|d| d.to_bits()).collect::<Vec<_>>(),
+                    [top.to_bits(), bottom.to_bits()]
+                );
+            }
+            // An adjacent f32 value genuinely inside the solid must not be snapped.
+            let outside = f32::from_bits((top as f32).to_bits() - 1).to_string();
+            for (bad_env, bad_flp, field) in [
+                (
+                    env.replace(
+                        &format!("2\n{top} {bottom} /"),
+                        &format!("2\n{outside} {bottom} /"),
+                    ),
+                    flp.clone(),
+                    "mode_sample_depths_m",
+                ),
+                (
+                    env.clone(),
+                    flp.replace(
+                        &format!("2\n{top} {bottom} /"),
+                        &format!("2\n{outside} {bottom} /"),
+                    ),
+                    "source_depths_m",
+                ),
+            ] {
+                assert!(
+                    load(&bad_env, &bad_flp)
+                        .unwrap_err()
+                        .diagnostics()
+                        .iter()
+                        .any(|d| d.field == field)
+                );
+            }
+            // The Rust API keeps exact bounds; only legacy f32 interface spellings are normalized.
+            let mut input = case.into_definition();
+            input.source_depths_m[0] = top - 1e-8;
+            assert!(
+                Case::from_definition(input)
+                    .unwrap_err()
+                    .diagnostics()
+                    .iter()
+                    .any(|d| d.field == "source_depths_m")
+            );
+        }
+    }
+}
+
+#[test]
 fn finite_elastic_materials_and_unvalidated_combinations_are_rejected() {
     let base = original("OriginalElasticIce", ModeSolver::Krakenc).into_definition();
     for change in ["cp", "cs", "density", "p_loss", "s_loss", "bulk", "depth"] {

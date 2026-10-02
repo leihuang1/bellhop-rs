@@ -124,27 +124,37 @@ pub(crate) fn validate(case: &CaseDefinition, diagnostics: &mut DiagnosticReport
             && let Err(report) = Profile::new_layer(case, layer)
         {
             let d = &report.diagnostics()[0];
-            let suffix = if d.field == "water_attenuation_db_per_wavelength" {
-                "attenuation_db_per_wavelength"
-            } else {
-                "sound_speed_profile"
-            };
-            diagnostics.push(error(format!("{field}.{suffix}"), &d.message));
+            diagnostics.push(error(profile_field(index - 1, &d.field), &d.message));
         }
     }
 }
 
 pub(crate) fn minimum_speed(case: &CaseDefinition) -> Result<f64, DiagnosticReport> {
     let mut minimum = Profile::new(case)?.minimum_speed();
-    for layer in iter(case).skip(1) {
+    for (index, layer) in iter(case).enumerate().skip(1) {
         // Malformed additional layers have already been diagnosed before interpolation.
         if layer.points.len() >= 2
             && (layer.loss.is_empty() || layer.loss.len() == layer.points.len())
         {
-            minimum = minimum.min(Profile::new_layer(case, layer)?.minimum_speed());
+            let profile = Profile::new_layer(case, layer).map_err(|mut report| {
+                for diagnostic in &mut report.diagnostics {
+                    diagnostic.field = profile_field(index - 1, &diagnostic.field);
+                }
+                report
+            })?;
+            minimum = minimum.min(profile.minimum_speed());
         }
     }
     Ok(minimum)
+}
+
+fn profile_field(index: usize, field: &str) -> String {
+    let suffix = if field == "water_attenuation_db_per_wavelength" {
+        "attenuation_db_per_wavelength"
+    } else {
+        "sound_speed_profile"
+    };
+    format!("additional_fluid_layers[{index}].{suffix}")
 }
 
 #[allow(

@@ -231,6 +231,14 @@ fn layer_spline_loss_undershoot_and_cumulative_input_copies_are_rejected() {
             .iter()
             .any(|d| d.field == "additional_fluid_layers[0].attenuation_db_per_wavelength")
     );
+    assert!(
+        report
+            .diagnostics()
+            .iter()
+            .all(|d| d.field != "sound_speed_profile"
+                && d.field != "water_attenuation_db_per_wavelength"),
+        "{report}"
+    );
     let source = include_str!("fixtures/LayeredFluidN.env")
         .replace("'NVW'", "'NVW  B'")
         .replace("\n7\n", "\n3000\n")

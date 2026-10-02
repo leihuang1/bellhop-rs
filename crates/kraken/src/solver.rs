@@ -1,5 +1,5 @@
 use crate::{
-    Case, Diagnostic, DiagnosticReport, MAX_FIELD_SAMPLES, ModeSet, PressureField,
+    Case, Diagnostic, DiagnosticReport, MAX_FIELD_SAMPLES, ModeAddition, ModeSet, PressureField,
     SimulationResult, SourceGeometry,
 };
 use num_complex::{Complex32, Complex64};
@@ -18,6 +18,7 @@ pub(super) fn solve(case: &Case) -> Result<SimulationResult, DiagnosticReport> {
     Ok(SimulationResult { modes, field })
 }
 
+#[allow(clippy::too_many_lines)]
 fn synthesize_field(case: &Case, mode_set: &ModeSet) -> Result<PressureField, DiagnosticReport> {
     let mode_count = mode_set.modes.len().min(case.mode_limit);
     let sample_count = case
@@ -44,17 +45,30 @@ fn synthesize_field(case: &Case, mode_set: &ModeSet) -> Result<PressureField, Di
         * (2.0 * field_pi).sqrt()
         * Complex32::from_polar(1.0, field_pi * 0.25);
     let mut pressure = Vec::with_capacity(sample_count);
-    for &source_depth in &case.source_depths_m {
+    for (source_index, &source_depth) in case.source_depths_m.iter().enumerate() {
         let source_shapes: Vec<_> = mode_set
             .modes
             .iter()
             .take(mode_count)
             .map(|mode| {
-                sample_shape(
+                let shape = sample_shape(
                     &mode_set.sampled_depths_m,
                     &mode.eigenfunction,
                     source_depth,
-                )
+                );
+                // Pinned FIELD applies its one source-pattern table only to the
+                // first source-depth block.
+                if source_index == 0 && !case.source_pattern.is_empty() {
+                    double(
+                        single(shape)
+                            * source_pattern_scale(
+                                case,
+                                single(mode.horizontal_wavenumber_rad_per_m),
+                            ),
+                    )
+                } else {
+                    shape
+                }
             })
             .collect();
         for (receiver_index, &receiver_depth) in case.receiver_depths_m.iter().enumerate() {
@@ -82,16 +96,27 @@ fn synthesize_field(case: &Case, mode_set: &ModeSet) -> Result<PressureField, Di
                 {
                     let k = single(mode.horizontal_wavenumber_rad_per_m);
                     let amplitude = factor * single(*source_shape)
-                        / if case.source_geometry == SourceGeometry::Point {
-                            k.sqrt()
-                        } else {
-                            k
+                        / match case.source_geometry {
+                            SourceGeometry::Line => k,
+                            SourceGeometry::Point | SourceGeometry::ScaledCylindrical => k.sqrt(),
                         };
-                    let ik = double(Complex32::new(0.0, -1.0) * k);
+                    let mut ik = Complex32::new(0.0, -1.0) * k;
+                    if case.mode_addition == ModeAddition::Incoherent {
+                        ik.im = 0.0;
+                    }
+                    let ik = double(ik);
                     let offset_shape = single(
                         double(amplitude * single(*receiver_shape)) * (ik * receiver_offset).exp(),
                     );
-                    value += offset_shape * single((ik * range).exp());
+                    let contribution = offset_shape * single((ik * range).exp());
+                    value += if case.mode_addition == ModeAddition::Incoherent {
+                        contribution * contribution
+                    } else {
+                        contribution
+                    };
+                }
+                if case.mode_addition == ModeAddition::Incoherent {
+                    value = value.sqrt();
                 }
                 if case.source_geometry == SourceGeometry::Point && range + receiver_offset > 0.0 {
                     #[allow(clippy::cast_possible_truncation)]
@@ -116,6 +141,22 @@ fn synthesize_field(case: &Case, mode_set: &ModeSet) -> Result<PressureField, Di
         receiver_offsets_m: case.receiver_offsets_m.clone(),
         pressure,
     })
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn source_pattern_scale(case: &Case, k: Complex32) -> f32 {
+    let omega = 2.0 * std::f64::consts::PI * case.frequency_hz;
+    let kz2 = ((omega.powi(2) / 1500.0_f64.powi(2) - double(k * k).re) as f32).max(0.0);
+    let angle = (f64::from(kz2).sqrt() / f64::from(k.re))
+        .atan()
+        .to_degrees();
+    let upper = case
+        .source_pattern
+        .partition_point(|point| point.angle_degrees < angle)
+        .clamp(1, case.source_pattern.len() - 1);
+    let [left, right] = [case.source_pattern[upper - 1], case.source_pattern[upper]];
+    let weight = (angle - left.angle_degrees) / (right.angle_degrees - left.angle_degrees);
+    ((1.0 - weight) * left.amplitude + weight * right.amplitude) as f32
 }
 
 fn double(value: Complex32) -> Complex64 {

@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 #[command(
     name = "kraken",
     version,
-    about = "Supported 2D KRAKEN/KRAKENC modes and coherent FIELD"
+    about = "Supported 2D KRAKEN/KRAKENC modes and FIELD"
 )]
 struct Cli {
     #[command(subcommand)]

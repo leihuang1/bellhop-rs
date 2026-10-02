@@ -391,6 +391,28 @@ fn compare_complex_with_flp(env: &Path, flp: &Path, reference: &Path) {
 }
 
 #[test]
+fn single_profile_field_extensions_match_pinned_goldens() {
+    for (name, solver) in [
+        ("FieldScaled", kraken::ModeSolver::Kraken),
+        ("FieldPattern", kraken::ModeSolver::Krakenc),
+        ("FieldIncoherent", kraken::ModeSolver::Krakenc),
+    ] {
+        compare_frequencies(
+            &fixtures().join(name).with_extension("env"),
+            &fixtures().join("golden").join(format!(
+                "{name}-{}",
+                if solver == kraken::ModeSolver::Kraken {
+                    "kraken"
+                } else {
+                    "krakenc"
+                }
+            )),
+            solver,
+        );
+    }
+}
+
+#[test]
 fn multifrequency_modes_and_field_match_pinned_goldens() {
     for (name, solver) in [
         ("PekerisBroadband", kraken::ModeSolver::Kraken),
@@ -480,6 +502,7 @@ fn compare_frequencies(env: &Path, reference: &Path, solver: kraken::ModeSolver)
 
 // Optional CLI-produced HDF5 input exercises the same strict Fortran comparator,
 // rather than trusting only the solver result before serialization.
+#[allow(clippy::too_many_lines)]
 fn result_for_comparison(case: &Case, index: usize, frequencies: usize) -> SimulationResult {
     let Some(path) = std::env::var_os("KRAKEN_HDF5_RESULT") else {
         return solve(case).unwrap();
@@ -525,6 +548,37 @@ fn result_for_comparison(case: &Case, index: usize, frequencies: usize) -> Simul
     let group = file.group(&format!("frequencies/{index}")).unwrap();
     compare_elastic_hdf5_materials(&group, case);
     compare_finite_elastic_hdf5(&group, case);
+    assert_eq!(
+        hdf5_attribute(&group, "source_geometry"),
+        match case.source_geometry {
+            kraken::SourceGeometry::Line => "line",
+            kraken::SourceGeometry::Point => "point",
+            kraken::SourceGeometry::ScaledCylindrical => "scaled_cylindrical",
+        }
+    );
+    assert_eq!(
+        hdf5_attribute(&group, "mode_addition"),
+        match case.mode_addition {
+            kraken::ModeAddition::Coherent => "coherent",
+            kraken::ModeAddition::Incoherent => "incoherent",
+        }
+    );
+    assert_eq!(
+        hdf5_attribute(&group, "source_pattern"),
+        if case.source_pattern.is_empty() {
+            "omnidirectional"
+        } else {
+            "tabulated"
+        }
+    );
+    assert_eq!(
+        group
+            .attr("source_pattern_point_count")
+            .unwrap()
+            .read_scalar::<u64>()
+            .unwrap(),
+        case.source_pattern.len() as u64
+    );
     let frequency_hz = group
         .attr("frequency_hz")
         .unwrap()

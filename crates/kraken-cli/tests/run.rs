@@ -72,6 +72,9 @@ fn cli_round_trips_single_and_multifrequency_results() {
         ("TabRefBrcC", "krakenc"),
         ("TabRefIrcN", "krakenc"),
         ("TabRefIrcC", "krakenc"),
+        ("FieldScaled", "kraken"),
+        ("FieldPattern", "krakenc"),
+        ("FieldIncoherent", "krakenc"),
         ("PekerisBroadband", "kraken"),
         ("PekerisComplexBroadband", "krakenc"),
     ] {
@@ -662,6 +665,9 @@ fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
         kraken::BottomBoundary::Impedance { .. } => inputs.push(("irc", env.with_extension("irc"))),
         _ => {}
     }
+    if !cases[0].source_pattern.is_empty() {
+        inputs.push(("sbp", flp.with_extension("sbp")));
+    }
     assert_eq!(
         file.group("inputs").unwrap().member_names().unwrap().len(),
         inputs.len()
@@ -734,7 +740,31 @@ fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
             match case.source_geometry {
                 kraken::SourceGeometry::Line => "line",
                 kraken::SourceGeometry::Point => "point",
+                kraken::SourceGeometry::ScaledCylindrical => "scaled_cylindrical",
             }
+        );
+        assert_eq!(
+            attribute(&group, "mode_addition"),
+            match case.mode_addition {
+                kraken::ModeAddition::Coherent => "coherent",
+                kraken::ModeAddition::Incoherent => "incoherent",
+            }
+        );
+        assert_eq!(
+            attribute(&group, "source_pattern"),
+            if case.source_pattern.is_empty() {
+                "omnidirectional"
+            } else {
+                "tabulated"
+            }
+        );
+        assert_eq!(
+            group
+                .attr("source_pattern_point_count")
+                .unwrap()
+                .read_scalar::<u64>()
+                .unwrap(),
+            case.source_pattern.len() as u64
         );
         assert_eq!(
             attribute(&group, "surface_boundary"),
@@ -1008,12 +1038,13 @@ fn assert_field(group: &Group, case: &Case, expected: &SimulationResult) {
 }
 
 #[test]
-fn cli_protects_consumed_tables_and_preserves_outputs_on_table_errors() {
-    let root = directory("tables");
+fn cli_protects_consumed_resources_and_preserves_outputs_on_resource_errors() {
+    let root = directory("resources");
     for (name, extension) in [
         ("TabRefBrcC", "brc"),
         ("TabRefIrcC", "irc"),
         ("FluidTrcC", "trc"),
+        ("FieldPattern", "sbp"),
     ] {
         let env = root.join(name).with_extension("env");
         let table = env.with_extension(extension);

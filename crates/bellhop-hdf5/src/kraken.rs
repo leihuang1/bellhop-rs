@@ -7,7 +7,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use hdf5::{File, Group, H5Type};
-use kraken::{Case, DiagnosticReport, ModeAddition, ModeSolver, SimulationResult, SourceGeometry};
+use kraken::{
+    Case, DiagnosticReport, FieldCase, FieldPropagation, ModeAddition, ModeSet, ModeSolver,
+    PressureField, ProfileSimulationResult, SourceGeometry,
+};
 use sha2::{Digest, Sha256};
 
 use super::{hdf5_error, write_scalar_attribute, write_string_attribute};
@@ -108,7 +111,7 @@ pub fn run_legacy(
             Ok::<_, RunError>((extension, path, source))
         })
         .transpose()?;
-    let cases = kraken::legacy::load_frequency_cases_with_resources(
+    let cases = kraken::legacy::load_field_cases_with_resources(
         &env_source,
         &flp_source,
         env_path,
@@ -150,7 +153,8 @@ pub fn run_legacy(
     }
     // Admit the known FIELD payload before doing numerical work. Modes are charged
     // as they are written, because their counts are not known before solving.
-    let pressure_bytes = cases.iter().try_fold(0_u64, |total, case| {
+    let pressure_bytes = cases.iter().try_fold(0_u64, |total, sequence| {
+        let case = &sequence.profiles()[0];
         total.checked_add(
             (case.source_depths_m.len() as u64)
                 .checked_mul(case.receiver_depths_m.len() as u64)?
@@ -189,16 +193,21 @@ pub fn run_legacy(
             ..RunSummary::default()
         };
         for (index, case) in cases.iter().enumerate() {
-            let result = kraken::solve(case).map_err(|report| RunError::Simulation {
+            let result = kraken::solve_field(case).map_err(|report| RunError::Simulation {
                 frequency_index: index,
-                frequency_hz: case.frequency_hz,
+                frequency_hz: case.profiles()[0].frequency_hz,
                 report,
             })?;
             let group = frequencies
                 .create_group(&index.to_string())
                 .map_err(|e| RunError::Output(hdf5_error(e)))?;
-            write_frequency(&group, case, &result, &mut budget).map_err(RunError::Output)?;
-            summary.mode_count += result.modes.modes.len() as u64;
+            write_frequency(&group, case, &result, &mut budget, &file, &cleanup.0)
+                .map_err(RunError::Output)?;
+            summary.mode_count += result
+                .modes
+                .iter()
+                .map(|m| m.modes.len() as u64)
+                .sum::<u64>();
             summary.pressure_count += result.field.pressure.len() as u64;
             check_file(&file, &cleanup.0, max_output_bytes).map_err(RunError::Output)?;
         }
@@ -295,7 +304,7 @@ impl Budget {
 }
 
 fn check_file(file: &File, path: &Path, maximum: u64) -> Result<(), String> {
-    // ponytail: physical quota checked after header/frequency flushes; a bounded HDF5 VFD
+    // ponytail: physical quota checked after header/profile/frequency flushes; a bounded HDF5 VFD
     // is needed for a strict in-write disk quota, not for sequential bounded results.
     file.flush().map_err(hdf5_error)?;
     check_file_size(path, maximum)
@@ -310,7 +319,7 @@ fn check_file_size(path: &Path, maximum: u64) -> Result<(), String> {
 
 fn write_header(
     file: &File,
-    cases: &[Case],
+    cases: &[FieldCase],
     inputs: &[(&str, &Path, &str)],
     budget: &mut Budget,
 ) -> Result<(), String> {
@@ -326,11 +335,11 @@ fn write_header(
         "compatibility_reference",
         "Acoustics Toolbox v2023.5 (475108519289c6fb488b58980c644ea14eccc604)",
     )?;
-    write_string_attribute(file, "title", &cases[0].title)?;
+    write_string_attribute(file, "title", &cases[0].profiles()[0].title)?;
     write_string_attribute(
         file,
         "solver",
-        match cases[0].mode_solver {
+        match cases[0].profiles()[0].mode_solver {
             ModeSolver::Kraken => "kraken",
             ModeSolver::Krakenc => "krakenc",
         },
@@ -342,7 +351,10 @@ fn write_header(
     )?;
     write_scalar_attribute(file, "frequency_count", &(cases.len() as u64))?;
     write_scalar_attribute(file, "max_output_bytes", &budget.maximum)?;
-    let frequencies: Vec<_> = cases.iter().map(|case| case.frequency_hz).collect();
+    let frequencies: Vec<_> = cases
+        .iter()
+        .map(|case| case.profiles()[0].frequency_hz)
+        .collect();
     dataset(
         file,
         "frequency_hz",
@@ -367,11 +379,57 @@ fn write_header(
 
 fn write_frequency(
     group: &Group,
-    case: &Case,
-    result: &SimulationResult,
+    case: &FieldCase,
+    result: &ProfileSimulationResult,
     budget: &mut Budget,
+    file: &File,
+    path: &Path,
 ) -> Result<(), String> {
-    write_scalar_attribute(group, "frequency_hz", &result.modes.frequency_hz)?;
+    write_profile_metadata(group, &case.profiles()[0])?;
+    write_modes(group, &result.modes[0], budget)?;
+    write_field(group, &result.field, budget)?;
+    write_scalar_attribute(group, "profile_count", &(case.profiles().len() as u64))?;
+    write_string_attribute(
+        group,
+        "field_propagation",
+        match case.propagation() {
+            FieldPropagation::RangeIndependent => "range_independent",
+            FieldPropagation::Adiabatic => "adiabatic",
+            FieldPropagation::Coupled => "coupled",
+        },
+    )?;
+    if case.profiles().len() > 1 {
+        dataset(
+            group,
+            "profile_range_m",
+            case.ranges_m(),
+            &[case.profiles().len()],
+            "m",
+            budget,
+        )?;
+        let profiles = group.create_group("profiles").map_err(hdf5_error)?;
+        for (index, (profile, modes)) in case.profiles().iter().zip(&result.modes).enumerate() {
+            let child = profiles
+                .create_group(&index.to_string())
+                .map_err(hdf5_error)?;
+            write_string_attribute(&child, "title", &profile.title)?;
+            write_scalar_attribute(&child, "range_m", &case.ranges_m()[index])?;
+            write_profile_metadata(&child, profile)?;
+            if index == 0 {
+                group
+                    .link_hard("modes", "profiles/0/modes")
+                    .map_err(hdf5_error)?;
+            } else {
+                write_modes(&child, modes, budget)?;
+            }
+            check_file(file, path, budget.maximum)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_profile_metadata(group: &Group, case: &Case) -> Result<(), String> {
+    write_scalar_attribute(group, "frequency_hz", &case.frequency_hz)?;
     write_string_attribute(
         group,
         "surface_boundary",
@@ -466,8 +524,7 @@ fn write_frequency(
         top_depth = bottom_depth;
     }
 
-    write_modes(group, result, budget)?;
-    write_field(group, result, budget)
+    Ok(())
 }
 
 fn write_elastic_layers(group: &Group, case: &Case) -> Result<(), String> {
@@ -581,14 +638,10 @@ fn write_elastic_half_spaces(group: &Group, case: &Case) -> Result<(), String> {
     Ok(())
 }
 
-fn write_modes(
-    group: &Group,
-    result: &SimulationResult,
-    budget: &mut Budget,
-) -> Result<(), String> {
+fn write_modes(group: &Group, result: &ModeSet, budget: &mut Budget) -> Result<(), String> {
     let modes = group.create_group("modes").map_err(hdf5_error)?;
-    let count = result.modes.modes.len();
-    let depths = &result.modes.sampled_depths_m;
+    let count = result.modes.len();
+    let depths = &result.sampled_depths_m;
     write_string_attribute(&modes, "eigenfunction_axis_order", "mode,sample_depth")?;
     write_string_attribute(
         &modes,
@@ -609,7 +662,6 @@ fn write_modes(
             "rad/m",
             result
                 .modes
-                .modes
                 .iter()
                 .map(|m| m.horizontal_wavenumber_rad_per_m.re)
                 .collect::<Vec<_>>(),
@@ -619,7 +671,6 @@ fn write_modes(
             "rad/m",
             result
                 .modes
-                .modes
                 .iter()
                 .map(|m| m.horizontal_wavenumber_rad_per_m.im)
                 .collect(),
@@ -627,28 +678,17 @@ fn write_modes(
         (
             "phase_speed_mps",
             "m/s",
-            result
-                .modes
-                .modes
-                .iter()
-                .map(|m| m.phase_speed_mps)
-                .collect(),
+            result.modes.iter().map(|m| m.phase_speed_mps).collect(),
         ),
         (
             "group_speed_mps",
             "m/s",
-            result
-                .modes
-                .modes
-                .iter()
-                .map(|m| m.group_speed_mps)
-                .collect(),
+            result.modes.iter().map(|m| m.group_speed_mps).collect(),
         ),
         (
             "attenuation_nepers_per_m",
             "neper/m",
             result
-                .modes
                 .modes
                 .iter()
                 .map(|m| m.attenuation_nepers_per_m)
@@ -659,7 +699,6 @@ fn write_modes(
     }
     for imaginary in [false, true] {
         let values: Vec<_> = result
-            .modes
             .modes
             .iter()
             .flat_map(|m| &m.eigenfunction)
@@ -682,11 +721,7 @@ fn write_modes(
 }
 
 #[allow(clippy::cast_possible_truncation)]
-fn write_field(
-    group: &Group,
-    result: &SimulationResult,
-    budget: &mut Budget,
-) -> Result<(), String> {
+fn write_field(group: &Group, result: &PressureField, budget: &mut Budget) -> Result<(), String> {
     let field = group.create_group("field").map_err(hdf5_error)?;
     write_string_attribute(
         &field,
@@ -694,21 +729,20 @@ fn write_field(
         "source_depth,receiver_depth,receiver_range",
     )?;
     for (name, values) in [
-        ("source_depth_m", &result.field.source_depths_m),
-        ("receiver_depth_m", &result.field.receiver_depths_m),
-        ("receiver_range_m", &result.field.receiver_ranges_m),
-        ("receiver_offset_m", &result.field.receiver_offsets_m),
+        ("source_depth_m", &result.source_depths_m),
+        ("receiver_depth_m", &result.receiver_depths_m),
+        ("receiver_range_m", &result.receiver_ranges_m),
+        ("receiver_offset_m", &result.receiver_offsets_m),
     ] {
         dataset(&field, name, values, &[values.len()], "m", budget)?;
     }
     let shape = [
-        result.field.source_depths_m.len(),
-        result.field.receiver_depths_m.len(),
-        result.field.receiver_ranges_m.len(),
+        result.source_depths_m.len(),
+        result.receiver_depths_m.len(),
+        result.receiver_ranges_m.len(),
     ];
     for imaginary in [false, true] {
         let values: Vec<_> = result
-            .field
             .pressure
             .iter()
             .map(|value| (if imaginary { value.im } else { value.re }) as f32)

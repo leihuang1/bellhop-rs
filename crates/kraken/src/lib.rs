@@ -10,7 +10,9 @@ use num_complex::Complex64;
 mod attenuation;
 mod complex_modes;
 mod elastic;
+mod field;
 mod layers;
+pub use field::{FieldCase, FieldPropagation, ProfileSimulationResult, solve_field};
 pub mod legacy;
 mod modes;
 #[cfg(test)]
@@ -273,6 +275,7 @@ pub struct CaseDefinition {
     pub source_pattern: Vec<SourcePatternPoint>,
     /// Mesh intervals at the reference frequency, or 0 for 20 per last-SSP wavelength.
     pub mesh_points: usize,
+    /// Lower phase-speed bound; zero lets the solver use the physical minimum.
     pub c_low_mps: f64,
     pub c_high_mps: f64,
     /// Eigenvalue extrapolation convergence control; 0 selects the base mesh only.
@@ -547,8 +550,11 @@ impl Case {
                 format!("mesh points must be 0 (automatic) or in 10..={MAX_MESH_POINTS}"),
             ));
         }
-        if definition.c_low_mps <= 0.0 || definition.c_high_mps <= definition.c_low_mps {
-            diagnostics.push(error("phase_speed_limits", "require 0 < c_low < c_high"));
+        if definition.c_low_mps < 0.0 || definition.c_high_mps <= definition.c_low_mps {
+            diagnostics.push(error(
+                "phase_speed_limits",
+                "require 0 <= c_low < c_high; zero selects the physical minimum",
+            ));
         }
         if definition.max_range_m < 0.0 {
             diagnostics.push(error("max_range_m", "maximum range must be non-negative"));

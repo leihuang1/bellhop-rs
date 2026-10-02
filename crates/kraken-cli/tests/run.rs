@@ -1038,6 +1038,113 @@ fn assert_field(group: &Group, case: &Case, expected: &SimulationResult) {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
+fn cli_round_trips_profile_fields_and_preserves_outputs_on_later_failure() {
+    let root = directory("profiles");
+    for (name, propagation) in [("ProfilesAd", "adiabatic"), ("ProfilesCm", "coupled")] {
+        let env = root.join(name).with_extension("env");
+        let flp = env.with_extension("flp");
+        for ext in ["env", "flp"] {
+            fs::copy(fixture(name).with_extension(ext), env.with_extension(ext)).unwrap();
+        }
+        let output = env.with_extension("h5");
+        assert!(run(&env, &output, "kraken", &[]).status.success());
+        let cases =
+            kraken::legacy::load_field_cases(&env, &flp, kraken::ModeSolver::Kraken).unwrap();
+        let expected = kraken::solve_field(&cases[0]).unwrap();
+        let file = hdf5::File::open(&output).unwrap();
+        for (kind, path) in [("env", &env), ("flp", &flp)] {
+            let input = file.group(&format!("inputs/{kind}")).unwrap();
+            assert_eq!(
+                attribute(&input, "sha256"),
+                format!("{:x}", Sha256::digest(fs::read(path).unwrap()))
+            );
+        }
+        let group = file.group("frequencies/0").unwrap();
+        assert_eq!(attribute(&group, "field_propagation"), propagation);
+        assert_eq!(
+            data::<f64>(&group, "profile_range_m", &[4], "m"),
+            cases[0].ranges_m()
+        );
+        let profiles = group.group("profiles").unwrap();
+        assert_eq!(profiles.member_names().unwrap().len(), 4);
+        let mode_count: usize = expected.modes.iter().map(|m| m.modes.len()).sum();
+        assert_eq!(
+            file.attr("mode_count")
+                .unwrap()
+                .read_scalar::<u64>()
+                .unwrap(),
+            mode_count as u64
+        );
+        for (index, modes) in expected.modes.into_iter().enumerate() {
+            let product = SimulationResult {
+                modes,
+                field: expected.field.clone(),
+            };
+            let profile = profiles.group(&index.to_string()).unwrap();
+            assert_eq!(
+                attribute(&profile, "title"),
+                cases[0].profiles()[index].title
+            );
+            assert_modes(&profile.group("modes").unwrap(), &product);
+            if index == 0 {
+                assert_modes(&group.group("modes").unwrap(), &product);
+                assert_field(
+                    &group.group("field").unwrap(),
+                    &cases[0].profiles()[0],
+                    &product,
+                );
+            }
+        }
+        drop(profiles);
+        drop(group);
+        file.close().unwrap();
+        let old = fs::read(&output).unwrap();
+        let source = fs::read_to_string(&env).unwrap();
+        // The fourth profile validates, but has no root in its selected spectral interval.
+        let split = source.rfind("1400.0 1700.0").unwrap();
+        fs::write(
+            &env,
+            format!(
+                "{}{}",
+                &source[..split],
+                source[split..].replacen("1400.0 1700.0", "1699.0 1700.0", 1)
+            ),
+        )
+        .unwrap();
+        let process = run(&env, &output, "kraken", &["--overwrite"]);
+        assert_failure(&process, 3, &output, &old);
+        assert!(String::from_utf8_lossy(&process.stderr).contains("profiles[3]"));
+        fs::write(&env, &source).unwrap();
+        assert_failure(
+            &run(
+                &env,
+                &output,
+                "kraken",
+                &["--overwrite", "--max-output-bytes", "100"],
+            ),
+            4,
+            &output,
+            &old,
+        );
+        fs::write(
+            &flp,
+            fs::read_to_string(&flp)
+                .unwrap()
+                .replace("4\n0.0 0.8 1.6 2.4", "3\n0.0 0.8 1.6"),
+        )
+        .unwrap();
+        assert_failure(
+            &run(&env, &output, "kraken", &["--overwrite"]),
+            2,
+            &output,
+            &old,
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn cli_protects_consumed_resources_and_preserves_outputs_on_resource_errors() {
     let root = directory("resources");
     for (name, extension) in [

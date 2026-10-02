@@ -391,6 +391,152 @@ fn compare_complex_with_flp(env: &Path, flp: &Path, reference: &Path) {
 }
 
 #[test]
+fn profile_fields_match_pinned_goldens() {
+    for name in ["ProfilesAd", "ProfilesCm"] {
+        compare_profiles(
+            &fixtures().join(name).with_extension("env"),
+            &fixtures().join(name).with_extension("flp"),
+            &fixtures().join("golden").join(format!("{name}-kraken")),
+            kraken::ModeSolver::Kraken,
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires pinned multi-profile modes and FIELD"]
+fn profile_fields_match_fresh_reference() {
+    let env = PathBuf::from(std::env::var_os("KRAKEN_PROFILE_ENV").unwrap());
+    let flp = PathBuf::from(
+        std::env::var_os("KRAKEN_PROFILE_FLP")
+            .unwrap_or_else(|| env.with_extension("flp").into_os_string()),
+    );
+    let root = PathBuf::from(std::env::var_os("KRAKEN_PROFILE_ROOT").unwrap());
+    compare_profiles(&env, &flp, &root, kraken::ModeSolver::Kraken);
+}
+
+fn compare_profiles(env: &Path, flp: &Path, root: &Path, solver: kraken::ModeSolver) {
+    let cases = kraken::legacy::load_field_cases(env, flp, solver).unwrap();
+    let file = Records::read(&root.with_extension("mod"));
+    let printed = fs::read_to_string(root.with_extension("prt")).unwrap();
+    let blocks: Vec<_> = printed
+        .split(if solver == kraken::ModeSolver::Kraken {
+            "KRAKEN-"
+        } else {
+            "KRAKENC-"
+        })
+        .skip(1)
+        .collect();
+    assert_eq!(blocks.len(), cases[0].profiles().len());
+    let mut offset = 0;
+    let mut references = Vec::new();
+    for block in &blocks {
+        let mut after_profile = offset + 5;
+        for _ in 0..cases.len() {
+            let m = count(file.record(after_profile), 0);
+            after_profile += 2 + m + m.div_ceil(file.record_bytes / 8);
+        }
+        references.push((
+            Records {
+                bytes: file.bytes[offset * file.record_bytes..after_profile * file.record_bytes]
+                    .to_vec(),
+                record_bytes: file.record_bytes,
+            },
+            *block,
+        ));
+        offset = after_profile;
+    }
+    assert_eq!(offset, file.len());
+    let shd = Records::read(&root.with_extension("shd"));
+    for (frequency, case) in cases.iter().enumerate() {
+        let result = profile_result_for_comparison(case, frequency, cases.len());
+        for (index, (profile, mode)) in case.profiles().iter().zip(&result.modes).enumerate() {
+            let errors = compare_modes_at(
+                profile,
+                mode,
+                &references[index].0,
+                references[index].1,
+                frequency,
+            );
+            eprintln!("profile {index}: {} modes; {errors:?}", mode.modes.len());
+        }
+        let dp = compare_field_at(&case.profiles()[0], &result.field, &shd, frequency);
+        eprintln!(
+            "{}: {} profiles / {} pressures; |dp|={dp:e}",
+            env.display(),
+            result.modes.len(),
+            result.field.pressure.len()
+        );
+    }
+}
+
+fn profile_result_for_comparison(
+    case: &kraken::FieldCase,
+    index: usize,
+    frequencies: usize,
+) -> kraken::ProfileSimulationResult {
+    let Some(path) = std::env::var_os("KRAKEN_HDF5_RESULT") else {
+        return kraken::solve_field(case).unwrap();
+    };
+    let first = result_for_comparison(&case.profiles()[0], index, frequencies);
+    let file = hdf5::File::open(path).unwrap();
+    let group = file.group(&format!("frequencies/{index}")).unwrap();
+    assert_eq!(
+        group
+            .attr("profile_count")
+            .unwrap()
+            .read_scalar::<u64>()
+            .unwrap(),
+        case.profiles().len() as u64
+    );
+    assert_eq!(
+        hdf5_attribute(&group, "field_propagation"),
+        match case.propagation() {
+            kraken::FieldPropagation::RangeIndependent => "range_independent",
+            kraken::FieldPropagation::Adiabatic => "adiabatic",
+            kraken::FieldPropagation::Coupled => "coupled",
+        }
+    );
+    assert_eq!(
+        hdf5_data::<f64>(&group, "profile_range_m", &[case.profiles().len()]),
+        case.ranges_m()
+    );
+    let profiles = group.group("profiles").unwrap();
+    assert_eq!(
+        profiles.member_names().unwrap().len(),
+        case.profiles().len()
+    );
+    let modes = case
+        .profiles()
+        .iter()
+        .enumerate()
+        .map(|(i, profile)| {
+            let child = profiles.group(&i.to_string()).unwrap();
+            assert_eq!(hdf5_attribute(&child, "title"), profile.title);
+            close(
+                child.attr("range_m").unwrap().read_scalar::<f64>().unwrap(),
+                case.ranges_m()[i],
+                0.0,
+                "profile range",
+            );
+            compare_finite_elastic_hdf5(&child, profile);
+            let m = hdf5_modes(
+                &child.group("modes").unwrap(),
+                profile.frequency_hz,
+                profile.mode_sample_depths_m.len(),
+            );
+            if i == 0 {
+                assert_eq!(m, first.modes);
+            }
+            m
+        })
+        .collect();
+    kraken::ProfileSimulationResult {
+        modes,
+        field: first.field,
+    }
+}
+
+#[test]
 fn single_profile_field_extensions_match_pinned_goldens() {
     for (name, solver) in [
         ("FieldScaled", kraken::ModeSolver::Kraken),

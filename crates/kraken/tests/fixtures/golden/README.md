@@ -1152,3 +1152,34 @@ the seven inputs and nine reference artifacts with
 `shasum -a 256 -c golden/single-profile-field.sha256`. PRT trailing whitespace
 alone is removed; Rust HDF5 is not a golden. Multi-profile adiabatic/coupled
 FIELD is not part of these fixtures.
+
+## Multi-profile FIELD
+
+`ProfilesAd` / `ProfilesCm` are constructed four-profile Pekeris derivatives,
+with depths 100/120/80/100 m and full-interval samples. Both use initial FIELD
+cap 2 and eight receiver ranges; CM can excite higher modes after an interface.
+All 13 modes and 24 pressures per path are checked, including depth changes,
+bottom half-space tails, exact interfaces, skipped segments and the final
+constant-profile continuation. These are not byte-original upstream inputs.
+
+The committed `original/Gulf/gulf_rd.env`, `gulf_ad.flp`, `gulf_cm.flp` preserve
+pinned upstream bytes, including CRLF line endings. Fresh CI pairs unchanged files under `GulfAd` / `GulfCm`
+working stems and verifies them against the pinned image source tree. Each path
+checks all 497 modes over eight profiles and all 501,501 pressures. No large
+Gulf binaries or Rust HDF5 are promoted to committed goldens.
+
+All four MOD/SHD pairs are byte-identical in three pinned runs. API and actual
+CLI/HDF5 differential pass the existing tolerances, with maximum local |dp|
+`4.1159031748919954e-10`. PRT trailing whitespace alone is removed. The 13-record
+`multi-profile.sha256` manifest locks seven input files and six small artifacts.
+The unchanged reference source hashes are:
+
+| v2023.5 source | SHA-256 |
+|---|---|
+| `KrakenField/EvaluateADMod.f90` | `d6ff17945ca0c83717f6b0bb9e4b66cf5aed83b9e54348e2323b613687b62785` |
+| `KrakenField/EvaluateCMMod.f90` | `2072109901a230bb1e233372ca95d2babee39753f58ae3b3a68419bdd6ec6d0c` |
+| `KrakenField/ReadModes.f90` | `0561feeeacc36089eb65878049ed46a7ba8d4760e2da3352bae518b4d68998b3` |
+| `KrakenField/field.f90` | `fe5ef3e7df5bdf4d42dea236439171df841f501fe9a0898e735ed841cd5120d4` |
+
+See [propagation semantics and limits](../../../../../docs/kraken-multi-profile-field.md).
+No newly discovered combination changes the initial acceptance target.

@@ -46,8 +46,10 @@ layer inputs needed to produce a table.
 The workspace also contains a separate KRAKEN rewrite: `kraken` currently covers
 validated range-independent `N/C/P/S` fluid stacks and single-layer fixed analytic
 Munk `A` profiles, smooth V/R/A outer boundaries, material/volume attenuation,
-and range-independent FIELD with line, point or scaled-cylindrical sources,
-omnidirectional/tabulated patterns, and coherent/incoherent mode addition. A
+and FIELD with line, point or scaled-cylindrical sources,
+omnidirectional/tabulated patterns, and coherent/incoherent mode addition.
+[Multi-profile adiabatic and smooth-fluid coupled FIELD](docs/kraken-multi-profile-field.md)
+now cover both original Gulf propagation paths. A
 separate, narrow KRAKENC path supports complex modes and the same FIELD options for
 complex `N/C/P/S` or lossless fixed-Munk-A fluid stacks with Richardson
 mesh extrapolation, covering trapped and leaky spectral intervals. Legacy
@@ -97,7 +99,8 @@ cargo run --release -p kraken-cli -- run crates/kraken/tests/fixtures/PekerisCom
 The `kraken` binary reads `.env` plus the same-stem `.flp` (or `--flp PATH`),
 the selected `.brc/.irc` bottom or `.trc` top resource for KRAKENC, and a
 same-stem `.sbp` when the FIELD input requests a source pattern, then writes
-[KRAKEN HDF5 schema v1](docs/kraken-output-format.md). Frequencies
+[KRAKEN HDF5 schema v1](docs/kraken-output-format.md). Multi-profile ENV sequences
+retain every profile's modes and synthesize one FIELD grid per frequency. Frequencies
 are solved and written sequentially in input order, including duplicates;
 existing outputs require `--overwrite`. The default cumulative output quota is
 256 MiB (`--max-output-bytes`). This adapter does **not** expand the numerical

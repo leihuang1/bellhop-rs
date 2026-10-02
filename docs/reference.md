@@ -152,7 +152,7 @@ NG to 200/400/400 and passes 42 modes/501 pressures per engine; it is derived,
 not acceptance of original `double`. `LayeredNormalization` removes shear only
 from the original `normal.env` bottom and is also explicitly derived. Original
 `normal/flused` now pass the half-space checkpoint and `elsed/ice` the finite-cap
-checkpoint below; Gulf's sequence needs multi-profile
+checkpoint below; Gulf's sequence now uses multi-profile
 FIELD. None is claimed as accepted by the fluid-stack stage. The wider-spectrum
 three-layer experiment described in the compatibility/golden provenance remains
 unaccepted; a matched subset is not advertised as full original acceptance.
@@ -185,7 +185,17 @@ through KRAKENC (4/9 each). The pattern case consumes a committed seven-point
 modes, shapes and pressures pass direct and actual CLI-HDF5 comparison at the
 unchanged tolerances, with local maximum pressure error 3.34e-8. Inputs and
 reference outputs are locked by `golden/single-profile-field.sha256`; Rust HDF5
-is not a golden. Multi-profile FIELD remains outside this checkpoint.
+is not a golden. Multi-profile FIELD is covered by the separate checkpoint below.
+
+The multi-profile FIELD checkpoint covers two small four-profile derivatives
+and both byte-original Gulf AD/CM workflows: 24 profile blocks, 1,020 modes and
+1,003,050 pressures. Full API and actual CLI/HDF5 comparisons pass unchanged
+tolerances, with local maximum |dp| `4.1159031748919954e-10`. All four MOD/SHD
+pairs are byte-identical across three pinned runs. Seven inputs (including the
+three original Gulf files) and six small reference files are SHA-locked in
+`golden/multi-profile.sha256`; original Gulf binaries are fresh-run artifacts,
+not committed large goldens. CI checks original input bytes against the pinned
+source tree. See [profile propagation](kraken-multi-profile-field.md).
 
 ## Pinned Linux x86-64 oracle
 

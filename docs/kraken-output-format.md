@@ -3,7 +3,7 @@
 This is a product adapter for the **currently accepted numerical subset** in
 [kraken-compatibility.md](kraken-compatibility.md), not completion of its planned
 matrix. It supports legacy `.env/.flp` inputs, KRAKEN or KRAKENC, and discrete
-single/multiple-frequency modes plus supported range-independent FIELD. JSON, HTTP, modes-only CLI
+single/multiple-frequency modes plus supported single/multi-profile FIELD. JSON, HTTP, modes-only CLI
 runs, reflection-table generation, ray arrivals and time-domain synthesis are
 not provided. Original BroadBand/MunkK is accepted through KRAKEN; KRAKENC
 now supports its S profile but still rejects 500 Hz at the unchanged work ceiling.
@@ -79,7 +79,7 @@ has no production HDF5 dependency.
 
 Input limits are unchanged: 1 MiB per UTF-8 file, 1,000 frequencies, and
 5,000,000 total copied case-vector entries. Inputs are read once into bounded
-snapshots, parsed through `legacy::load_frequency_cases_with_resources`, and
+snapshots, parsed through `legacy::load_field_cases_with_resources`, and
 hashed from those exact bytes. Metadata is never obtained by rereading an
 input after solving.
 
@@ -124,7 +124,7 @@ This is independent of [BELLHOP schema v3](output-format.md); the common
 | `solver` | UTF-8 `kraken` or `krakenc` |
 | `coordinate_convention` | range origin at source; depth positive downward |
 | `frequency_count` | uint64, number of input frequencies |
-| `mode_count`, `pressure_count` | uint64 totals across all frequencies |
+| `mode_count`, `pressure_count` | uint64 totals across all frequencies; modes also total all profiles |
 | `max_output_bytes` | uint64 configured quota |
 
 `/frequency_hz` is float64 `[F]`, unit `Hz`, in input order. Descending and
@@ -153,6 +153,8 @@ Each `/frequencies/i` group has attributes:
 - `finite_fluid_layer_count`: uint64 number of finite fluid layers (additive v1 metadata);
 - `max_range_m`: float64 extrapolation control;
 - `field_mode_limit`: uint64 requested FIELD cap (not the total stored mode count);
+- `profile_count`: uint64 number of modal environments;
+- `field_propagation`: UTF-8 `range_independent`, `adiabatic` or `coupled`;
 - `source_geometry`: UTF-8 `line`, `point` or `scaled_cylindrical`;
 - `mode_addition`: UTF-8 `coherent` or `incoherent` (additive v1 metadata);
 - `source_pattern`: UTF-8 `omnidirectional` or `tabulated`, plus uint64
@@ -196,8 +198,9 @@ identity are unchanged. Modal samples and FIELD depths may span the whole stack.
 
 ## Modes
 
-Under `/frequencies/i/modes`, let `M` be that frequency's mode count and `D`
-its modal sample-depth count. All datasets are float64 and have a `unit`
+Under `/frequencies/i/modes`, let `M` be the first profile's mode count at that
+frequency and `D` its modal sample-depth count. Each later profile uses the
+same mode layout with its own `M` and `D`. All datasets are float64 and have a `unit`
 attribute:
 
 | Dataset | Shape | Unit |
@@ -221,6 +224,15 @@ nor phase convention is changed during serialization.
 
 ## FIELD
 
+For multi-profile output, `/frequencies/i/profile_range_m` is float64 `[P]`
+(unit `m`), and `/frequencies/i/profiles/j` records UTF-8 `title`, float64 `range_m`,
+the same profile/material metadata listed above, and a complete `modes` group.
+`profiles/0/modes` is a hard link to `/frequencies/i/modes`, preserving the old
+first-profile path without duplicating its payload. All later profile modes are
+stored separately. One pressure field, not one per profile, is synthesized.
+These additions retain schema v1; single-profile dataset paths/types are unchanged.
+Files are quota-checked after each profile flush as well as each frequency.
+
 Under `/frequencies/i/field`, geometry is float64:
 
 | Dataset | Shape | Unit |
@@ -234,11 +246,13 @@ Under `/frequencies/i/field`, geometry is float64:
 `pressure_axis_order` is `source_depth,receiver_depth,receiver_range`, with
 range varying fastest in row-major storage. It is **not** the flattened,
 range-major BELLHOP field layout. Offsets are separate per-depth values; the
-solver's effective range is range plus offset. Pressure is relative complex
+single-profile solver's effective range is range plus offset. Pressure is relative complex
 pressure, not calibrated pascals. Incoherent FIELD retains the pinned
-`EvaluateMod` complex square-root convention rather than changing the result
-model to intensity. FIELD arithmetic and storage remain single precision;
-writing adds no new numerical rounding.
+`EvaluateMod` complex square-root convention for single-profile runs; adiabatic
+FIELD uses `EvaluateADMod`'s real nonnegative RMS convention. Coupled/incoherent
+input is rejected. Multi-profile evaluators retain but do not apply receiver
+offsets, matching the pinned reference. Pressure storage remains single precision;
+arithmetic preserves each pinned evaluator's mixed-precision stages. Writing adds no new numerical rounding.
 
 ## Acceptance
 
@@ -258,7 +272,10 @@ KRAKENC derivatives, broadband PCHIP Munk and original MunkS/MunkAnalytic
 environments with **derived** FIELD geometry, 27 water-material workflows and
 24 derived smooth-boundary/TRC workflows, 41 derived layered-fluid workflows
 (50 frequency blocks, 530 modes, 4,902 pressures), and the three fixed
-single-profile FIELD-extension workflows. Layer metadata, fractional
+single-profile FIELD-extension workflows. The multi-profile checkpoint adds
+two small derivatives and both byte-original Gulf AD/CM paths (24 profile blocks,
+1,020 modes, 1,003,050 pressures), comparing every profile's modes and every
+pressure via actual CLI HDF5. Layer metadata, fractional
 interfaces, cross-layer sources/receivers, repeated frequencies and cumulative
 budgets are checked; original coarse `double` and a later-frequency root-work
 failure preserve old output and remove scratch. Every mode, shape and

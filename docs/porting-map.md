@@ -37,3 +37,6 @@
 | `Kraken/kraken{c}.f90::Normalize` half-space admittance derivative | `kraken::{modes,complex_modes}` | Real/complex elastic half-space normalization verified; pinned group/loss limitations retained |
 | `KrakenField/EvaluateMod.f90::Evaluate` | `kraken::solver::synthesize_field` | Single-profile X/R/S and coherent/incoherent addition verified |
 | `misc/beampattern.f90::ReadPat` + `interp1` | `kraken::legacy` + `kraken::solver` | SBP parsing, dB conversion and take-off-angle shading verified |
+| `KrakenField/EvaluateADMod.f90` | `kraken::field::adiabatic` | Full original Gulf AD modes/FIELD/CLI-HDF5 differential verified |
+| `KrakenField/EvaluateCMMod.f90::{EvaluateCM,PLeft,NewProfile,CalculateTail}` | `kraken::field::{coupled,project}` | Full original Gulf CM and changing-depth derivatives verified |
+| `ReadEnvironment` repeated profile records + FIELD `rProf` | `kraken::legacy::load_field_cases` + `FieldCase` | Immutable profile/frequency sequences with cumulative bounds |

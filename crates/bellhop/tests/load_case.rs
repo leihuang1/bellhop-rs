@@ -119,7 +119,23 @@ fn resolves_top_and_bottom_reflection_tables() {
     fs::write(directory.join("reflection.brc"), table).unwrap();
     fs::write(directory.join("reflection.trc"), table).unwrap();
 
+    let expected_source = fs::read(&environment).unwrap();
+    let (outcome, source, paths) = bellhop::legacy::load_case_with_inputs(&environment)
+        .unwrap()
+        .into_parts();
+    assert_eq!(source.as_bytes(), expected_source);
+    assert_eq!(
+        paths,
+        [
+            environment.clone(),
+            environment.with_extension("brc"),
+            environment.with_extension("trc")
+        ]
+    );
     let case = load_case(&environment).unwrap().value;
+    assert_eq!(outcome.value, case);
+    fs::write(&environment, b"changed after parsing").unwrap();
+    assert_eq!(source.as_bytes(), expected_source);
     assert_eq!(case.bottom_reflection.as_ref().unwrap().points.len(), 2);
     assert_eq!(case.top_reflection.as_ref().unwrap().points.len(), 2);
 }

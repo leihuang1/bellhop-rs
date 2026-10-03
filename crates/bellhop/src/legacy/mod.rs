@@ -3,7 +3,7 @@ mod env;
 mod records;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::case::validate_environment;
 use crate::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome, SourceLocation};
@@ -40,9 +40,35 @@ pub fn load_env(path: &Path) -> Result<LoadOutcome<EnvironmentCase>, DiagnosticR
 /// Returns structured diagnostics when the environment or any required
 /// `.ssp`, `.ati`, `.bty`, `.brc`, `.trc`, `.irc`, or `.sbp` input is missing,
 /// malformed, inconsistent, or unsupported.
-#[allow(clippy::too_many_lines)]
 pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
+    load_case_with_inputs(path).map(|input| input.outcome)
+}
+
+/// A complete case with its exact primary source and paths of all consumed inputs.
+#[derive(Clone, Debug)]
+pub struct CaseInput {
+    outcome: LoadOutcome<Case>,
+    source: String,
+    paths: Vec<PathBuf>,
+}
+
+impl CaseInput {
+    /// Consume the read-only input record without rereading or reconstructing provenance.
+    #[must_use]
+    pub fn into_parts(self) -> (LoadOutcome<Case>, String, Vec<PathBuf>) {
+        (self.outcome, self.source, self.paths)
+    }
+}
+
+/// Load with the same parsing/diagnostics as `load_case`, retaining the primary
+/// snapshot for hashing and consumed auxiliary paths for output protection.
+/// Auxiliary contents are not retained or added to the BELLHOP HDF5 schema.
+/// # Errors
+/// Returns the same primary/auxiliary read, parse and validation diagnostics.
+#[allow(clippy::too_many_lines)]
+pub fn load_case_with_inputs(path: &Path) -> Result<CaseInput, DiagnosticReport> {
     let source = read_environment(path)?;
+    let mut paths = vec![path.to_path_buf()];
     let env::ParsedEnvironment {
         value: environment,
         mut diagnostics,
@@ -67,7 +93,7 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
             .map(|point| point.depth_m)
             .collect();
         collect_auxiliary(
-            read_auxiliary(path, "ssp", "range_dependent_sound_speed").and_then(
+            read_auxiliary(path, "ssp", "range_dependent_sound_speed", &mut paths).and_then(
                 |(source, path)| parse_range_dependent_sound_speed(&source, &path, &depths),
             ),
             &mut diagnostics,
@@ -78,7 +104,7 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
 
     let altimetry = if environment.top_boundary.has_shape_file {
         collect_auxiliary(
-            read_auxiliary(path, "ati", "altimetry").and_then(|(source, path)| {
+            read_auxiliary(path, "ati", "altimetry", &mut paths).and_then(|(source, path)| {
                 parse_boundary_shape(
                     &source,
                     &path,
@@ -94,7 +120,7 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
 
     let bathymetry = if environment.bottom_boundary.has_shape_file {
         collect_auxiliary(
-            read_auxiliary(path, "bty", "bathymetry").and_then(|(source, path)| {
+            read_auxiliary(path, "bty", "bathymetry", &mut paths).and_then(|(source, path)| {
                 parse_boundary_shape(
                     &source,
                     &path,
@@ -113,9 +139,9 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
         BoundaryCondition::ReflectionCoefficientFile
     ) {
         collect_auxiliary(
-            read_auxiliary(path, "brc", "bottom_reflection").and_then(|(source, path)| {
-                parse_reflection_coefficients(&source, &path, "bottom_reflection")
-            }),
+            read_auxiliary(path, "brc", "bottom_reflection", &mut paths).and_then(
+                |(source, path)| parse_reflection_coefficients(&source, &path, "bottom_reflection"),
+            ),
             &mut diagnostics,
         )
     } else {
@@ -127,7 +153,7 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
         BoundaryCondition::ReflectionCoefficientFile
     ) {
         collect_auxiliary(
-            read_auxiliary(path, "trc", "top_reflection").and_then(|(source, path)| {
+            read_auxiliary(path, "trc", "top_reflection", &mut paths).and_then(|(source, path)| {
                 parse_reflection_coefficients(&source, &path, "top_reflection")
             }),
             &mut diagnostics,
@@ -141,7 +167,7 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
         BoundaryCondition::PrecalculatedReflectionCoefficient
     ) {
         let table = collect_auxiliary(
-            read_auxiliary(path, "irc", "internal_reflection")
+            read_auxiliary(path, "irc", "internal_reflection", &mut paths)
                 .and_then(|(source, path)| parse_internal_reflection_coefficients(&source, &path)),
             &mut diagnostics,
         );
@@ -158,7 +184,7 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
 
     let source_beam_pattern = if environment.run.has_source_beam_pattern {
         collect_auxiliary(
-            read_auxiliary(path, "sbp", "source_beam_pattern")
+            read_auxiliary(path, "sbp", "source_beam_pattern", &mut paths)
                 .and_then(|(source, path)| parse_source_beam_pattern(&source, &path)),
             &mut diagnostics,
         )
@@ -171,7 +197,7 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
         return Err(diagnostics);
     }
 
-    Case::from_definition_with(
+    let outcome = Case::from_definition_with(
         CaseDefinition {
             environment,
             range_dependent_sound_speed,
@@ -184,7 +210,12 @@ pub fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
         },
         &locations,
         diagnostics,
-    )
+    )?;
+    Ok(CaseInput {
+        outcome,
+        source,
+        paths,
+    })
 }
 
 fn read_environment(path: &Path) -> Result<String, DiagnosticReport> {
@@ -204,10 +235,14 @@ fn read_auxiliary(
     environment_path: &Path,
     extension: &str,
     field: &'static str,
-) -> Result<(String, std::path::PathBuf), Diagnostic> {
+    consumed: &mut Vec<PathBuf>,
+) -> Result<(String, PathBuf), Diagnostic> {
     let path = environment_path.with_extension(extension);
     fs::read_to_string(&path)
-        .map(|source| (source, path.clone()))
+        .map(|source| {
+            consumed.push(path.clone());
+            (source, path.clone())
+        })
         .map_err(|error| {
             Diagnostic::error(
                 "BH0001",

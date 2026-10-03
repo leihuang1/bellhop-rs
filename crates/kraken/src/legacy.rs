@@ -316,27 +316,8 @@ pub fn load_field_cases(
     flp_path: impl AsRef<Path>,
     solver: ModeSolver,
 ) -> Result<Vec<crate::FieldCase>, DiagnosticReport> {
-    let env_path = env_path.as_ref();
-    let flp_path = flp_path.as_ref();
-    let env = read_file(env_path)?;
-    let flp = read_file(flp_path)?;
-    let [surface, brc, irc] = field_table_extensions(&env, env_path, solver)?.map(|ext| {
-        ext.map(|ext| read_file(&env_path.with_extension(ext)))
-            .transpose()
-    });
-    let tables = [surface?, brc?, irc?];
-    let pattern = source_pattern_extension(&flp, flp_path)?
-        .map(|ext| read_file(&flp_path.with_extension(ext)))
-        .transpose()?;
-    load_field_cases_with_resources(
-        &env,
-        &flp,
-        env_path,
-        flp_path,
-        solver,
-        tables.each_ref().map(Option::as_deref),
-        pattern.as_deref(),
-    )
+    crate::input::load_legacy(env_path.as_ref(), flp_path.as_ref(), solver)
+        .map(crate::input::FieldInput::into_cases)
 }
 
 /// Parse exact snapshots into one validated profile sequence per frequency.
@@ -979,7 +960,7 @@ fn environment_cases(
         .collect()
 }
 
-fn read_file(path: &Path) -> Result<String, DiagnosticReport> {
+pub(crate) fn read_file(path: &Path) -> Result<String, DiagnosticReport> {
     let mut source = String::new();
     File::open(path)
         .and_then(|file| file.take(MAX_INPUT_BYTES + 1).read_to_string(&mut source))

@@ -1,0 +1,29 @@
+# Acoustics inputs and results
+
+Vocabulary for the existing BELLHOP and KRAKEN/KRAKENC workflows. Their validated models, numerical implementations and HDF5 schemas remain separate.
+
+## Language
+
+**Case**:
+An immutable validated acoustic input, constructed from an unvalidated case definition. A KRAKEN case describes one modal environment and its FIELD geometry; a BELLHOP case describes a complete ray/beam calculation.
+_Avoid_: Job, generic acoustics configuration
+
+**FIELD case**:
+One KRAKEN solve frequency with ordered modal profiles, profile ranges and range-independent, adiabatic or coupled propagation. Frequency order and repetitions belong to the enclosing input sequence.
+_Avoid_: Broadband response, time-domain response
+
+**Input snapshot**:
+The exact source bytes parsed for an acoustic input, paired with their supplied path and resource role. KRAKEN retains ENV/FLP/TRC/BRC/IRC/SBP snapshots; BELLHOP retains its primary source for existing HDF5 provenance.
+_Avoid_: Reconstructed input, reread provenance
+
+**Consumed input**:
+A primary or auxiliary path actually read under the selected acoustic options. A merely adjacent same-stem file is not a consumed input; ENV and FLP may own different resource stems.
+_Avoid_: All neighboring files
+
+**HDF5 result**:
+A complete numerical product in BELLHOP schema v3 or KRAKEN schema v1. Fortran MOD/SHD/RAY artifacts are pinned comparison evidence, not interchangeable output schemas.
+_Avoid_: Fortran golden, common solver result
+
+**HDF5 publication**:
+Installing a complete local HDF5 result only after writing, closing and syncing succeeds. Consumed inputs are protected, scratch is exclusively owned, and no-overwrite installation must reject destinations that appear during execution.
+_Avoid_: Best-effort overwrite, early existence check alone

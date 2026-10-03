@@ -1,6 +1,7 @@
 //! BELLHOP and KRAKEN HDF5 adapters with separate, versioned schemas.
 
 pub mod kraken;
+mod publication;
 
 use std::path::Path;
 use std::str::FromStr;
@@ -30,39 +31,69 @@ pub fn write_hdf5(
     result: &SimulationResult,
     warnings: &[Diagnostic],
 ) -> Result<(), String> {
+    let file = File::create(path).map_err(hdf5_error)?;
+    write_hdf5_contents(&file, input_filename, input_bytes, result, warnings)
+}
+
+/// Write BELLHOP schema v3 and publish it with the same local file-safety policy
+/// as KRAKEN: protect consumed input paths/aliases, exclusively reserve scratch,
+/// close and sync before installing, and never clobber without `overwrite`.
+/// No KRAKEN byte quota is imposed on BELLHOP.
+/// # Errors
+/// Returns metadata, HDF5 or filesystem errors; preserves existing files on failure.
+pub fn write_hdf5_atomic(
+    path: &Path,
+    input_filename: &str,
+    input_bytes: &[u8],
+    result: &SimulationResult,
+    warnings: &[Diagnostic],
+    input_paths: &[&Path],
+    overwrite: bool,
+) -> Result<(), String> {
+    publication::publish(path, input_paths, overwrite, None, "BH0402", |file, _| {
+        write_hdf5_contents(file, input_filename, input_bytes, result, warnings)
+    })
+}
+
+fn write_hdf5_contents(
+    file: &File,
+    input_filename: &str,
+    input_bytes: &[u8],
+    result: &SimulationResult,
+    warnings: &[Diagnostic],
+) -> Result<(), String> {
     let input_size = u64::try_from(input_bytes.len())
         .map_err(|_| "input size does not fit in u64".to_owned())?;
     let input_sha256 = format!("{:x}", Sha256::digest(input_bytes));
 
-    let file = File::create(path).map_err(hdf5_error)?;
-    write_scalar_attribute(&file, "schema_version", &SCHEMA_VERSION)?;
+    write_scalar_attribute(file, "schema_version", &SCHEMA_VERSION)?;
     write_string_attribute(
-        &file,
+        file,
         "implementation",
         concat!("bellhop-rs ", env!("CARGO_PKG_VERSION")),
     )?;
     write_string_attribute(
-        &file,
+        file,
         "compatibility_reference",
         "Acoustics Toolbox v2023.5 (475108519289c6fb488b58980c644ea14eccc604)",
     )?;
-    write_string_attribute(&file, "input_filename", input_filename)?;
-    write_scalar_attribute(&file, "input_size_bytes", &input_size)?;
-    write_string_attribute(&file, "input_sha256", &input_sha256)?;
-    write_string_attribute(&file, "title", &result.title)?;
-    write_scalar_attribute(&file, "frequency_hz", &result.frequency_hz)?;
+    write_string_attribute(file, "input_filename", input_filename)?;
+    write_scalar_attribute(file, "input_size_bytes", &input_size)?;
+    write_string_attribute(file, "input_sha256", &input_sha256)?;
+    write_string_attribute(file, "title", &result.title)?;
+    write_scalar_attribute(file, "frequency_hz", &result.frequency_hz)?;
     write_string_attribute(
-        &file,
+        file,
         "legacy_run_options",
         result.legacy_run_options.trim_end(),
     )?;
     write_string_attribute(
-        &file,
+        file,
         "coordinate_convention",
         "range origin at source; depth positive downward; launch angle positive downward",
     )?;
     let warnings: Vec<String> = warnings.iter().map(ToString::to_string).collect();
-    write_string_array_attribute(&file, "warnings", &warnings)?;
+    write_string_array_attribute(file, "warnings", &warnings)?;
 
     let rays = file.create_group("rays").map_err(hdf5_error)?;
     write_rays(&rays, result)?;

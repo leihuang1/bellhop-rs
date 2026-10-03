@@ -125,6 +125,32 @@ done
 See [multi-profile semantics/limits](../docs/kraken-multi-profile-field.md) and
 [additive HDF5 profile layout](../docs/kraken-output-format.md).
 
+For [self-contained KRAKEN JSON](../docs/kraken-json-input.md), first generate
+an existing representative's pinned reference, then compare both JSON API
+and actual JSON CLI/HDF5 through the same comparator:
+
+```sh
+cargo build --release -p kraken-cli
+env="$PWD/crates/kraken/tests/fixtures/WaterLossPower.env"
+reference="$PWD/target/reference/WaterLossPower-kraken/WaterLossPower"
+mkdir -p target/reference/json
+tools/reference/run-kraken-case.sh kraken "$env"
+json="$PWD/target/reference/json/WaterLossPower.json"
+target/release/kraken export "$env" > "$json"
+KRAKEN_JSON_INPUT="$json" KRAKEN_JSON_ENV="$env" KRAKEN_JSON_REFERENCE_ROOT="$reference" \
+  cargo test --release -p kraken --test differential_reference \
+    json_fields_match_fresh_reference -- --ignored --exact --nocapture
+target/release/kraken run "$json" --output "${json%.json}.h5" --overwrite
+KRAKEN_HDF5_RESULT="${json%.json}.h5" KRAKEN_JSON_INPUT="$json" \
+KRAKEN_JSON_ENV="$env" KRAKEN_JSON_REFERENCE_ROOT="$reference" \
+  cargo test --release -p kraken --test differential_reference \
+    json_fields_match_fresh_reference -- --ignored --exact --nocapture
+```
+
+CI repeats this for ten fixed existing routes, including original BRC/IRC,
+BroadBand/MunkK and both Gulf paths. JSON/HDF5 are not Fortran goldens; the
+numerical tolerances and source provenance remain unchanged.
+
 KRAKENC P/S/fixed-Munk-A interpolation uses the same lossless `Profile`; four
 cubic/analytic fixtures above compare full modes and FIELD. `MunkS.env` is an
 upstream **SCOOTER environment**, not an original KRAKENC/FIELD pair. It and

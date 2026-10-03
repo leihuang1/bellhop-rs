@@ -197,6 +197,16 @@ three original Gulf files) and six small reference files are SHA-locked in
 not committed large goldens. CI checks original input bytes against the pinned
 source tree. See [profile propagation](kraken-multi-profile-field.md).
 
+The [self-contained KRAKEN JSON checkpoint](kraken-json-input.md) reuses ten
+existing representative references: water power-law loss, source patterns,
+TRC, layered-fluid power laws, finite elastic stacks, original TabRefCoef
+BRC/IRC, BroadBand/MunkK and both Gulf paths. Complete exported definitions are
+checked against legacy definitions before JSON API and actual JSON CLI/HDF5
+mode/shape/pressure comparisons. The test entry is
+`json_fields_match_fresh_reference`; no reference artifacts or tolerance rules
+are replaced. Input SHA provenance hashes the parsed JSON bytes, including
+whitespace, rather than canonical re-serialization.
+
 ## Pinned Linux x86-64 oracle
 
 `tools/reference` provides the reproducible differential environment:

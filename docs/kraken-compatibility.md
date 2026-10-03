@@ -24,7 +24,9 @@ are also supported; unmodified `tests/BroadBand/MunkK.env/.flp` passes at 50
 and 500 Hz through **KRAKEN**. KRAKENC 500 Hz still exceeds its 300M root-work
 limit and is not accepted. The `kraken` CLI now runs supported legacy pairs and writes
 [KRAKEN HDF5 schema v1](kraken-output-format.md), with sequential frequency
-output and atomic publication. JSON/HTTP remain unimplemented. This is not
+output and atomic publication. [Strict self-contained JSON](kraken-json-input.md)
+now imports/exports the same canonical cases and uses that CLI/HDF5 path; HTTP
+is not provided. This is not
 the full matrix below; unsupported physics is rejected. Numerical parity is
 verified for the complete workflows below, not promised for every arbitrary
 branch-sensitive secant spectrum.
@@ -540,6 +542,23 @@ set remains available at the existing path via a hard link, not a duplicated
 payload. [Propagation semantics, fixed evidence and limits](kraken-multi-profile-field.md)
 describe this capability block; no option Cartesian product is added.
 
+### Self-contained JSON
+
+Strict JSON v1 represents ordered frequency/profile blocks with inline boundary
+tables and source patterns. Export stores already converted solve-frequency
+losses; it does not add raw-unit recipes or retabulate geometry. Both backends
+and existing case/profile validators, budgets and atomic HDF5 publication are
+reused. `/inputs/json` hashes the exact parsed snapshot, not reconstructed ENV
+resources. Unknown/duplicate fields and invalid combinations are rejected.
+
+Ordinary tests cover exact legacy-definition round trips, relocated CLI runs,
+nested validation, quotas and output rollback. Ten existing representative
+workflows pass JSON API and actual CLI/HDF5 fixed-oracle comparison, including
+original BroadBand/MunkK, TabRefCoef BRC/IRC and Gulf AD/CM. Numerical tolerances,
+reference files, BELLHOP schemas and physics support limits are unchanged; this
+checkpoint adds no option Cartesian product. See [schema, units and
+limits](kraken-json-input.md).
+
 ### Multiple frequencies
 
 `legacy::load_frequency_cases(env, flp, ModeSolver)` returns a `Vec<Case>` in
@@ -548,7 +567,8 @@ input frequency order. Each case uses the existing `solve` (or KRAKENC
 result. `load_case` and `load_complex_case` reject multiple frequencies rather
 than silently taking the first. The CLI/HDF5 adapter processes these cases
 sequentially with cumulative output quotas; it adds no batched numerical solver,
-FFT, time-domain response, JSON or HTTP endpoint.
+FFT or time-domain response. JSON uses the separate canonical adapter below;
+HTTP is not provided.
 
 The sixth top-option character `B` enables a frequency count/vector after
 `.env` source/receiver depths. Frequencies are finite and positive; duplicates
@@ -625,9 +645,10 @@ Measured differences and fixture provenance are recorded
 ## Planned environment support
 
 The planned legacy adapters accept KRAKEN `.env` and FIELD `.flp` files,
-including same-stem auxiliary resources used by selected cases. A strict,
-self-contained JSON adapter is also planned, following BELLHOP's
-single-document input convention.
+including same-stem auxiliary resources used by selected cases. The strict,
+[self-contained JSON adapter](kraken-json-input.md) follows BELLHOP's
+single-document convention, with an independent KRAKEN schema and canonical
+solve-frequency materials.
 
 The v2023.5 KRAKEN environment reader supports these SSP interpolation options:
 
@@ -700,5 +721,5 @@ The implementation follows the existing BELLHOP boundaries: `crates/kraken`
 contains validated cases, legacy adapters, mode solving, and FIELD. The
 `kraken-cli` binary uses `bellhop-hdf5::kraken` for the supported legacy-to-HDF5
 workflow; BELLHOP v3 and KRAKEN v1 schemas and result types remain independent.
-JSON and HTTP adapters are still planned. No shared acoustics abstraction is
-introduced.
+The JSON adapter reuses those validated cases and output paths; HTTP is not
+provided. No shared acoustics abstraction is introduced.

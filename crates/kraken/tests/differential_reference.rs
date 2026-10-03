@@ -414,9 +414,39 @@ fn profile_fields_match_fresh_reference() {
     compare_profiles(&env, &flp, &root, kraken::ModeSolver::Kraken);
 }
 
+#[test]
+#[ignore = "requires exported JSON, legacy inputs and pinned Fortran modes/FIELD"]
+fn json_fields_match_fresh_reference() {
+    let input = PathBuf::from(std::env::var_os("KRAKEN_JSON_INPUT").unwrap());
+    let env = PathBuf::from(std::env::var_os("KRAKEN_JSON_ENV").unwrap());
+    let root = PathBuf::from(std::env::var_os("KRAKEN_JSON_REFERENCE_ROOT").unwrap());
+    let cases = kraken::json::load_case_document_named(&fs::read(&input).unwrap(), &input).unwrap();
+    let legacy = kraken::legacy::load_field_cases(
+        &env,
+        env.with_extension("flp"),
+        cases[0].profiles()[0].mode_solver,
+    )
+    .unwrap();
+    assert_eq!(
+        cases, legacy,
+        "JSON must preserve the entire accepted legacy definition"
+    );
+    compare_profile_cases(&cases, &input, &root);
+}
+
 fn compare_profiles(env: &Path, flp: &Path, root: &Path, solver: kraken::ModeSolver) {
     let cases = kraken::legacy::load_field_cases(env, flp, solver).unwrap();
+    compare_profile_cases(&cases, env, root);
+}
+
+fn compare_profile_cases(cases: &[kraken::FieldCase], input: &Path, root: &Path) {
+    let solver = cases[0].profiles()[0].mode_solver;
     let file = Records::read(&root.with_extension("mod"));
+    assert_eq!(
+        count(file.record(0), 84),
+        cases.len(),
+        "mode frequency count"
+    );
     let printed = fs::read_to_string(root.with_extension("prt")).unwrap();
     let blocks: Vec<_> = printed
         .split(if solver == kraken::ModeSolver::Kraken {
@@ -447,6 +477,11 @@ fn compare_profiles(env: &Path, flp: &Path, root: &Path, solver: kraken::ModeSol
     }
     assert_eq!(offset, file.len());
     let shd = Records::read(&root.with_extension("shd"));
+    assert_eq!(
+        count(shd.record(2), 0),
+        cases.len(),
+        "FIELD frequency count"
+    );
     for (frequency, case) in cases.iter().enumerate() {
         let result = profile_result_for_comparison(case, frequency, cases.len());
         for (index, (profile, mode)) in case.profiles().iter().zip(&result.modes).enumerate() {
@@ -462,7 +497,7 @@ fn compare_profiles(env: &Path, flp: &Path, root: &Path, solver: kraken::ModeSol
         let dp = compare_field_at(&case.profiles()[0], &result.field, &shd, frequency);
         eprintln!(
             "{}: {} profiles / {} pressures; |dp|={dp:e}",
-            env.display(),
+            input.display(),
             result.modes.len(),
             result.field.pressure.len()
         );
@@ -478,6 +513,12 @@ fn profile_result_for_comparison(
         return kraken::solve_field(case).unwrap();
     };
     let first = result_for_comparison(&case.profiles()[0], index, frequencies);
+    if case.profiles().len() == 1 {
+        return kraken::ProfileSimulationResult {
+            modes: vec![first.modes],
+            field: first.field,
+        };
+    }
     let file = hdf5::File::open(path).unwrap();
     let group = file.group(&format!("frequencies/{index}")).unwrap();
     assert_eq!(

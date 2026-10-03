@@ -1145,6 +1145,107 @@ fn cli_round_trips_profile_fields_and_preserves_outputs_on_later_failure() {
 }
 
 #[test]
+fn cli_discovers_and_routes_profile_boundary_resources() {
+    let root = directory("profile-resources");
+    let env = root.join("mixed.env");
+    let flp = env.with_extension("flp");
+    let field = fs::read_to_string(fixture("TabRefBrcC.flp")).unwrap();
+    fs::write(
+        &flp,
+        field
+            .replace("'R OC'", "'RAOC'")
+            .replace("1\n0.0 /", "4\n0.0 0.4 0.8 1.2 /"),
+    )
+    .unwrap();
+    for (name, ext) in [
+        ("TabRefBrcC", "brc"),
+        ("TabRefIrcC", "irc"),
+        ("FluidTrcC", "trc"),
+    ] {
+        fs::copy(fixture(name).with_extension(ext), env.with_extension(ext)).unwrap();
+    }
+    for names in [
+        [
+            "PekerisComplexBlank",
+            "TabRefBrcC",
+            "TabRefIrcC",
+            "FluidTrcC",
+        ],
+        [
+            "FluidTrcC",
+            "TabRefIrcC",
+            "TabRefBrcC",
+            "PekerisComplexBlank",
+        ],
+    ] {
+        let source: String = names
+            .iter()
+            .map(|name| fs::read_to_string(fixture(name).with_extension("env")).unwrap())
+            .collect();
+        fs::write(&env, source).unwrap();
+        let cases = kraken::legacy::load_field_cases(&env, &flp, ModeSolver::Krakenc).unwrap();
+        for (case, name) in cases[0].profiles().iter().zip(names) {
+            let expected = kraken::legacy::load_complex_case(
+                fixture(name).with_extension("env"),
+                fixture(name).with_extension("flp"),
+            )
+            .unwrap();
+            assert_eq!(case.bottom_boundary, expected.bottom_boundary);
+            assert_eq!(case.surface_boundary, expected.surface_boundary);
+        }
+        let output = env.with_extension("h5");
+        let process = run(&env, &output, "krakenc", &["--overwrite"]);
+        assert!(
+            process.status.success(),
+            "{}",
+            String::from_utf8_lossy(&process.stderr)
+        );
+        let file = File::open(&output).unwrap();
+        for ext in ["brc", "irc", "trc"] {
+            let input = file.group(&format!("inputs/{ext}")).unwrap();
+            assert_eq!(
+                attribute(&input, "sha256"),
+                format!(
+                    "{:x}",
+                    Sha256::digest(fs::read(env.with_extension(ext)).unwrap())
+                )
+            );
+        }
+        let expected = kraken::solve_field(&cases[0]).unwrap();
+        let product = SimulationResult {
+            modes: expected.modes[0].clone(),
+            field: expected.field,
+        };
+        assert_field(
+            &file.group("frequencies/0/field").unwrap(),
+            &cases[0].profiles()[0],
+            &product,
+        );
+        file.close().unwrap();
+        let old = fs::read(&output).unwrap();
+        for ext in ["brc", "irc", "trc"] {
+            let path = env.with_extension(ext);
+            let bytes = fs::read(&path).unwrap();
+            assert_failure(
+                &run(&env, &path, "krakenc", &["--overwrite"]),
+                4,
+                &path,
+                &bytes,
+            );
+            fs::remove_file(&path).unwrap();
+            assert_failure(
+                &run(&env, &output, "krakenc", &["--overwrite"]),
+                2,
+                &output,
+                &old,
+            );
+            fs::write(path, bytes).unwrap();
+        }
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn cli_protects_consumed_resources_and_preserves_outputs_on_resource_errors() {
     let root = directory("resources");
     for (name, extension) in [

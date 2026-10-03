@@ -87,22 +87,18 @@ pub fn run_legacy(
     }
     let env_source = read_source(env_path)?;
     let flp_source = read_source(flp_path)?;
-    let bottom_table = kraken::legacy::bottom_table_extension(&env_source, env_path, solver)
+    let [surface, brc, irc] = kraken::legacy::field_table_extensions(&env_source, env_path, solver)
         .map_err(|report| RunError::Input(report.to_string()))?
         .map(|extension| {
-            let path = env_path.with_extension(extension);
-            let source = read_source(&path)?;
-            Ok::<_, RunError>((extension, path, source))
-        })
-        .transpose()?;
-    let surface_table = kraken::legacy::surface_table_extension(&env_source, env_path, solver)
-        .map_err(|report| RunError::Input(report.to_string()))?
-        .map(|extension| {
-            let path = env_path.with_extension(extension);
-            let source = read_source(&path)?;
-            Ok::<_, RunError>((extension, path, source))
-        })
-        .transpose()?;
+            extension
+                .map(|extension| {
+                    let path = env_path.with_extension(extension);
+                    let source = read_source(&path)?;
+                    Ok::<_, RunError>((extension, path, source))
+                })
+                .transpose()
+        });
+    let tables = [surface?, brc?, irc?];
     let source_pattern = kraken::legacy::source_pattern_extension(&flp_source, flp_path)
         .map_err(|report| RunError::Input(report.to_string()))?
         .map(|extension| {
@@ -117,8 +113,9 @@ pub fn run_legacy(
         env_path,
         flp_path,
         solver,
-        surface_table.as_ref().map(|(_, _, source)| source.as_str()),
-        bottom_table.as_ref().map(|(_, _, source)| source.as_str()),
+        tables
+            .each_ref()
+            .map(|table| table.as_ref().map(|(_, _, source)| source.as_str())),
         source_pattern
             .as_ref()
             .map(|(_, _, source)| source.as_str()),
@@ -128,8 +125,9 @@ pub fn run_legacy(
         ("env", env_path, env_source.as_str()),
         ("flp", flp_path, flp_source.as_str()),
     ];
-    for resource in [&surface_table, &bottom_table, &source_pattern]
-        .into_iter()
+    for resource in tables
+        .iter()
+        .chain(std::iter::once(&source_pattern))
         .flatten()
     {
         inputs.push((resource.0, resource.1.as_path(), resource.2.as_str()));

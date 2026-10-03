@@ -273,6 +273,41 @@ pub fn load_frequency_cases_with_boundary_tables(
     )
 }
 
+fn environment_table_extensions(environment: &Environment) -> [Option<&'static str>; 3] {
+    [
+        matches!(environment.surface_boundary, SurfaceBoundary::Reflection(_)).then_some("trc"),
+        matches!(environment.bottom_boundary, BottomBoundary::Reflection(_)).then_some("brc"),
+        matches!(
+            environment.bottom_boundary,
+            BottomBoundary::Impedance { .. }
+        )
+        .then_some("irc"),
+    ]
+}
+
+/// Discover same-stem tables across every ENV profile, in TRC/BRC/IRC order.
+/// # Errors
+/// Returns bounded-input and environment parse diagnostics.
+pub fn field_table_extensions(
+    source: &str,
+    path: &Path,
+    solver: ModeSolver,
+) -> Result<[Option<&'static str>; 3], DiagnosticReport> {
+    check_input_size(source, path)?;
+    let mut reader = Reader::new(source, path)?;
+    let mut extensions = [None; 3];
+    while reader.index < reader.records.len() {
+        let environment = read_environment(&mut reader, solver)?;
+        for (slot, extension) in extensions
+            .iter_mut()
+            .zip(environment_table_extensions(&environment))
+        {
+            *slot = slot.or(extension);
+        }
+    }
+    Ok(extensions)
+}
+
 /// Load ordered legacy environments and FIELD propagation, retaining frequency order.
 /// # Errors
 /// Returns bounded-input, resource, profile-count and validation diagnostics.
@@ -285,12 +320,11 @@ pub fn load_field_cases(
     let flp_path = flp_path.as_ref();
     let env = read_file(env_path)?;
     let flp = read_file(flp_path)?;
-    let bottom = bottom_table_extension(&env, env_path, solver)?
-        .map(|ext| read_file(&env_path.with_extension(ext)))
-        .transpose()?;
-    let surface = surface_table_extension(&env, env_path, solver)?
-        .map(|ext| read_file(&env_path.with_extension(ext)))
-        .transpose()?;
+    let [surface, brc, irc] = field_table_extensions(&env, env_path, solver)?.map(|ext| {
+        ext.map(|ext| read_file(&env_path.with_extension(ext)))
+            .transpose()
+    });
+    let tables = [surface?, brc?, irc?];
     let pattern = source_pattern_extension(&flp, flp_path)?
         .map(|ext| read_file(&flp_path.with_extension(ext)))
         .transpose()?;
@@ -300,13 +334,14 @@ pub fn load_field_cases(
         env_path,
         flp_path,
         solver,
-        surface.as_deref(),
-        bottom.as_deref(),
+        tables.each_ref().map(Option::as_deref),
         pattern.as_deref(),
     )
 }
 
 /// Parse exact snapshots into one validated profile sequence per frequency.
+/// Tables are TRC/BRC/IRC snapshots; each profile consumes only its required tables.
+/// Snapshots not required anywhere in the sequence are rejected.
 /// # Errors
 /// Returns bounded-input, resource, profile-count and validation diagnostics.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines, clippy::float_cmp)]
@@ -316,18 +351,29 @@ pub fn load_field_cases_with_resources(
     env_path: &Path,
     flp_path: &Path,
     solver: ModeSolver,
-    surface_table: Option<&str>,
-    bottom_table: Option<&str>,
+    tables: [Option<&str>; 3],
     source_pattern: Option<&str>,
 ) -> Result<Vec<crate::FieldCase>, DiagnosticReport> {
     check_input_size(env_source, env_path)?;
     check_input_size(flp_source, flp_path)?;
+    for (extension, source) in ["trc", "brc", "irc"].into_iter().zip(tables) {
+        if let Some(source) = source {
+            check_input_size(source, &env_path.with_extension(extension))?;
+        }
+    }
     let field = parse_field(flp_source, flp_path)?;
     let mut reader = Reader::new(env_source, env_path)?;
     let mut sequences: Vec<Vec<Case>> = Vec::new();
     let mut total = 0;
+    let mut used_tables = [false; 3];
     for index in 0..field.profile_ranges_m.len() {
         let environment = read_environment(&mut reader, solver)?;
+        let required = environment_table_extensions(&environment);
+        for (used, extension) in used_tables.iter_mut().zip(required) {
+            *used |= extension.is_some();
+        }
+        let [surface_table, brc, irc] =
+            std::array::from_fn(|index| required[index].and(tables[index]));
         let cases = environment_cases(
             environment,
             field.clone(),
@@ -335,7 +381,7 @@ pub fn load_field_cases_with_resources(
             flp_path,
             solver,
             false,
-            [surface_table, bottom_table],
+            [surface_table, brc.or(irc)],
             source_pattern,
         )?;
         if index == 0 {
@@ -375,6 +421,26 @@ pub fn load_field_cases_with_resources(
         }
     }
     reader.finish()?;
+    for ((extension, source), used) in ["trc", "brc", "irc"]
+        .into_iter()
+        .zip(tables)
+        .zip(used_tables)
+    {
+        if source.is_some() && !used {
+            return Err(one(
+                "KR0202",
+                "unexpected boundary table snapshot",
+                if extension == "trc" {
+                    "surface_boundary"
+                } else {
+                    "bottom_boundary"
+                },
+                env_path.with_extension(extension),
+                1,
+                1,
+            ));
+        }
+    }
     sequences
         .into_iter()
         .map(|profiles| {

@@ -14,6 +14,12 @@ profiles followed by one FIELD geometry. The snapshot counterpart,
 have the same frequency vector. Existing single-profile APIs remain strict
 and reject sequences instead of discarding trailing profiles.
 
+`field_table_extensions` discovers required same-stem tables across the entire
+ENV sequence, in TRC/BRC/IRC order. The snapshot API accepts that same three-slot
+array: each profile receives only its own required tables, and snapshots unused
+by every profile are rejected. Adiabatic profiles may change boundary types;
+CLI provenance and input/output protection cover all consumed tables.
+
 `FieldCase::new(profiles, ranges_m, propagation)` validates an immutable
 sequence. Ranges start at zero and strictly increase. Profiles share frequency,
 solver, source/receiver geometry, FIELD mode cap, addition and source pattern.

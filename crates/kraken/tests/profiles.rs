@@ -116,8 +116,7 @@ fn snapshots_reject_extra_profiles_and_preserve_frequency_order() {
             Path::new("snapshot.env"),
             Path::new("snapshot.flp"),
             ModeSolver::Kraken,
-            None,
-            None,
+            [None; 3],
             None,
         )
     };
@@ -130,6 +129,25 @@ fn snapshots_reject_extra_profiles_and_preserve_frequency_order() {
         )
         .is_err()
     );
+    for index in 0..3 {
+        let mut tables = [None; 3];
+        tables[index] = Some("unused");
+        let report = legacy::load_field_cases_with_resources(
+            env,
+            flp,
+            Path::new("snapshot.env"),
+            Path::new("snapshot.flp"),
+            ModeSolver::Kraken,
+            tables,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(report.diagnostics()[0].code, "KR0202");
+        assert_eq!(
+            report.diagnostics()[0].message,
+            "unexpected boundary table snapshot"
+        );
+    }
     let mut broadband = String::new();
     for block in env.split("'Derived").skip(1) {
         broadband.push_str("'Derived");

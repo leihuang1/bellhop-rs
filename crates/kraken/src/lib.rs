@@ -14,6 +14,7 @@ mod elastic;
 mod field;
 mod layers;
 pub use field::{FieldCase, FieldPropagation, ProfileSimulationResult, solve_field};
+pub mod input;
 pub mod json;
 pub mod legacy;
 mod modes;

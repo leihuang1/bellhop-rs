@@ -62,7 +62,7 @@ fn main() -> ExitCode {
 
 fn validate(path: &Path) -> ExitCode {
     match load_case(path) {
-        Ok(outcome) => {
+        Ok(LoadedInput { outcome, .. }) => {
             for diagnostic in outcome.warnings {
                 eprintln!("{diagnostic}");
             }
@@ -101,26 +101,21 @@ fn run(path: &Path, requested_output: Option<&Path>, overwrite: bool) -> ExitCod
         return ExitCode::from(4);
     }
 
-    let (case, warnings) = match load_case(path) {
-        Ok(outcome) => {
-            for diagnostic in &outcome.warnings {
-                eprintln!("{diagnostic}");
-            }
-            (outcome.value, outcome.warnings)
-        }
+    let LoadedInput {
+        outcome,
+        bytes: input_bytes,
+        paths: input_paths,
+    } = match load_case(path) {
+        Ok(input) => input,
         Err(report) => {
             render_report(&report);
             return ExitCode::from(2);
         }
     };
-    let input_bytes = match read_input(path) {
-        Ok(bytes) => bytes,
-        Err(report) => {
-            render_report(&report);
-            return ExitCode::from(2);
-        }
-    };
-    let result = match run_simulation(&case, SimulationLimits::default()) {
+    for diagnostic in &outcome.warnings {
+        eprintln!("{diagnostic}");
+    }
+    let result = match run_simulation(&outcome.value, SimulationLimits::default()) {
         Ok(result) => result,
         Err(report) => {
             render_report(&report);
@@ -128,34 +123,19 @@ fn run(path: &Path, requested_output: Option<&Path>, overwrite: bool) -> ExitCod
         }
     };
 
-    let temporary_path = temporary_output_path(&output_path);
-    if temporary_path.exists() {
-        eprintln!(
-            "error[BH0402]: temporary output already exists: {}",
-            temporary_path.display()
-        );
-        return ExitCode::from(4);
-    }
     let input_filename = path
         .file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-    if let Err(error) = bellhop_hdf5::write_hdf5(
-        &temporary_path,
+    if let Err(error) = bellhop_hdf5::write_hdf5_atomic(
+        &output_path,
         &input_filename,
         &input_bytes,
         &result,
-        &warnings,
+        &outcome.warnings,
+        &input_paths.iter().map(PathBuf::as_path).collect::<Vec<_>>(),
+        overwrite,
     ) {
-        let _ = fs::remove_file(&temporary_path);
         eprintln!("error[BH0402]: {error}");
-        return ExitCode::from(4);
-    }
-    if let Err(error) = fs::rename(&temporary_path, &output_path) {
-        let _ = fs::remove_file(&temporary_path);
-        eprintln!(
-            "error[BH0402]: unable to atomically install {}: {error}",
-            output_path.display()
-        );
         return ExitCode::from(4);
     }
 
@@ -199,7 +179,7 @@ fn run(path: &Path, requested_output: Option<&Path>, overwrite: bool) -> ExitCod
 
 fn export(path: &Path) -> ExitCode {
     let outcome = match load_case(path) {
-        Ok(outcome) => outcome,
+        Ok(input) => input.outcome,
         Err(report) => {
             render_report(&report);
             return ExitCode::from(2);
@@ -226,13 +206,29 @@ fn export(path: &Path) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn load_case(path: &Path) -> Result<LoadOutcome<Case>, DiagnosticReport> {
+struct LoadedInput {
+    outcome: LoadOutcome<Case>,
+    bytes: Vec<u8>,
+    paths: Vec<PathBuf>,
+}
+
+fn load_case(path: &Path) -> Result<LoadedInput, DiagnosticReport> {
     if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
         let bytes = read_input(path)?;
-        bellhop::json::load_case_document_named(&bytes, path)
-            .map_err(bellhop::json::DocumentError::into_report)
+        let outcome = bellhop::json::load_case_document_named(&bytes, path)
+            .map_err(bellhop::json::DocumentError::into_report)?;
+        Ok(LoadedInput {
+            outcome,
+            bytes,
+            paths: vec![path.to_path_buf()],
+        })
     } else {
-        bellhop::legacy::load_case(path)
+        let (outcome, source, paths) = bellhop::legacy::load_case_with_inputs(path)?.into_parts();
+        Ok(LoadedInput {
+            outcome,
+            bytes: source.into_bytes(),
+            paths,
+        })
     }
 }
 
@@ -245,12 +241,6 @@ fn default_output_path(input: &Path) -> PathBuf {
         .file_stem()
         .map_or_else(|| "bellhop".into(), std::ffi::OsStr::to_os_string);
     PathBuf::from(stem).with_extension("h5")
-}
-
-fn temporary_output_path(output: &Path) -> PathBuf {
-    let mut name = output.as_os_str().to_os_string();
-    name.push(".tmp");
-    PathBuf::from(name)
 }
 
 fn render_report(report: &bellhop::DiagnosticReport) {

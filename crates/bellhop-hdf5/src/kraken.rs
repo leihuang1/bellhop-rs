@@ -4,7 +4,7 @@
 use std::fmt;
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use hdf5::{File, Group, H5Type};
 use kraken::{
@@ -13,6 +13,7 @@ use kraken::{
 };
 use sha2::{Digest, Sha256};
 
+use super::publication::{check_file_size, publish};
 use super::{hdf5_error, write_scalar_attribute, write_string_attribute};
 
 pub const SCHEMA_VERSION: u32 = 1;
@@ -57,6 +58,12 @@ impl fmt::Display for RunError {
 
 impl std::error::Error for RunError {}
 
+impl From<String> for RunError {
+    fn from(message: String) -> Self {
+        Self::Output(message)
+    }
+}
+
 /// Solve one supported legacy pair and publish a complete, versioned HDF5 result.
 ///
 /// Exact input snapshots are parsed and hashed once. Frequencies are solved/written
@@ -73,7 +80,6 @@ impl std::error::Error for RunError {}
 ///
 /// Returns input diagnostics, numerical diagnostics, or a quota/filesystem/HDF5 error.
 /// No incomplete result is published on failure.
-#[allow(clippy::too_many_lines)]
 pub fn run_legacy(
     env_path: &Path,
     flp_path: &Path,
@@ -85,54 +91,20 @@ pub fn run_legacy(
     if max_output_bytes == 0 {
         return Err(RunError::Output("max_output_bytes must be positive".into()));
     }
-    let env_source = read_source(env_path)?;
-    let flp_source = read_source(flp_path)?;
-    let [surface, brc, irc] = kraken::legacy::field_table_extensions(&env_source, env_path, solver)
-        .map_err(|report| RunError::Input(report.to_string()))?
-        .map(|extension| {
-            extension
-                .map(|extension| {
-                    let path = env_path.with_extension(extension);
-                    let source = read_source(&path)?;
-                    Ok::<_, RunError>((extension, path, source))
-                })
-                .transpose()
-        });
-    let tables = [surface?, brc?, irc?];
-    let source_pattern = kraken::legacy::source_pattern_extension(&flp_source, flp_path)
-        .map_err(|report| RunError::Input(report.to_string()))?
-        .map(|extension| {
-            let path = flp_path.with_extension(extension);
-            let source = read_source(&path)?;
-            Ok::<_, RunError>((extension, path, source))
-        })
-        .transpose()?;
-    let cases = kraken::legacy::load_field_cases_with_resources(
-        &env_source,
-        &flp_source,
-        env_path,
-        flp_path,
-        solver,
-        tables
-            .each_ref()
-            .map(|table| table.as_ref().map(|(_, _, source)| source.as_str())),
-        source_pattern
-            .as_ref()
-            .map(|(_, _, source)| source.as_str()),
-    )
-    .map_err(|report| RunError::Input(report.to_string()))?;
-    let mut inputs = vec![
-        ("env", env_path, env_source.as_str()),
-        ("flp", flp_path, flp_source.as_str()),
-    ];
-    for resource in tables
+    let input = kraken::input::load_legacy(env_path, flp_path, solver)
+        .map_err(|report| RunError::Input(report.to_string()))?;
+    let snapshots: Vec<_> = input
+        .snapshots()
         .iter()
-        .chain(std::iter::once(&source_pattern))
-        .flatten()
-    {
-        inputs.push((resource.0, resource.1.as_path(), resource.2.as_str()));
-    }
-    run_cases(&cases, &inputs, output_path, overwrite, max_output_bytes)
+        .map(|snapshot| (snapshot.role(), snapshot.path(), snapshot.source()))
+        .collect();
+    run_cases(
+        input.cases(),
+        &snapshots,
+        output_path,
+        overwrite,
+        max_output_bytes,
+    )
 }
 
 /// Run a strict self-contained JSON snapshot without reading auxiliary files.
@@ -175,23 +147,6 @@ fn run_cases(
     if max_output_bytes == 0 {
         return Err(RunError::Output("max_output_bytes must be positive".into()));
     }
-    protect_inputs(
-        output_path,
-        &inputs.iter().map(|(_, path, _)| *path).collect::<Vec<_>>(),
-    )
-    .map_err(RunError::Output)?;
-    match fs::symlink_metadata(output_path) {
-        Ok(_) if !overwrite => {
-            return Err(RunError::Output(format!(
-                "output already exists: {}; pass --overwrite to replace it",
-                output_path.display()
-            )));
-        }
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-            return Err(RunError::Output(error.to_string()));
-        }
-        _ => {}
-    }
     // Admit the known FIELD payload before doing numerical work. Modes are charged
     // as they are written, because their counts are not known before solving.
     let pressure_bytes = cases.iter().try_fold(0_u64, |total, sequence| {
@@ -209,73 +164,54 @@ fn run_cases(
         )));
     }
 
-    let mut temporary = output_path.as_os_str().to_os_string();
-    temporary.push(".tmp");
-    let temporary = PathBuf::from(temporary);
-    // HDF5's exclusive create is the reservation; do not check then truncate.
-    let file =
-        File::create_excl(&temporary).map_err(|error| RunError::Output(hdf5_error(error)))?;
-    let cleanup = TemporaryOutput(temporary);
-    (|| {
-        // Own the handle in this inner scope: every early return drops it (and
-        // child groups) before the outer guard removes the scratch path.
-        let file = file;
-        let mut budget = Budget {
-            payload: 0,
-            maximum: max_output_bytes,
-        };
-        write_header(&file, cases, inputs, &mut budget).map_err(RunError::Output)?;
-        check_file(&file, &cleanup.0, max_output_bytes).map_err(RunError::Output)?;
-        let frequencies = file
-            .create_group("frequencies")
-            .map_err(|e| RunError::Output(hdf5_error(e)))?;
-        let mut summary = RunSummary {
-            frequency_count: cases.len(),
-            ..RunSummary::default()
-        };
-        for (index, case) in cases.iter().enumerate() {
-            let result = kraken::solve_field(case).map_err(|report| RunError::Simulation {
-                frequency_index: index,
-                frequency_hz: case.profiles()[0].frequency_hz,
-                report,
-            })?;
-            let group = frequencies
-                .create_group(&index.to_string())
+    publish(
+        output_path,
+        &inputs.iter().map(|(_, path, _)| *path).collect::<Vec<_>>(),
+        overwrite,
+        Some(max_output_bytes),
+        "KR0402",
+        |file, temporary| {
+            let mut budget = Budget {
+                payload: 0,
+                maximum: max_output_bytes,
+            };
+            write_header(file, cases, inputs, &mut budget).map_err(RunError::Output)?;
+            check_file(file, temporary, max_output_bytes).map_err(RunError::Output)?;
+            let frequencies = file
+                .create_group("frequencies")
                 .map_err(|e| RunError::Output(hdf5_error(e)))?;
-            write_frequency(&group, case, &result, &mut budget, &file, &cleanup.0)
+            let mut summary = RunSummary {
+                frequency_count: cases.len(),
+                ..RunSummary::default()
+            };
+            for (index, case) in cases.iter().enumerate() {
+                let result = kraken::solve_field(case).map_err(|report| RunError::Simulation {
+                    frequency_index: index,
+                    frequency_hz: case.profiles()[0].frequency_hz,
+                    report,
+                })?;
+                let group = frequencies
+                    .create_group(&index.to_string())
+                    .map_err(|e| RunError::Output(hdf5_error(e)))?;
+                write_frequency(&group, case, &result, &mut budget, file, temporary)
+                    .map_err(RunError::Output)?;
+                summary.mode_count += result
+                    .modes
+                    .iter()
+                    .map(|m| m.modes.len() as u64)
+                    .sum::<u64>();
+                summary.pressure_count += result.field.pressure.len() as u64;
+                check_file(file, temporary, max_output_bytes).map_err(RunError::Output)?;
+            }
+            drop(frequencies);
+            write_scalar_attribute(file, "mode_count", &summary.mode_count)
                 .map_err(RunError::Output)?;
-            summary.mode_count += result
-                .modes
-                .iter()
-                .map(|m| m.modes.len() as u64)
-                .sum::<u64>();
-            summary.pressure_count += result.field.pressure.len() as u64;
-            check_file(&file, &cleanup.0, max_output_bytes).map_err(RunError::Output)?;
-        }
-        drop(frequencies);
-        write_scalar_attribute(&file, "mode_count", &summary.mode_count)
-            .map_err(RunError::Output)?;
-        write_scalar_attribute(&file, "pressure_count", &summary.pressure_count)
-            .map_err(RunError::Output)?;
-        check_file(&file, &cleanup.0, max_output_bytes).map_err(RunError::Output)?;
-        file.close().map_err(|e| RunError::Output(hdf5_error(e)))?;
-        check_file_size(&cleanup.0, max_output_bytes).map_err(RunError::Output)?;
-        fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&cleanup.0)
-            .and_then(|file| file.sync_all())
-            .map_err(|e| RunError::Output(e.to_string()))?;
-        if overwrite {
-            fs::rename(&cleanup.0, output_path)
-        } else {
-            fs::hard_link(&cleanup.0, output_path)
-        }
-        .map_err(|e| {
-            RunError::Output(format!("unable to install {}: {e}", output_path.display()))
-        })?;
-        Ok(summary)
-    })()
+            write_scalar_attribute(file, "pressure_count", &summary.pressure_count)
+                .map_err(RunError::Output)?;
+            check_file(file, temporary, max_output_bytes).map_err(RunError::Output)?;
+            Ok(summary)
+        },
+    )
 }
 
 fn read_source(path: &Path) -> Result<String, RunError> {
@@ -292,40 +228,6 @@ fn read_source(path: &Path) -> Result<String, RunError> {
             ))
         })?;
     Ok(source)
-}
-
-fn protect_inputs(output: &Path, inputs: &[&Path]) -> Result<(), String> {
-    let parent = output
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let filename = output.file_name().ok_or("output must name a file")?;
-    let destination = fs::canonicalize(parent)
-        .map_err(|e| e.to_string())?
-        .join(filename);
-    let existing = fs::canonicalize(output).ok();
-    for input in inputs {
-        let input = fs::canonicalize(input).map_err(|e| e.to_string())?;
-        if destination == input || existing.as_ref() == Some(&input) {
-            return Err("output must not replace an input file or its symlink alias".into());
-        }
-    }
-    Ok(())
-}
-
-struct TemporaryOutput(PathBuf);
-
-impl Drop for TemporaryOutput {
-    fn drop(&mut self) {
-        if let Err(error) = fs::remove_file(&self.0)
-            && error.kind() != std::io::ErrorKind::NotFound
-        {
-            eprintln!(
-                "warning[KR0402]: unable to remove scratch {}: {error}",
-                self.0.display()
-            );
-        }
-    }
 }
 
 struct Budget {
@@ -349,13 +251,6 @@ fn check_file(file: &File, path: &Path, maximum: u64) -> Result<(), String> {
     // is needed for a strict in-write disk quota, not for sequential bounded results.
     file.flush().map_err(hdf5_error)?;
     check_file_size(path, maximum)
-}
-
-fn check_file_size(path: &Path, maximum: u64) -> Result<(), String> {
-    if fs::metadata(path).map_err(|e| e.to_string())?.len() > maximum {
-        return Err(format!("HDF5 file exceeds {maximum} bytes"));
-    }
-    Ok(())
 }
 
 fn write_header(

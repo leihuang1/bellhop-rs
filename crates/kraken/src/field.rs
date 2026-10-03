@@ -1,0 +1,693 @@
+//! Validated profile sequences and range-dependent 2D FIELD.
+use crate::solver::{double, error, single, source_pattern_scale};
+use crate::{Case, DiagnosticReport, ModeAddition, ModeSet, PressureField, SourceGeometry};
+use num_complex::{Complex32, Complex64};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FieldPropagation {
+    RangeIndependent,
+    Adiabatic,
+    Coupled,
+}
+
+/// One frequency, with ordered range-independent modal environments.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FieldCase {
+    profiles: Vec<Case>,
+    ranges_m: Vec<f64>,
+    propagation: FieldPropagation,
+}
+
+impl FieldCase {
+    /// Validate profile ranges, shared FIELD geometry and coupling requirements.
+    /// # Errors
+    /// Returns structured diagnostics for inconsistent or oversized sequences.
+    #[allow(
+        clippy::float_cmp,
+        clippy::too_many_lines,
+        clippy::cast_possible_truncation
+    )]
+    pub fn new(
+        profiles: Vec<Case>,
+        ranges_m: Vec<f64>,
+        propagation: FieldPropagation,
+    ) -> Result<Self, DiagnosticReport> {
+        if profiles.is_empty()
+            || profiles.len() > crate::MAX_VECTOR_LENGTH
+            || profiles.len() != ranges_m.len()
+            || ranges_m[0] != 0.0
+            || ranges_m.iter().any(|r| !r.is_finite())
+            || ranges_m.windows(2).any(|p| p[1] <= p[0])
+            || (profiles.len() == 1) != (propagation == FieldPropagation::RangeIndependent)
+        {
+            return Err(error(
+                "KR0201",
+                "profile ranges must increase from zero and match the propagation type and profile count",
+                "profile_ranges_m",
+            ));
+        }
+        let first = &profiles[0];
+        for case in &profiles {
+            if case.frequency_hz != first.frequency_hz
+                || case.mode_solver != first.mode_solver
+                || case.source_geometry != first.source_geometry
+                || case.mode_addition != first.mode_addition
+                || case.source_pattern != first.source_pattern
+                || case.mode_limit != first.mode_limit
+                || case.source_depths_m != first.source_depths_m
+                || case.receiver_depths_m != first.receiver_depths_m
+                || case.receiver_ranges_m != first.receiver_ranges_m
+                || case.receiver_offsets_m != first.receiver_offsets_m
+            {
+                return Err(error(
+                    "KR0201",
+                    "profiles must share frequency, solver and FIELD geometry",
+                    "profiles",
+                ));
+            }
+            if propagation == FieldPropagation::Coupled {
+                if case.mode_addition == ModeAddition::Incoherent {
+                    return Err(error(
+                        "KR0202",
+                        "coupled modes do not support incoherent addition",
+                        "mode_addition",
+                    ));
+                }
+                if !case.top_elastic_layers.is_empty()
+                    || !case.bottom_elastic_layers.is_empty()
+                    || matches!(
+                        case.surface_boundary,
+                        crate::Boundary::ElasticHalfSpace { .. }
+                    )
+                    || matches!(
+                        case.bottom_boundary,
+                        crate::Boundary::ElasticHalfSpace { .. }
+                    )
+                    || case.surface_boundary.is_tabulated()
+                    || case.bottom_boundary.is_tabulated()
+                {
+                    return Err(error(
+                        "KR0202",
+                        "coupling currently requires smooth fluid profiles",
+                        "profiles",
+                    ));
+                }
+                if case.mode_sample_depths_m[0] != case.fluid_top_depth_m()
+                    || case.mode_sample_depths_m.last().copied()
+                        != Some(case.fluid_bottom_depth_m())
+                {
+                    return Err(error(
+                        "KR0201",
+                        "coupling requires modes sampled across the full fluid interval",
+                        "mode_sample_depths_m",
+                    ));
+                }
+                // ponytail: require PLeft-supported f32 stencils; retabulate for coarser coupling grids.
+                let z = &case.mode_sample_depths_m;
+                let mut previous_upper = None;
+                if crate::layers::iter(case).skip(1).any(|layer| {
+                    let depth = layer.top as f32;
+                    let upper = z.partition_point(|&z| (z as f32) < depth);
+                    let on_grid = z.get(upper).is_some_and(|&z| z as f32 == depth);
+                    // Endpoints have no interface correction; interior stencils handle one interface.
+                    let unsupported = upper == 0
+                        || upper == z.len()
+                        || (!on_grid && (upper == 1 || upper + 1 == z.len()))
+                        || previous_upper.is_some_and(|previous| {
+                            previous == upper || (!on_grid && previous + 1 == upper)
+                        });
+                    previous_upper = Some(upper);
+                    unsupported
+                }) {
+                    return Err(error(
+                        "KR0201",
+                        "coupling requires a modal grid resolving every fluid-interface quadrature stencil",
+                        "mode_sample_depths_m",
+                    ));
+                }
+            }
+        }
+        if profiles.iter().map(input_values).sum::<usize>() + ranges_m.len() > MAX_SEQUENCE_VALUES {
+            return Err(error(
+                "KR0201",
+                "profile sequence exceeds the input storage limit",
+                "profiles",
+            ));
+        }
+        Ok(Self {
+            profiles,
+            ranges_m,
+            propagation,
+        })
+    }
+
+    #[must_use]
+    pub fn profiles(&self) -> &[Case] {
+        &self.profiles
+    }
+    #[must_use]
+    pub fn ranges_m(&self) -> &[f64] {
+        &self.ranges_m
+    }
+    #[must_use]
+    pub fn propagation(&self) -> FieldPropagation {
+        self.propagation
+    }
+}
+
+pub(crate) const MAX_SEQUENCE_VALUES: usize = 5_000_000;
+pub(crate) fn input_values(case: &Case) -> usize {
+    case.sound_speed_profile.len()
+        + case.water_attenuation_db_per_wavelength.len()
+        + case.mode_sample_depths_m.len()
+        + case.source_depths_m.len()
+        + case.receiver_depths_m.len()
+        + case.receiver_ranges_m.len()
+        + case.receiver_offsets_m.len()
+        + 2 * case.source_pattern.len()
+        + case
+            .additional_fluid_layers
+            .iter()
+            .map(|l| 1 + l.sound_speed_profile.len() + l.attenuation_db_per_wavelength.len())
+            .sum::<usize>()
+        + 7 * (case.top_elastic_layers.len() + case.bottom_elastic_layers.len())
+        + [&case.surface_boundary, &case.bottom_boundary]
+            .iter()
+            .map(|b| match b {
+                crate::Boundary::Reflection(p) => p.len(),
+                crate::Boundary::Impedance { points, .. } => points.len(),
+                _ => 0,
+            })
+            .sum::<usize>()
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProfileSimulationResult {
+    /// One complete modal product per input profile, including modes above the FIELD cap.
+    pub modes: Vec<ModeSet>,
+    pub field: PressureField,
+}
+
+/// Compute every profile's modes and synthesize one range-dependent field.
+/// # Errors
+/// Returns modal, cumulative storage/work or non-finite pressure diagnostics.
+#[allow(clippy::missing_panics_doc, clippy::too_many_lines)] // FieldCase construction guarantees a nonempty sequence
+pub fn solve_field(case: &FieldCase) -> Result<ProfileSimulationResult, DiagnosticReport> {
+    if case.propagation == FieldPropagation::RangeIndependent {
+        let result = crate::solve(&case.profiles[0])?;
+        return Ok(ProfileSimulationResult {
+            modes: vec![result.modes],
+            field: result.field,
+        });
+    }
+    let mut modes = Vec::with_capacity(case.profiles.len());
+    let mut shapes = 0;
+    for (index, profile) in case.profiles.iter().enumerate() {
+        let set = crate::solver::solve_modes(profile).map_err(|mut report| {
+            for d in &mut report.diagnostics {
+                d.field = format!("profiles[{index}].{}", d.field);
+            }
+            report
+        })?;
+        shapes += set.modes.len() * set.sampled_depths_m.len();
+        if shapes > MAX_SEQUENCE_VALUES {
+            return Err(error(
+                "KR0302",
+                "profile mode shapes exceed the cumulative storage limit",
+                "profiles",
+            ));
+        }
+        modes.push(set);
+    }
+    let first = &case.profiles[0];
+    let samples =
+        first.source_depths_m.len() * first.receiver_depths_m.len() * first.receiver_ranges_m.len();
+    let largest = modes.iter().map(|m| m.modes.len()).max().unwrap_or(0);
+    let coupling_work = if case.propagation == FieldPropagation::Coupled {
+        modes
+            .windows(2)
+            .zip(case.profiles.windows(2))
+            .map(|(m, p)| {
+                let left = m[0].modes.len();
+                let right = m[1].modes.len();
+                let grid = m[0].sampled_depths_m.len() + m[1].sampled_depths_m.len();
+                // Pressure tabulation, retabulation/projection, two half-space tails,
+                // and receiver interpolation; no dense coupling matrix is stored.
+                left.saturating_mul(m[0].sampled_depths_m.len())
+                    .saturating_add((left + right).saturating_mul(grid))
+                    .saturating_add(2_usize.saturating_mul(left).saturating_mul(right))
+                    .saturating_add(right.saturating_mul(p[1].receiver_depths_m.len()))
+            })
+            .fold(0_usize, usize::saturating_add)
+            .saturating_mul(first.source_depths_m.len())
+    } else {
+        0
+    };
+    if samples > crate::MAX_FIELD_SAMPLES
+        || samples
+            .saturating_mul(largest)
+            .saturating_add(coupling_work)
+            > crate::solver::MAX_FIELD_WORK
+    {
+        return Err(error(
+            "KR0302",
+            "profile FIELD exceeds the cumulative modal-operation limit",
+            "field_grid",
+        ));
+    }
+    let mut pressure = vec![Complex64::new(0.0, 0.0); samples];
+    for (source, &depth) in first.source_depths_m.iter().enumerate() {
+        let count = modes[0].modes.len().min(first.mode_limit);
+        let excitation: Vec<_> = modes[0]
+            .modes
+            .iter()
+            .take(count)
+            .map(|mode| {
+                let shape = sample(&modes[0], mode, depth);
+                if source == 0 && !first.source_pattern.is_empty() {
+                    shape
+                        * source_pattern_scale(first, single(mode.horizontal_wavenumber_rad_per_m))
+                } else {
+                    shape
+                }
+            })
+            .collect();
+        let block = &mut pressure[source * samples / first.source_depths_m.len()
+            ..(source + 1) * samples / first.source_depths_m.len()];
+        match case.propagation {
+            FieldPropagation::Adiabatic => adiabatic(case, &modes, &excitation, block),
+            FieldPropagation::Coupled => coupled(case, &modes, &excitation, block),
+            FieldPropagation::RangeIndependent => unreachable!(),
+        }
+    }
+    if pressure
+        .iter()
+        .any(|p| !p.re.is_finite() || !p.im.is_finite())
+    {
+        return Err(error(
+            "KR0302",
+            "field pressure is not finite",
+            "field_grid",
+        ));
+    }
+    Ok(ProfileSimulationResult {
+        modes,
+        field: PressureField {
+            source_depths_m: first.source_depths_m.clone(),
+            receiver_depths_m: first.receiver_depths_m.clone(),
+            receiver_ranges_m: first.receiver_ranges_m.clone(),
+            receiver_offsets_m: first.receiver_offsets_m.clone(),
+            pressure,
+        },
+    })
+}
+
+#[allow(clippy::approx_constant)]
+fn factor() -> Complex32 {
+    let pi = 3.141_592_6_f32;
+    Complex32::new(0.0, 1.0) * (2.0 * pi).sqrt() * Complex32::from_polar(1.0, pi * 0.25)
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn sample(set: &ModeSet, mode: &crate::NormalMode, depth: f64) -> Complex32 {
+    let z = &set.sampled_depths_m;
+    if z.len() == 1 {
+        return single(mode.eigenfunction[0]);
+    }
+    let upper = z.partition_point(|d| *d < depth).clamp(1, z.len() - 1);
+    let w = (depth as f32 - z[upper - 1] as f32) / (z[upper] as f32 - z[upper - 1] as f32);
+    let left = single(mode.eigenfunction[upper - 1]);
+    left + w * (single(mode.eigenfunction[upper]) - left)
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn interpolate(left: Complex32, right: Complex32, w: f64) -> Complex32 {
+    single(double(left) + w * double(right - left))
+}
+
+#[allow(clippy::float_cmp, clippy::cast_possible_truncation)]
+fn adiabatic(
+    case: &FieldCase,
+    modes: &[ModeSet],
+    excitation: &[Complex32],
+    pressure: &mut [Complex64],
+) {
+    let first = &case.profiles[0];
+    let mut count = excitation.len().min(modes[1].modes.len());
+    let constants: Vec<_> = excitation.iter().map(|s| double(factor() * s)).collect();
+    let mut integral = vec![Complex64::new(0.0, 0.0); excitation.len()];
+    let mut segment = 0;
+    let mut previous = 0.0_f64;
+    for (ir, &range) in first.receiver_ranges_m.iter().enumerate() {
+        let mut left = previous.max(case.ranges_m[segment]);
+        while segment + 1 < modes.len() && range > case.ranges_m[segment + 1] {
+            let boundary = case.ranges_m[segment + 1];
+            integrate(
+                modes,
+                &case.ranges_m,
+                segment,
+                left,
+                boundary,
+                &mut integral[..count],
+            );
+            left = boundary;
+            segment += 1;
+            if segment + 1 < modes.len() {
+                count = count.min(modes[segment + 1].modes.len());
+            }
+        }
+        integrate(
+            modes,
+            &case.ranges_m,
+            segment,
+            left,
+            range,
+            &mut integral[..count],
+        );
+        let right = (segment + 1).min(modes.len() - 1);
+        let w = if right == segment {
+            0.0
+        } else {
+            (range - case.ranges_m[segment]) / (case.ranges_m[right] - case.ranges_m[segment])
+        };
+        let hank: Vec<_> = (0..count)
+            .map(|m| {
+                let k = interpolate(
+                    single(modes[segment].modes[m].horizontal_wavenumber_rad_per_m),
+                    single(modes[right].modes[m].horizontal_wavenumber_rad_per_m),
+                    w,
+                );
+                let phase = Complex64::new(
+                    integral[m].im,
+                    if first.mode_addition == ModeAddition::Incoherent {
+                        0.0
+                    } else {
+                        -integral[m].re
+                    },
+                );
+                let mut h = constants[m]
+                    * if first.mode_addition == ModeAddition::Incoherent {
+                        phase.exp()
+                    } else {
+                        double(single(phase.exp()))
+                    };
+                h = match first.source_geometry {
+                    SourceGeometry::Line => h / double(k),
+                    SourceGeometry::Point if range == 0.0 => Complex64::new(0.0, 0.0),
+                    SourceGeometry::Point => h / (double(k) * range).sqrt(),
+                    SourceGeometry::ScaledCylindrical => h / double(k.sqrt()),
+                };
+                h
+            })
+            .collect();
+        for (iz, &depth) in first.receiver_depths_m.iter().enumerate() {
+            let contributions = (0..count).map(|m| {
+                double(interpolate(
+                    sample(&modes[segment], &modes[segment].modes[m], depth),
+                    sample(&modes[right], &modes[right].modes[m], depth),
+                    w,
+                )) * hank[m]
+            });
+            let value = if first.mode_addition == ModeAddition::Incoherent {
+                Complex64::new(contributions.map(|p| p.norm_sqr()).sum::<f64>().sqrt(), 0.0)
+            } else {
+                contributions.sum()
+            };
+            pressure[iz * first.receiver_ranges_m.len() + ir] = double(single(value));
+        }
+        previous = range;
+    }
+}
+
+fn integrate(
+    modes: &[ModeSet],
+    ranges: &[f64],
+    segment: usize,
+    left: f64,
+    right: f64,
+    integral: &mut [Complex64],
+) {
+    let next = (segment + 1).min(modes.len() - 1);
+    let w = if next == segment {
+        0.0
+    } else {
+        (right.midpoint(left) - ranges[segment]) / (ranges[next] - ranges[segment])
+    };
+    for (m, sum) in integral.iter_mut().enumerate() {
+        let k = interpolate(
+            single(modes[segment].modes[m].horizontal_wavenumber_rad_per_m),
+            single(modes[next].modes[m].horizontal_wavenumber_rad_per_m),
+            w,
+        );
+        *sum += double(k) * (right - left);
+    }
+}
+
+#[allow(clippy::float_cmp)]
+fn coupled(
+    case: &FieldCase,
+    modes: &[ModeSet],
+    excitation: &[Complex32],
+    pressure: &mut [Complex64],
+) {
+    let first = &case.profiles[0];
+    let mut a: Vec<_> = excitation
+        .iter()
+        .zip(&modes[0].modes)
+        .map(|(s, m)| {
+            let k = single(m.horizontal_wavenumber_rad_per_m);
+            if first.source_geometry == SourceGeometry::Line {
+                factor() / Complex32::new(0.0, 1.0) * s / k
+            } else {
+                factor() * s / k.sqrt()
+            }
+        })
+        .collect();
+    let mut segment = 0;
+    let mut previous = 0.0;
+    for (ir, &range) in first.receiver_ranges_m.iter().enumerate() {
+        while segment + 1 < modes.len()
+            && range > case.ranges_m[segment].midpoint(case.ranges_m[segment + 1])
+        {
+            let boundary = case.ranges_m[segment].midpoint(case.ranges_m[segment + 1]);
+            advance(&mut a, &modes[segment], boundary - previous);
+            a = project(
+                &case.profiles[segment],
+                &case.profiles[segment + 1],
+                &modes[segment],
+                &modes[segment + 1],
+                &a,
+            );
+            previous = boundary;
+            segment += 1;
+        }
+        advance(&mut a, &modes[segment], range - previous);
+        for (iz, &depth) in first.receiver_depths_m.iter().enumerate() {
+            let sum: Complex32 = a
+                .iter()
+                .zip(&modes[segment].modes)
+                .map(|(a, mode)| a * sample(&modes[segment], mode, depth))
+                .sum();
+            let value = if first.source_geometry == SourceGeometry::Point && range != 0.0 {
+                single(double(sum) / range.sqrt())
+            } else {
+                sum
+            };
+            pressure[iz * first.receiver_ranges_m.len() + ir] = double(value);
+        }
+        previous = range;
+    }
+}
+
+fn advance(a: &mut [Complex32], modes: &ModeSet, distance: f64) {
+    for (a, m) in a.iter_mut().zip(&modes.modes) {
+        let ik = Complex32::new(0.0, -1.0) * single(m.horizontal_wavenumber_rad_per_m);
+        *a = single(double(*a) * (double(ik) * distance).exp());
+    }
+}
+
+#[allow(clippy::approx_constant, clippy::cast_possible_truncation)]
+fn gamma(case: &Case, mode: &crate::NormalMode, top: bool) -> Complex32 {
+    let boundary = if top {
+        &case.surface_boundary
+    } else {
+        &case.bottom_boundary
+    };
+    if !boundary.is_half_space() {
+        return Complex32::new(0.0, 0.0);
+    }
+    let (cp, loss) = if top {
+        (
+            case.surface_sound_speed_mps,
+            case.surface_attenuation_db_per_wavelength,
+        )
+    } else {
+        (
+            case.bottom_sound_speed_mps,
+            case.bottom_attenuation_db_per_wavelength,
+        )
+    };
+    let cp = Complex32::new(
+        cp as f32,
+        (loss * cp / (8.685_889_6 * 2.0 * std::f64::consts::PI)) as f32,
+    );
+    let kb = single(
+        (Complex64::new(2.0 * f64::from(3.141_592_6_f32) * case.frequency_hz, 0.0) / double(cp))
+            .powi(2),
+    );
+    let k = single(mode.horizontal_wavenumber_rad_per_m);
+    single(crate::complex_modes::pekeris_root(double(k * k - kb)))
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::too_many_lines,
+    clippy::manual_midpoint
+)] // preserve PLeft's f32 density-quadrature grouping
+fn project(
+    left: &Case,
+    right: &Case,
+    lm: &ModeSet,
+    rm: &ModeSet,
+    a: &[Complex32],
+) -> Vec<Complex32> {
+    let mut z: Vec<_> = rm.sampled_depths_m.iter().map(|&z| z as f32).collect();
+    for &depth in &lm.sampled_depths_m {
+        if depth as f32 > *z.last().unwrap_or(&0.0) {
+            z.push(depth as f32);
+        }
+    }
+    let pl: Vec<Complex32> = (0..lm.sampled_depths_m.len())
+        .map(|iz| {
+            a.iter()
+                .zip(&lm.modes)
+                .map(|(a, m)| a * single(m.eigenfunction[iz]))
+                .sum()
+        })
+        .collect();
+    let lz: Vec<_> = lm.sampled_depths_m.iter().map(|&z| z as f32).collect();
+    let bottom = right.fluid_bottom_depth_m() as f32;
+    let top = right.fluid_top_depth_m() as f32;
+    let mut medium = 0;
+    let layers: Vec<_> = crate::layers::iter(right).collect();
+    let mut density = layers[0].density as f32;
+    let mut p = Vec::with_capacity(z.len());
+    for (iz, &depth) in z.iter().enumerate() {
+        if depth < top {
+            density = right.surface_density_g_cm3 as f32;
+        } else if depth > bottom {
+            density = right.bottom_density_g_cm3 as f32;
+        } else if medium + 1 < layers.len() && depth > layers[medium].bottom as f32 {
+            medium += 1;
+            density = layers[medium].density as f32;
+        }
+        let below = layers[medium].bottom as f32;
+        let density_below = layers
+            .get(medium + 1)
+            .map_or(right.bottom_density_g_cm3 as f32, |l| l.density as f32);
+        let value = if (depth > left.fluid_bottom_depth_m() as f32
+            && !right.bottom_boundary.is_half_space())
+            || (depth < left.fluid_top_depth_m() as f32 && !right.surface_boundary.is_half_space())
+        {
+            Complex32::new(0.0, 0.0)
+        } else if depth > left.fluid_bottom_depth_m() as f32 {
+            a.iter()
+                .zip(&lm.modes)
+                .map(|(a, m)| {
+                    a * single(*m.eigenfunction.last().unwrap())
+                        * (-gamma(left, m, false) * (depth - left.fluid_bottom_depth_m() as f32))
+                            .exp()
+                })
+                .sum()
+        } else if depth < left.fluid_top_depth_m() as f32 {
+            a.iter()
+                .zip(&lm.modes)
+                .map(|(a, m)| {
+                    a * single(m.eigenfunction[0])
+                        * (-gamma(left, m, true) * (left.fluid_top_depth_m() as f32 - depth)).exp()
+                })
+                .sum()
+        } else {
+            let upper = lz.partition_point(|&d| d < depth).clamp(1, lz.len() - 1);
+            pl[upper - 1]
+                + (depth - lz[upper - 1]) / (lz[upper] - lz[upper - 1])
+                    * (pl[upper] - pl[upper - 1])
+        };
+        let h = if iz == 0 {
+            0.5 * (z[1] - z[0]) / density
+        } else if iz + 1 == z.len() {
+            0.5 * (depth - z[iz - 1]) / density
+        } else if z[iz - 1] < below && z[iz + 1] > below {
+            0.5 * (z[iz + 1] / density_below - z[iz - 1] / density - below / density_below
+                + below / density)
+        } else {
+            0.5 * (z[iz + 1] - z[iz - 1]) / density
+        };
+        p.push(h * value);
+    }
+    rm.modes
+        .iter()
+        .map(|mode| {
+            let mut sum: Complex32 = p
+                .iter()
+                .enumerate()
+                .map(|(iz, p)| {
+                    let phi = if iz < mode.eigenfunction.len() {
+                        single(mode.eigenfunction[iz])
+                    } else if right.bottom_boundary.is_half_space() {
+                        single(*mode.eigenfunction.last().unwrap())
+                            * (-gamma(right, mode, false) * (z[iz] - bottom)).exp()
+                    } else {
+                        Complex32::new(0.0, 0.0)
+                    };
+                    p * phi
+                })
+                .sum();
+            for (top_side, boundary, density, depth) in [
+                (
+                    true,
+                    &right.surface_boundary,
+                    right.surface_density_g_cm3,
+                    right.fluid_top_depth_m(),
+                ),
+                (
+                    false,
+                    &right.bottom_boundary,
+                    right.bottom_density_g_cm3,
+                    right.fluid_bottom_depth_m(),
+                ),
+            ] {
+                if boundary.is_half_space() {
+                    let edge = if top_side { 0 } else { z.len() - 1 };
+                    let phi_r = single(if top_side {
+                        mode.eigenfunction[0]
+                    } else {
+                        *mode.eigenfunction.last().unwrap()
+                    });
+                    let gr = gamma(right, mode, top_side);
+                    let fr = phi_r / density as f32 * (-gr * (z[edge] - depth as f32)).exp();
+                    let dl = if top_side {
+                        left.fluid_top_depth_m()
+                    } else {
+                        left.fluid_bottom_depth_m()
+                    } as f32;
+                    let tail: Complex32 = a
+                        .iter()
+                        .zip(&lm.modes)
+                        .map(|(a, m)| {
+                            let gl = gamma(left, m, top_side);
+                            let phi_l = single(if top_side {
+                                m.eigenfunction[0]
+                            } else {
+                                *m.eigenfunction.last().unwrap()
+                            });
+                            a * phi_l * (-gl * (z[edge] - dl)).exp() / (gl + gr)
+                        })
+                        .sum();
+                    sum += fr * tail;
+                }
+            }
+            sum
+        })
+        .collect()
+}

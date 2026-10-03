@@ -192,7 +192,7 @@ pub fn bottom_table_extension(
     solver: ModeSolver,
 ) -> Result<Option<&'static str>, DiagnosticReport> {
     check_input_size(source, path)?;
-    let env = parse_environment_with_solver(source, path, solver)?;
+    let env = read_environment(&mut Reader::new(source, path)?, solver)?;
     Ok(match env.bottom_boundary {
         BottomBoundary::Reflection(_) => Some("brc"),
         BottomBoundary::Impedance { .. } => Some("irc"),
@@ -209,7 +209,7 @@ pub fn surface_table_extension(
     solver: ModeSolver,
 ) -> Result<Option<&'static str>, DiagnosticReport> {
     check_input_size(source, path)?;
-    let env = parse_environment_with_solver(source, path, solver)?;
+    let env = read_environment(&mut Reader::new(source, path)?, solver)?;
     Ok(matches!(env.surface_boundary, SurfaceBoundary::Reflection(_)).then_some("trc"))
 }
 
@@ -273,6 +273,189 @@ pub fn load_frequency_cases_with_boundary_tables(
     )
 }
 
+fn environment_table_extensions(environment: &Environment) -> [Option<&'static str>; 3] {
+    [
+        matches!(environment.surface_boundary, SurfaceBoundary::Reflection(_)).then_some("trc"),
+        matches!(environment.bottom_boundary, BottomBoundary::Reflection(_)).then_some("brc"),
+        matches!(
+            environment.bottom_boundary,
+            BottomBoundary::Impedance { .. }
+        )
+        .then_some("irc"),
+    ]
+}
+
+/// Discover same-stem tables across every ENV profile, in TRC/BRC/IRC order.
+/// # Errors
+/// Returns bounded-input and environment parse diagnostics.
+pub fn field_table_extensions(
+    source: &str,
+    path: &Path,
+    solver: ModeSolver,
+) -> Result<[Option<&'static str>; 3], DiagnosticReport> {
+    check_input_size(source, path)?;
+    let mut reader = Reader::new(source, path)?;
+    let mut extensions = [None; 3];
+    while reader.index < reader.records.len() {
+        let environment = read_environment(&mut reader, solver)?;
+        for (slot, extension) in extensions
+            .iter_mut()
+            .zip(environment_table_extensions(&environment))
+        {
+            *slot = slot.or(extension);
+        }
+    }
+    Ok(extensions)
+}
+
+/// Load ordered legacy environments and FIELD propagation, retaining frequency order.
+/// # Errors
+/// Returns bounded-input, resource, profile-count and validation diagnostics.
+pub fn load_field_cases(
+    env_path: impl AsRef<Path>,
+    flp_path: impl AsRef<Path>,
+    solver: ModeSolver,
+) -> Result<Vec<crate::FieldCase>, DiagnosticReport> {
+    let env_path = env_path.as_ref();
+    let flp_path = flp_path.as_ref();
+    let env = read_file(env_path)?;
+    let flp = read_file(flp_path)?;
+    let [surface, brc, irc] = field_table_extensions(&env, env_path, solver)?.map(|ext| {
+        ext.map(|ext| read_file(&env_path.with_extension(ext)))
+            .transpose()
+    });
+    let tables = [surface?, brc?, irc?];
+    let pattern = source_pattern_extension(&flp, flp_path)?
+        .map(|ext| read_file(&flp_path.with_extension(ext)))
+        .transpose()?;
+    load_field_cases_with_resources(
+        &env,
+        &flp,
+        env_path,
+        flp_path,
+        solver,
+        tables.each_ref().map(Option::as_deref),
+        pattern.as_deref(),
+    )
+}
+
+/// Parse exact snapshots into one validated profile sequence per frequency.
+/// Tables are TRC/BRC/IRC snapshots; each profile consumes only its required tables.
+/// Snapshots not required anywhere in the sequence are rejected.
+/// # Errors
+/// Returns bounded-input, resource, profile-count and validation diagnostics.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines, clippy::float_cmp)]
+pub fn load_field_cases_with_resources(
+    env_source: &str,
+    flp_source: &str,
+    env_path: &Path,
+    flp_path: &Path,
+    solver: ModeSolver,
+    tables: [Option<&str>; 3],
+    source_pattern: Option<&str>,
+) -> Result<Vec<crate::FieldCase>, DiagnosticReport> {
+    check_input_size(env_source, env_path)?;
+    check_input_size(flp_source, flp_path)?;
+    for (extension, source) in ["trc", "brc", "irc"].into_iter().zip(tables) {
+        if let Some(source) = source {
+            check_input_size(source, &env_path.with_extension(extension))?;
+        }
+    }
+    let field = parse_field(flp_source, flp_path)?;
+    let mut reader = Reader::new(env_source, env_path)?;
+    let mut sequences: Vec<Vec<Case>> = Vec::new();
+    let mut total = 0;
+    let mut used_tables = [false; 3];
+    for index in 0..field.profile_ranges_m.len() {
+        let environment = read_environment(&mut reader, solver)?;
+        let required = environment_table_extensions(&environment);
+        for (used, extension) in used_tables.iter_mut().zip(required) {
+            *used |= extension.is_some();
+        }
+        let [surface_table, brc, irc] =
+            std::array::from_fn(|index| required[index].and(tables[index]));
+        let cases = environment_cases(
+            environment,
+            field.clone(),
+            env_path,
+            flp_path,
+            solver,
+            false,
+            [surface_table, brc.or(irc)],
+            source_pattern,
+        )?;
+        if index == 0 {
+            total += field.profile_ranges_m.len() * cases.len();
+            sequences = (0..cases.len())
+                .map(|_| Vec::with_capacity(field.profile_ranges_m.len()))
+                .collect();
+        }
+        if cases.len() != sequences.len()
+            || cases
+                .iter()
+                .zip(&sequences)
+                .any(|(c, s)| s.first().is_some_and(|p| p.frequency_hz != c.frequency_hz))
+        {
+            return Err(one(
+                "KR0201",
+                "profiles must share the exact frequency vector",
+                "frequencies_hz",
+                env_path,
+                reader.last_line,
+                1,
+            ));
+        }
+        total += cases.iter().map(crate::field::input_values).sum::<usize>();
+        if total > crate::field::MAX_SEQUENCE_VALUES {
+            return Err(one(
+                "KR0201",
+                "profile/frequency cases exceed the cumulative input storage limit",
+                "profiles",
+                env_path,
+                reader.last_line,
+                1,
+            ));
+        }
+        for (sequence, case) in sequences.iter_mut().zip(cases) {
+            sequence.push(case);
+        }
+    }
+    reader.finish()?;
+    for ((extension, source), used) in ["trc", "brc", "irc"]
+        .into_iter()
+        .zip(tables)
+        .zip(used_tables)
+    {
+        if source.is_some() && !used {
+            return Err(one(
+                "KR0202",
+                "unexpected boundary table snapshot",
+                if extension == "trc" {
+                    "surface_boundary"
+                } else {
+                    "bottom_boundary"
+                },
+                env_path.with_extension(extension),
+                1,
+                1,
+            ));
+        }
+    }
+    sequences
+        .into_iter()
+        .map(|profiles| {
+            crate::FieldCase::new(profiles, field.profile_ranges_m.clone(), field.propagation)
+                .map_err(|mut report| {
+                    for d in &mut report.diagnostics {
+                        d.path = flp_path.to_path_buf();
+                        d.line = field.locations["profile_ranges_km"].0;
+                    }
+                    report
+                })
+        })
+        .collect()
+}
+
 /// Parse exact `.env`/`.flp` and optional TRC/BRC/IRC/SBP snapshots without rereading them.
 /// # Errors
 /// Returns bounded-input, resource, parse and validation diagnostics.
@@ -313,8 +496,42 @@ fn parse_frequency_cases_with_resources(
     tables: [Option<&str>; 2],
     source_pattern: Option<&str>,
 ) -> Result<Vec<Case>, DiagnosticReport> {
+    let environment = parse_environment_with_solver(env_source, env_path, mode_solver)?;
+    let field = parse_field(flp_source, flp_path)?;
+    if field.profile_ranges_m.len() != 1 {
+        return Err(one(
+            "KR0202",
+            "multiple profiles require load_field_cases",
+            "profile_ranges_km",
+            flp_path,
+            field.locations["profile_ranges_km"].0,
+            1,
+        ));
+    }
+    environment_cases(
+        environment,
+        field,
+        env_path,
+        flp_path,
+        mode_solver,
+        single_frequency,
+        tables,
+        source_pattern,
+    )
+}
+
+#[allow(clippy::float_cmp, clippy::too_many_arguments, clippy::too_many_lines)]
+fn environment_cases(
+    mut environment: Environment,
+    mut field: Field,
+    env_path: &Path,
+    flp_path: &Path,
+    mode_solver: ModeSolver,
+    single_frequency: bool,
+    tables: [Option<&str>; 2],
+    source_pattern: Option<&str>,
+) -> Result<Vec<Case>, DiagnosticReport> {
     let [surface_table, bottom_table] = tables;
-    let mut environment = parse_environment_with_solver(env_source, env_path, mode_solver)?;
     if environment.bottom_boundary.is_tabulated() {
         let extension = if matches!(environment.bottom_boundary, BottomBoundary::Reflection(_)) {
             "brc"
@@ -391,7 +608,6 @@ fn parse_frequency_cases_with_resources(
             column,
         ));
     }
-    let mut field = parse_field(flp_source, flp_path)?;
     let pattern_path = flp_path.with_extension("sbp");
     if field.source_pattern_requested {
         let source = source_pattern.ok_or_else(|| {
@@ -1123,6 +1339,18 @@ fn parse_environment_with_solver(
     mode_solver: ModeSolver,
 ) -> Result<Environment, DiagnosticReport> {
     let mut reader = Reader::new(source, path)?;
+    let environment = read_environment(&mut reader, mode_solver)?;
+    reader.finish()?;
+    Ok(environment)
+}
+
+#[allow(clippy::float_cmp, clippy::too_many_lines, clippy::needless_borrow)]
+fn read_environment(
+    reader: &mut Reader,
+    mode_solver: ModeSolver,
+) -> Result<Environment, DiagnosticReport> {
+    let path = reader.path.clone();
+    let path = path.as_path();
     let title = reader.text("title")?.text;
     let frequency_hz = reader.scalar("frequency_hz")?;
     let medium_count = reader.count("medium_count")?;
@@ -1236,7 +1464,7 @@ fn parse_environment_with_solver(
             ));
         }
         read_half_space(
-            &mut reader,
+            reader,
             "surface_half_space",
             0.0,
             [0.0, 1500.0, 0.0, 1.0, 0.0, 0.0],
@@ -1263,7 +1491,7 @@ fn parse_environment_with_solver(
     let mut profile_points = 0;
     for index in 0..medium_count {
         let (medium, power, last, point_count) = read_finite_layer(
-            &mut reader,
+            reader,
             interpolation,
             option(2),
             frequency_hz,
@@ -1413,7 +1641,7 @@ fn parse_environment_with_solver(
         } else {
             1
         };
-        bottom = read_half_space(&mut reader, "bottom_half_space", top, defaults, minimum)?;
+        bottom = read_half_space(reader, "bottom_half_space", top, defaults, minimum)?;
         if bottom[2] > 0.0 {
             bottom_boundary = crate::Boundary::ElasticHalfSpace {
                 shear_sound_speed_mps: bottom[2],
@@ -1423,8 +1651,8 @@ fn parse_environment_with_solver(
     }
     let limits = reader.numbers("phase_speed_limits", 2)?;
     let max_range_m = reader.scalar("max_range_km")? * 1000.0;
-    let source_depths = read_vector(&mut reader, "mode_source_depths_m", true)?;
-    let receiver_depths = read_vector(&mut reader, "mode_receiver_depths_m", true)?;
+    let source_depths = read_vector(reader, "mode_source_depths_m", true)?;
+    let receiver_depths = read_vector(reader, "mode_receiver_depths_m", true)?;
     let broadband = option(5) == b'B';
     let frequencies_hz = if broadband {
         let count = reader.count("frequencies_hz.count")?;
@@ -1437,7 +1665,7 @@ fn parse_environment_with_solver(
             ));
         }
         // Unlike ReadVector, ReadfreqVec/SubTab preserves frequency order.
-        let frequencies = read_vector_values(&mut reader, "frequencies_hz", count, false)?;
+        let frequencies = read_vector_values(reader, "frequencies_hz", count, false)?;
         if frequencies.iter().any(|&f| f <= 0.0) {
             return Err(reader_error(
                 &reader,
@@ -1450,8 +1678,6 @@ fn parse_environment_with_solver(
     } else {
         vec![frequency_hz]
     };
-    reader.finish()?;
-
     Ok(Environment {
         title,
         frequency_hz,
@@ -1495,7 +1721,7 @@ fn parse_environment_with_solver(
         max_range_m,
         source_depths,
         receiver_depths,
-        locations: reader.locations,
+        locations: std::mem::take(&mut reader.locations),
     })
 }
 
@@ -1559,12 +1785,12 @@ fn read_finite_layer(
     if interpolation != Interpolation::AnalyticMunk {
         loop {
             let record = reader.record(&profile_field)?;
-            if !(2..=6).contains(&record.tokens.len()) || (record.tokens.len() < 6 && !record.slash)
+            if !(1..=6).contains(&record.tokens.len()) || (record.tokens.len() < 6 && !record.slash)
             {
                 return Err(reader.record_error(
                     &record,
                     &profile_field,
-                    "expected 6 values, or 2..=5 followed by / to inherit trailing values",
+                    "expected 6 values, or 1..=5 followed by / to inherit trailing values",
                 ));
             }
             let mut point = inherited;
@@ -1872,7 +2098,10 @@ fn parse_bottom_table(
     })
 }
 
+#[derive(Clone)]
 struct Field {
+    profile_ranges_m: Vec<f64>,
+    propagation: crate::FieldPropagation,
     mode_limit: usize,
     source_geometry: SourceGeometry,
     mode_addition: ModeAddition,
@@ -1932,7 +2161,7 @@ fn parse_field(source: &str, path: &Path) -> Result<Field, DiagnosticReport> {
     let chars: Vec<char> = options.text.chars().collect();
     let option = |index| chars.get(index).copied().unwrap_or(' ');
     if !matches!(option(0), 'X' | 'R' | 'S')
-        || !matches!(option(1), ' ' | 'A')
+        || !matches!(option(1), ' ' | 'A' | 'C')
         || !matches!(option(2), ' ' | 'O' | '*')
         || !matches!(option(3), ' ' | 'C' | 'I')
         || chars.iter().skip(4).any(|ch| !ch.is_whitespace())
@@ -1948,12 +2177,18 @@ fn parse_field(source: &str, path: &Path) -> Result<Field, DiagnosticReport> {
     }
     let mode_limit = reader.count("mode_limit")?;
     let profiles = reader.count("profile_count")?;
-    let profile_ranges = reader.vector(profiles, "profile_ranges_km")?;
-    if profiles != 1 || profile_ranges.len() != 1 || profile_ranges[0] != 0.0 {
+    let mut profile_ranges = read_vector_values(&mut reader, "profile_ranges_km", profiles, false)?;
+    profile_ranges.sort_by(f64::total_cmp);
+    if profile_ranges.len() != profiles
+        || profile_ranges[0] != 0.0
+        || profile_ranges.windows(2).any(|pair| pair[1] <= pair[0])
+        || (profiles > 1 && !matches!(option(1), 'A' | 'C'))
+        || (profiles > 1 && option(1) == 'C' && option(3) == 'I')
+    {
         return Err(reader_error(
             &reader,
             "KR0202",
-            "requires one range-independent profile at 0 km",
+            "requires increasing profile ranges starting at 0 km, adiabatic or coupled propagation; coupled modes cannot use incoherent addition",
             "profile_ranges_km",
         ));
     }
@@ -1964,6 +2199,17 @@ fn parse_field(source: &str, path: &Path) -> Result<Field, DiagnosticReport> {
     reader.finish()?;
 
     Ok(Field {
+        profile_ranges_m: profile_ranges
+            .into_iter()
+            .map(|range| range * 1000.0)
+            .collect(),
+        propagation: if profiles == 1 {
+            crate::FieldPropagation::RangeIndependent
+        } else if option(1) == 'C' {
+            crate::FieldPropagation::Coupled
+        } else {
+            crate::FieldPropagation::Adiabatic
+        },
         mode_limit,
         source_geometry: match option(0) {
             'X' => SourceGeometry::Line,

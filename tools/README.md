@@ -92,6 +92,39 @@ for mapping in 'FieldScaled kraken' 'FieldPattern krakenc' 'FieldIncoherent krak
 done
 ```
 
+Reproduce the fixed multi-profile AD/CM paths without modifying original Gulf
+inputs. Only working filenames are aliased to pair each original FLP with the
+same original ENV. Small goldens remain independent of Docker.
+
+```sh
+(cd crates/kraken/tests/fixtures && shasum -a 256 -c golden/multi-profile.sha256)
+mkdir -p target/reference/profile-cases
+for mapping in 'GulfAd gulf_ad' 'GulfCm gulf_cm'; do
+  set -- $mapping
+  cp crates/kraken/tests/fixtures/original/Gulf/gulf_rd.env "target/reference/profile-cases/$1.env"
+  cp "crates/kraken/tests/fixtures/original/Gulf/$2.flp" "target/reference/profile-cases/$1.flp"
+done
+cargo build --release -p kraken-cli
+for case in ProfilesAd ProfilesCm GulfAd GulfCm; do
+  case "$case" in
+    Gulf*) env="$PWD/target/reference/profile-cases/$case.env" ;;
+    *) env="$PWD/crates/kraken/tests/fixtures/$case.env" ;;
+  esac
+  reference="$PWD/target/reference/$case-kraken/$case"
+  tools/reference/run-kraken-case.sh kraken "$env"
+  KRAKEN_PROFILE_ENV="$env" KRAKEN_PROFILE_ROOT="$reference" \
+    cargo test --release -p kraken --test differential_reference \
+      profile_fields_match_fresh_reference -- --ignored --exact --nocapture
+  target/release/kraken run "$env" --output "$reference.h5" --overwrite
+  KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_PROFILE_ENV="$env" KRAKEN_PROFILE_ROOT="$reference" \
+    cargo test --release -p kraken --test differential_reference \
+      profile_fields_match_fresh_reference -- --ignored --exact --nocapture
+done
+```
+
+See [multi-profile semantics/limits](../docs/kraken-multi-profile-field.md) and
+[additive HDF5 profile layout](../docs/kraken-output-format.md).
+
 KRAKENC P/S/fixed-Munk-A interpolation uses the same lossless `Profile`; four
 cubic/analytic fixtures above compare full modes and FIELD. `MunkS.env` is an
 upstream **SCOOTER environment**, not an original KRAKENC/FIELD pair. It and

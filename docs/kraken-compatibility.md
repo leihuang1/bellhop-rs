@@ -8,6 +8,8 @@ Fortran 12.2 environment described in [`reference.md`](reference.md).
 trapped or confined modes with material/volume and fluid-half-space attenuation.
 Range-independent FIELD supports line, point and scaled-cylindrical sources,
 omnidirectional or tabulated patterns, and coherent or incoherent mode addition.
+Multi-profile adiabatic and smooth-fluid coupled FIELD now cover both original
+Gulf paths; see [profile propagation](kraken-multi-profile-field.md).
 KRAKENC computes trapped and leaky modes and the same FIELD options for complex
 `N/C/P/S` or lossless fixed-Munk-A water.
 Both backends accept smooth V/R/A top and bottom combinations, with bounded
@@ -322,7 +324,7 @@ doubles NG to 200/400/400, with 42 modes/501 pressures per engine. Likewise
 `LayeredNormalization` removes the original `normal.env` bottom's shear speed
 and is labelled derived. Original normal/flused now pass the elastic half-space
 checkpoint below; original elsed/ice now pass the homogeneous finite-cap checkpoint.
-Gulf's multi-profile environment is left for the later FIELD stage.
+Gulf's multi-profile environment is now covered by the FIELD checkpoint below.
 
 The three-layer accepted refined fixture uses cHigh=1700 (all four reference
 modes); its separate RMax=0 wide fixture uses cHigh=1800 (all five modes).
@@ -516,8 +518,27 @@ modes, shapes and pressures pass the existing tolerances through the API and
 actual CLI/HDF5; local maximum pressure error is 3.34e-8. The 16-record
 `golden/single-profile-field.sha256` manifest locks inputs and reference files.
 HDF5 records addition/pattern metadata and the exact consumed SBP snapshot.
-Multi-profile adiabatic/coupled propagation remains the separate next FIELD
-stage; no newly observed option combination is added to this checkpoint.
+This checkpoint excludes multi-profile propagation, covered separately below;
+no newly observed option combination is added to its acceptance scope.
+
+### Multi-profile FIELD
+
+`legacy::load_field_cases` and `solve_field` now accept ordered ENV sequences
+with adiabatic or coupled FLP propagation. Every profile's full modal product is
+retained. Coupled/incoherent input is rejected; coupled projection currently
+requires smooth fluids and full-interval modal samples. Frequency order,
+independent source marches, cumulative input/shape/work budgets and CLI atomic
+publication are preserved. Zero lower phase-speed bounds and depth-only SSP
+inheritance support byte-original Gulf inputs without altering them.
+
+Two small four-profile derivatives and both original `Gulf/gulf_rd.env` +
+`gulf_ad.flp` / `gulf_cm.flp` paths pass full API and actual CLI/HDF5 differential
+at unchanged tolerances: 24 profile blocks, 1,020 modes, 1,003,050 pressures,
+local maximum |dp| `4.1159031748919954e-10`. MOD/SHD are byte-identical in three
+pinned runs. Schema-v1 additive profile groups retain all modes; the first mode
+set remains available at the existing path via a hard link, not a duplicated
+payload. [Propagation semantics, fixed evidence and limits](kraken-multi-profile-field.md)
+describe this capability block; no option Cartesian product is added.
 
 ### Multiple frequencies
 

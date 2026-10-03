@@ -7,15 +7,19 @@ use std::path::Path;
 
 // ponytail: 550m contributions cover BroadBand/MunkK's 513m per frequency;
 // precompute modal phases only if measured throughput requires it.
-const MAX_FIELD_WORK: usize = 550_000_000;
+pub(crate) const MAX_FIELD_WORK: usize = 550_000_000;
 
 pub(super) fn solve(case: &Case) -> Result<SimulationResult, DiagnosticReport> {
-    let modes = match case.mode_solver {
-        crate::ModeSolver::Kraken => crate::modes::solve(case)?,
-        crate::ModeSolver::Krakenc => crate::complex_modes::solve(case)?,
-    };
+    let modes = solve_modes(case)?;
     let field = synthesize_field(case, &modes)?;
     Ok(SimulationResult { modes, field })
+}
+
+pub(crate) fn solve_modes(case: &Case) -> Result<ModeSet, DiagnosticReport> {
+    match case.mode_solver {
+        crate::ModeSolver::Kraken => crate::modes::solve(case),
+        crate::ModeSolver::Krakenc => crate::complex_modes::solve(case),
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -144,7 +148,7 @@ fn synthesize_field(case: &Case, mode_set: &ModeSet) -> Result<PressureField, Di
 }
 
 #[allow(clippy::cast_possible_truncation)]
-fn source_pattern_scale(case: &Case, k: Complex32) -> f32 {
+pub(crate) fn source_pattern_scale(case: &Case, k: Complex32) -> f32 {
     let omega = 2.0 * std::f64::consts::PI * case.frequency_hz;
     let kz2 = ((omega.powi(2) / 1500.0_f64.powi(2) - double(k * k).re) as f32).max(0.0);
     let angle = (f64::from(kz2).sqrt() / f64::from(k.re))
@@ -159,12 +163,12 @@ fn source_pattern_scale(case: &Case, k: Complex32) -> f32 {
     ((1.0 - weight) * left.amplitude + weight * right.amplitude) as f32
 }
 
-fn double(value: Complex32) -> Complex64 {
+pub(crate) fn double(value: Complex32) -> Complex64 {
     Complex64::new(f64::from(value.re), f64::from(value.im))
 }
 
 #[allow(clippy::cast_possible_truncation)]
-fn single(value: Complex64) -> Complex32 {
+pub(crate) fn single(value: Complex64) -> Complex32 {
     Complex32::new(value.re as f32, value.im as f32)
 }
 

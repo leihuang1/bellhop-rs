@@ -1038,6 +1038,246 @@ fn assert_field(group: &Group, case: &Case, expected: &SimulationResult) {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
+fn cli_round_trips_profile_fields_and_preserves_outputs_on_later_failure() {
+    let root = directory("profiles");
+    for (name, propagation) in [("ProfilesAd", "adiabatic"), ("ProfilesCm", "coupled")] {
+        let env = root.join(name).with_extension("env");
+        let flp = env.with_extension("flp");
+        for ext in ["env", "flp"] {
+            fs::copy(fixture(name).with_extension(ext), env.with_extension(ext)).unwrap();
+        }
+        let output = env.with_extension("h5");
+        assert!(run(&env, &output, "kraken", &[]).status.success());
+        let cases =
+            kraken::legacy::load_field_cases(&env, &flp, kraken::ModeSolver::Kraken).unwrap();
+        let expected = kraken::solve_field(&cases[0]).unwrap();
+        let file = hdf5::File::open(&output).unwrap();
+        for (kind, path) in [("env", &env), ("flp", &flp)] {
+            let input = file.group(&format!("inputs/{kind}")).unwrap();
+            assert_eq!(
+                attribute(&input, "sha256"),
+                format!("{:x}", Sha256::digest(fs::read(path).unwrap()))
+            );
+        }
+        let group = file.group("frequencies/0").unwrap();
+        assert_eq!(attribute(&group, "field_propagation"), propagation);
+        assert_eq!(
+            data::<f64>(&group, "profile_range_m", &[4], "m"),
+            cases[0].ranges_m()
+        );
+        let profiles = group.group("profiles").unwrap();
+        assert_eq!(profiles.member_names().unwrap().len(), 4);
+        let mode_count: usize = expected.modes.iter().map(|m| m.modes.len()).sum();
+        assert_eq!(
+            file.attr("mode_count")
+                .unwrap()
+                .read_scalar::<u64>()
+                .unwrap(),
+            mode_count as u64
+        );
+        for (index, modes) in expected.modes.into_iter().enumerate() {
+            let product = SimulationResult {
+                modes,
+                field: expected.field.clone(),
+            };
+            let profile = profiles.group(&index.to_string()).unwrap();
+            assert_eq!(
+                attribute(&profile, "title"),
+                cases[0].profiles()[index].title
+            );
+            assert_modes(&profile.group("modes").unwrap(), &product);
+            if index == 0 {
+                assert_modes(&group.group("modes").unwrap(), &product);
+                assert_field(
+                    &group.group("field").unwrap(),
+                    &cases[0].profiles()[0],
+                    &product,
+                );
+            }
+        }
+        drop(profiles);
+        drop(group);
+        file.close().unwrap();
+        let old = fs::read(&output).unwrap();
+        let source = fs::read_to_string(&env).unwrap();
+        // The fourth profile validates, but has no root in its selected spectral interval.
+        let split = source.rfind("1400.0 1700.0").unwrap();
+        fs::write(
+            &env,
+            format!(
+                "{}{}",
+                &source[..split],
+                source[split..].replacen("1400.0 1700.0", "1699.0 1700.0", 1)
+            ),
+        )
+        .unwrap();
+        let process = run(&env, &output, "kraken", &["--overwrite"]);
+        assert_failure(&process, 3, &output, &old);
+        assert!(String::from_utf8_lossy(&process.stderr).contains("profiles[3]"));
+        fs::write(&env, &source).unwrap();
+        assert_failure(
+            &run(
+                &env,
+                &output,
+                "kraken",
+                &["--overwrite", "--max-output-bytes", "100"],
+            ),
+            4,
+            &output,
+            &old,
+        );
+        fs::write(
+            &flp,
+            fs::read_to_string(&flp)
+                .unwrap()
+                .replace("4\n0.0 0.8 1.6 2.4", "3\n0.0 0.8 1.6"),
+        )
+        .unwrap();
+        assert_failure(
+            &run(&env, &output, "kraken", &["--overwrite"]),
+            2,
+            &output,
+            &old,
+        );
+    }
+    let env = root.join("layered.env");
+    let flp = env.with_extension("flp");
+    let output = env.with_extension("h5");
+    let source = fs::read_to_string(fixture("LayeredFluidThree.env")).unwrap();
+    let field = fs::read_to_string(fixture("LayeredFluidThree.flp")).unwrap();
+    fs::write(&env, format!("{source}{source}")).unwrap();
+    fs::write(
+        &flp,
+        field
+            .replace("'RAOC'", "'RCOC'")
+            .replace("1\n0.0\n", "2\n0.0 0.5 /\n"),
+    )
+    .unwrap();
+    let process = run(&env, &output, "kraken", &[]);
+    assert!(
+        process.status.success(),
+        "{}",
+        String::from_utf8_lossy(&process.stderr)
+    );
+    let old = fs::read(&output).unwrap();
+    // Only the second profile omits internal interfaces; the single-profile case is otherwise valid.
+    let coarse = source.replace(
+        "3\n31.0 70.0 105.0 /\n7\n0.0 69.99 70.0 70.01 105.0 139.99 140.0 /",
+        "1\n31.0 /\n2\n0.0 140.0 /",
+    );
+    assert_ne!(coarse, source);
+    fs::write(&env, format!("{source}{coarse}")).unwrap();
+    let process = run(&env, &output, "kraken", &["--overwrite"]);
+    assert_failure(&process, 2, &output, &old);
+    assert!(
+        String::from_utf8_lossy(&process.stderr).contains("fluid-interface quadrature stencil")
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn cli_discovers_and_routes_profile_boundary_resources() {
+    let root = directory("profile-resources");
+    let env = root.join("mixed.env");
+    let flp = env.with_extension("flp");
+    let field = fs::read_to_string(fixture("TabRefBrcC.flp")).unwrap();
+    fs::write(
+        &flp,
+        field
+            .replace("'R OC'", "'RAOC'")
+            .replace("1\n0.0 /", "4\n0.0 0.4 0.8 1.2 /"),
+    )
+    .unwrap();
+    for (name, ext) in [
+        ("TabRefBrcC", "brc"),
+        ("TabRefIrcC", "irc"),
+        ("FluidTrcC", "trc"),
+    ] {
+        fs::copy(fixture(name).with_extension(ext), env.with_extension(ext)).unwrap();
+    }
+    for names in [
+        [
+            "PekerisComplexBlank",
+            "TabRefBrcC",
+            "TabRefIrcC",
+            "FluidTrcC",
+        ],
+        [
+            "FluidTrcC",
+            "TabRefIrcC",
+            "TabRefBrcC",
+            "PekerisComplexBlank",
+        ],
+    ] {
+        let source: String = names
+            .iter()
+            .map(|name| fs::read_to_string(fixture(name).with_extension("env")).unwrap())
+            .collect();
+        fs::write(&env, source).unwrap();
+        let cases = kraken::legacy::load_field_cases(&env, &flp, ModeSolver::Krakenc).unwrap();
+        for (case, name) in cases[0].profiles().iter().zip(names) {
+            let expected = kraken::legacy::load_complex_case(
+                fixture(name).with_extension("env"),
+                fixture(name).with_extension("flp"),
+            )
+            .unwrap();
+            assert_eq!(case.bottom_boundary, expected.bottom_boundary);
+            assert_eq!(case.surface_boundary, expected.surface_boundary);
+        }
+        let output = env.with_extension("h5");
+        let process = run(&env, &output, "krakenc", &["--overwrite"]);
+        assert!(
+            process.status.success(),
+            "{}",
+            String::from_utf8_lossy(&process.stderr)
+        );
+        let file = File::open(&output).unwrap();
+        for ext in ["brc", "irc", "trc"] {
+            let input = file.group(&format!("inputs/{ext}")).unwrap();
+            assert_eq!(
+                attribute(&input, "sha256"),
+                format!(
+                    "{:x}",
+                    Sha256::digest(fs::read(env.with_extension(ext)).unwrap())
+                )
+            );
+        }
+        let expected = kraken::solve_field(&cases[0]).unwrap();
+        let product = SimulationResult {
+            modes: expected.modes[0].clone(),
+            field: expected.field,
+        };
+        assert_field(
+            &file.group("frequencies/0/field").unwrap(),
+            &cases[0].profiles()[0],
+            &product,
+        );
+        file.close().unwrap();
+        let old = fs::read(&output).unwrap();
+        for ext in ["brc", "irc", "trc"] {
+            let path = env.with_extension(ext);
+            let bytes = fs::read(&path).unwrap();
+            assert_failure(
+                &run(&env, &path, "krakenc", &["--overwrite"]),
+                4,
+                &path,
+                &bytes,
+            );
+            fs::remove_file(&path).unwrap();
+            assert_failure(
+                &run(&env, &output, "krakenc", &["--overwrite"]),
+                2,
+                &output,
+                &old,
+            );
+            fs::write(path, bytes).unwrap();
+        }
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn cli_protects_consumed_resources_and_preserves_outputs_on_resource_errors() {
     let root = directory("resources");
     for (name, extension) in [

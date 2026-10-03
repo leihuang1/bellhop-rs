@@ -22,7 +22,11 @@ impl FieldCase {
     /// Validate profile ranges, shared FIELD geometry and coupling requirements.
     /// # Errors
     /// Returns structured diagnostics for inconsistent or oversized sequences.
-    #[allow(clippy::float_cmp, clippy::too_many_lines)]
+    #[allow(
+        clippy::float_cmp,
+        clippy::too_many_lines,
+        clippy::cast_possible_truncation
+    )]
     pub fn new(
         profiles: Vec<Case>,
         ranges_m: Vec<f64>,
@@ -95,6 +99,29 @@ impl FieldCase {
                     return Err(error(
                         "KR0201",
                         "coupling requires modes sampled across the full fluid interval",
+                        "mode_sample_depths_m",
+                    ));
+                }
+                // ponytail: require PLeft-supported f32 stencils; retabulate for coarser coupling grids.
+                let z = &case.mode_sample_depths_m;
+                let mut previous_upper = None;
+                if crate::layers::iter(case).skip(1).any(|layer| {
+                    let depth = layer.top as f32;
+                    let upper = z.partition_point(|&z| (z as f32) < depth);
+                    let on_grid = z.get(upper).is_some_and(|&z| z as f32 == depth);
+                    // Endpoints have no interface correction; interior stencils handle one interface.
+                    let unsupported = upper == 0
+                        || upper == z.len()
+                        || (!on_grid && (upper == 1 || upper + 1 == z.len()))
+                        || previous_upper.is_some_and(|previous| {
+                            previous == upper || (!on_grid && previous + 1 == upper)
+                        });
+                    previous_upper = Some(upper);
+                    unsupported
+                }) {
+                    return Err(error(
+                        "KR0201",
+                        "coupling requires a modal grid resolving every fluid-interface quadrature stencil",
                         "mode_sample_depths_m",
                     ));
                 }

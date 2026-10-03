@@ -106,6 +106,96 @@ fn profile_validation_and_source_blocks_are_stateless() {
 }
 
 #[test]
+#[allow(clippy::cast_possible_truncation)]
+fn coupling_rejects_unsupported_fluid_interface_stencils() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for name in ["LayeredFluidThree", "LayeredFluidFractional"] {
+        let root = fixtures.join(name);
+        let base =
+            legacy::load_case(root.with_extension("env"), root.with_extension("flp")).unwrap();
+        let mut input = base.clone().into_definition();
+        let interfaces: Vec<_> = std::iter::once(base.water_depth_m)
+            .chain(
+                base.additional_fluid_layers
+                    .iter()
+                    .take(base.additional_fluid_layers.len() - 1)
+                    .map(|layer| layer.bottom_depth_m),
+            )
+            .map(|depth| f64::from(depth as f32))
+            .collect();
+        input.mode_sample_depths_m = std::iter::once(base.fluid_top_depth_m())
+            .chain(interfaces.iter().copied())
+            .chain(std::iter::once(base.fluid_bottom_depth_m()))
+            .collect();
+        let complete = Case::from_definition(input).unwrap();
+        let supported = FieldCase::new(
+            vec![base, complete.clone()],
+            vec![0.0, 500.0],
+            FieldPropagation::Coupled,
+        )
+        .unwrap();
+        assert!(solve_field(&supported).is_ok());
+        let mut grids = vec![vec![
+            complete.fluid_top_depth_m(),
+            complete.fluid_bottom_depth_m(),
+        ]];
+        for omitted in 1..=interfaces.len() {
+            let mut grid = complete.mode_sample_depths_m.clone();
+            grid.remove(omitted);
+            grids.push(grid);
+        }
+        let mut input = complete.clone().into_definition();
+        input.mode_sample_depths_m = if interfaces.len() == 2 {
+            // Two interfaces in one gap or one interior stencil, including an on-grid interface.
+            grids.extend([
+                vec![0.0, 30.0, 115.0, 140.0],
+                vec![0.0, 50.0, 90.0, 115.0, 140.0],
+                vec![0.0, 50.0, 105.0, 140.0],
+                vec![0.0, 50.0, 70.0, 115.0, 140.0],
+            ]);
+            vec![0.0, 50.0, 80.0, 95.0, 115.0, 140.0]
+        } else {
+            vec![0.0, 35.0, 105.0, complete.fluid_bottom_depth_m()]
+        };
+        // Like Gulf, isolated off-grid interfaces inside interior stencils remain supported.
+        let interior = Case::from_definition(input).unwrap();
+        let supported = FieldCase::new(
+            vec![complete.clone(), interior],
+            vec![0.0, 500.0],
+            FieldPropagation::Coupled,
+        )
+        .unwrap();
+        assert!(solve_field(&supported).is_ok());
+        for grid in grids {
+            let mut input = complete.clone().into_definition();
+            input.mode_sample_depths_m = grid;
+            let coarse = Case::from_definition(input).unwrap();
+            for profile in 0..2 {
+                let mut profiles = vec![complete.clone(); 2];
+                profiles[profile] = coarse.clone();
+                assert!(
+                    FieldCase::new(
+                        profiles.clone(),
+                        vec![0.0, 500.0],
+                        FieldPropagation::Adiabatic
+                    )
+                    .is_ok()
+                );
+                let report = FieldCase::new(profiles, vec![0.0, 500.0], FieldPropagation::Coupled)
+                    .unwrap_err();
+                assert_eq!(report.diagnostics()[0].code, "KR0201");
+                assert_eq!(report.diagnostics()[0].field, "mode_sample_depths_m");
+                assert!(
+                    report.diagnostics()[0]
+                        .message
+                        .contains("fluid-interface quadrature stencil")
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn snapshots_reject_extra_profiles_and_preserve_frequency_order() {
     let env = include_str!("fixtures/ProfilesAd.env");
     let flp = include_str!("fixtures/ProfilesAd.flp");

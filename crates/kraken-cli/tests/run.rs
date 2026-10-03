@@ -1141,6 +1141,38 @@ fn cli_round_trips_profile_fields_and_preserves_outputs_on_later_failure() {
             &old,
         );
     }
+    let env = root.join("layered.env");
+    let flp = env.with_extension("flp");
+    let output = env.with_extension("h5");
+    let source = fs::read_to_string(fixture("LayeredFluidThree.env")).unwrap();
+    let field = fs::read_to_string(fixture("LayeredFluidThree.flp")).unwrap();
+    fs::write(&env, format!("{source}{source}")).unwrap();
+    fs::write(
+        &flp,
+        field
+            .replace("'RAOC'", "'RCOC'")
+            .replace("1\n0.0\n", "2\n0.0 0.5 /\n"),
+    )
+    .unwrap();
+    let process = run(&env, &output, "kraken", &[]);
+    assert!(
+        process.status.success(),
+        "{}",
+        String::from_utf8_lossy(&process.stderr)
+    );
+    let old = fs::read(&output).unwrap();
+    // Only the second profile omits internal interfaces; the single-profile case is otherwise valid.
+    let coarse = source.replace(
+        "3\n31.0 70.0 105.0 /\n7\n0.0 69.99 70.0 70.01 105.0 139.99 140.0 /",
+        "1\n31.0 /\n2\n0.0 140.0 /",
+    );
+    assert_ne!(coarse, source);
+    fs::write(&env, format!("{source}{coarse}")).unwrap();
+    let process = run(&env, &output, "kraken", &["--overwrite"]);
+    assert_failure(&process, 2, &output, &old);
+    assert!(
+        String::from_utf8_lossy(&process.stderr).contains("fluid-interface quadrature stencil")
+    );
     fs::remove_dir_all(root).unwrap();
 }
 

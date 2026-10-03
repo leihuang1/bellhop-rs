@@ -55,9 +55,16 @@ the solver use its physical minimum; negative bounds remain invalid.
   the first source block. Each Rust source/frequency march has independent state.
 
 Coupled/incoherent input is rejected, as in Fortran. Coupling currently requires
-smooth fluid profiles with modal samples spanning the complete fluid interval;
-finite solids, elastic half-spaces and reflection/impedance tables are not
-accepted for coupling. Existing individual profile limits still apply, including
+smooth fluid profiles with modal samples spanning the complete fluid interval.
+At the evaluator's float32 depth precision, internal fluid interfaces must not
+fall strictly inside the first/last grid interval or share an interior
+three-point quadrature stencil. Unsupported grids are rejected with `KR0201`.
+Sampling every interface satisfies this rule; isolated off-grid interfaces
+within interior stencils remain supported, as required by the original Gulf
+inputs. No grid insertion or retabulation changes pinned quadrature arithmetic.
+Adiabatic and range-independent sampling requirements are unchanged. Finite
+solids, elastic half-spaces and reflection/impedance tables are not accepted for
+coupling. Existing individual profile limits still apply, including
 in-fluid source/receiver validation. These limits do not create additional
 acceptance stages beyond the initial target's representative paths.
 

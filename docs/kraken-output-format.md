@@ -2,9 +2,10 @@
 
 This is a product adapter for the **currently accepted numerical subset** in
 [kraken-compatibility.md](kraken-compatibility.md), not completion of its planned
-matrix. It supports legacy `.env/.flp` inputs, KRAKEN or KRAKENC, and discrete
-single/multiple-frequency modes plus supported single/multi-profile FIELD. JSON, HTTP, modes-only CLI
-runs, reflection-table generation, ray arrivals and time-domain synthesis are
+matrix. It supports legacy `.env/.flp` or [self-contained JSON](kraken-json-input.md),
+KRAKEN or KRAKENC, and discrete single/multiple-frequency modes plus supported
+single/multi-profile FIELD. HTTP, modes-only CLI runs, reflection-table
+generation, ray arrivals and time-domain synthesis are
 not provided. Original BroadBand/MunkK is accepted through KRAKEN; KRAKENC
 now supports its S profile but still rejects 500 Hz at the unchanged work ceiling.
 
@@ -18,7 +19,10 @@ cargo run --release -p kraken-cli -- run path/to/case.env --solver krakenc --flp
 The installed binary is `kraken`; `cargo install --path crates/kraken-cli`
 builds it using the existing static HDF5 dependency.
 
-- `--solver kraken|krakenc` defaults to `kraken`; the engine is not guessed.
+- Legacy `--solver kraken|krakenc` defaults to `kraken`; the engine is not guessed.
+  JSON declares its engine; an explicit `--solver` must match it. `--flp` is
+  invalid for JSON, which never resolves auxiliary files. `kraken export` emits
+  a complete canonical document without running the numerical solver.
 - Both backends accept 1..500 contiguous constant-density fluid layers with
   independent meshes, N/C/P/S interpolation and material/volume attenuation.
   Density/speed/loss may jump at interfaces; density gradients and finite-layer
@@ -72,7 +76,9 @@ parity-certification attribute. It remains outside numerical acceptance; this
 release-scope exception does not change the solver or add a runtime guard.
 
 Rust adapters may call `bellhop_hdf5::kraken::run_legacy` with input/output
-paths, engine, overwrite policy and byte quota. The numerical `kraken` crate
+paths, engine, overwrite policy and byte quota, or `run_json` for one JSON
+snapshot with an optional matching engine assertion. Both share the same writer.
+The numerical `kraken` crate
 has no production HDF5 dependency.
 
 ## Resource limits and publication
@@ -80,8 +86,10 @@ has no production HDF5 dependency.
 Input limits are unchanged: 1 MiB per UTF-8 file, 1,000 frequencies, and
 5,000,000 total copied case-vector entries. Inputs are read once into bounded
 snapshots, parsed through `legacy::load_field_cases_with_resources`, and
-hashed from those exact bytes. Metadata is never obtained by rereading an
-input after solving.
+hashed from those exact bytes. JSON instead parses one bounded snapshot through
+`json::load_case_document_named` and records only `/inputs/json`; its exact
+bytes are hashed, including whitespace. Metadata is never obtained by rereading
+an input after solving.
 
 The default cumulative output limit is **268,435,456 bytes (256 MiB)**;
 `--max-output-bytes N` accepts a positive override. All FIELD float32 payloads
@@ -120,7 +128,7 @@ This is independent of [BELLHOP schema v3](output-format.md); the common
 | `schema_version` | uint32 `1` |
 | `implementation` | Rust implementation/package version |
 | `compatibility_reference` | pinned Acoustics Toolbox v2023.5 commit |
-| `title` | `.env` title |
+| `title` | first profile's title at the first frequency |
 | `solver` | UTF-8 `kraken` or `krakenc` |
 | `coordinate_convention` | range origin at source; depth positive downward |
 | `frequency_count` | uint64, number of input frequencies |
@@ -136,7 +144,9 @@ parsed snapshot**. Unused
 same-stem resources are neither read nor recorded. Input contents are not embedded.
 These groups and the `surface_boundary`/`bottom_boundary` attributes below are additive schema-v1
 metadata; existing dataset layouts, types, units and schema identity are unchanged.
-Older v1 files may omit this additive metadata.
+Older v1 files may omit this additive metadata. JSON input instead records only
+`/inputs/json` with the same filename/size/SHA attributes, never reconstructed
+ENV/FLP/resource provenance.
 
 Results live under `/frequencies/0`, `/frequencies/1`, ... using **indices,
 not Hz names**. Every frequency has its own mode count and arrays; no padded
@@ -145,6 +155,9 @@ common-mode matrix or cross-frequency mode correspondence is implied.
 ## Per-frequency metadata
 
 Each `/frequencies/i` group has attributes:
+
+- `title`: UTF-8 first-profile title for this frequency block (additive v1;
+  older files may omit it);
 
 - `frequency_hz`: float64 actual solve frequency;
 - `mesh_reference_frequency_hz`: float64 nominal frequency; for a non-broadband

@@ -3,7 +3,8 @@ use crate::solver::{double, error, single, source_pattern_scale};
 use crate::{Case, DiagnosticReport, ModeAddition, ModeSet, PressureField, SourceGeometry};
 use num_complex::{Complex32, Complex64};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FieldPropagation {
     RangeIndependent,
     Adiabatic,

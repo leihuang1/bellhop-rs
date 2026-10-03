@@ -94,6 +94,8 @@ full 2D acceptance target and explicit exclusions are in
 ```console
 cargo run --release -p kraken-cli -- run crates/kraken/tests/fixtures/PekerisBroadband.env --output broadband.h5
 cargo run --release -p kraken-cli -- run crates/kraken/tests/fixtures/PekerisComplexBroadband.env --solver krakenc --output complex.h5
+cargo run --release -p kraken-cli -- export crates/kraken/tests/fixtures/PekerisBroadband.env > case.json
+cargo run --release -p kraken-cli -- run case.json --output modern.h5
 ```
 
 The `kraken` binary reads `.env` plus the same-stem `.flp` (or `--flp PATH`),
@@ -104,7 +106,9 @@ retain every profile's modes and synthesize one FIELD grid per frequency. Freque
 are solved and written sequentially in input order, including duplicates;
 existing outputs require `--overwrite`. The default cumulative output quota is
 256 MiB (`--max-output-bytes`). This adapter does **not** expand the numerical
-matrix or provide JSON/HTTP or time-domain products. BELLHOP schema v3 is unchanged.
+matrix. It also accepts [strict self-contained JSON v1](docs/kraken-json-input.md),
+with all resources inline and exact parsed-byte provenance. HTTP and time-domain
+products are not provided; BELLHOP schema v3 is unchanged.
 
 ## Workspace
 
@@ -113,7 +117,7 @@ matrix or provide JSON/HTTP or time-domain products. BELLHOP schema v3 is unchan
 - `bellhop-cli`: local validation, conversion, and simulation
 - `bellhop-server`: synchronous JSON/HDF5 HTTP service
 - `kraken`: layered-fluid 2D KRAKEN/KRAKENC modes and FIELD
-- `kraken-cli`: supported legacy KRAKEN/KRAKENC pairs to atomic, bounded HDF5 output
+- `kraken-cli`: legacy/JSON KRAKEN/KRAKENC inputs to atomic, bounded HDF5 output
 
 ## License
 

@@ -366,6 +366,33 @@ jobs:
           KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
             cargo test --release -p kraken-cli --test run \
               original_complex_spline_broadband_retains_the_work_limit_and_output -- --ignored --exact --nocapture
+      - name: Self-contained KRAKEN JSON API and actual CLI HDF5 differential
+        run: |
+          cargo build --release -p kraken-cli
+          mkdir -p target/reference/json
+          for mapping in \
+            'WaterLossPower kraken crates/kraken/tests/fixtures/WaterLossPower.env target/reference/WaterLossPower-kraken/WaterLossPower' \
+            'FieldPattern krakenc crates/kraken/tests/fixtures/FieldPattern.env target/reference/FieldPattern-krakenc/FieldPattern' \
+            'FluidTrcC krakenc crates/kraken/tests/fixtures/FluidTrcC.env target/reference/FluidTrcC-krakenc/FluidTrcC' \
+            'LayeredFluidPower krakenc crates/kraken/tests/fixtures/LayeredFluidPower.env target/reference/LayeredFluidPower-krakenc/LayeredFluidPower' \
+            'FiniteElasticStack krakenc crates/kraken/tests/fixtures/FiniteElasticStack.env target/reference/FiniteElasticStack-krakenc/FiniteElasticStack' \
+            'TabRefBrc krakenc target/reference/TabRefCoef/run1/neggradC_brc.env target/reference/TabRefCoef/run1/neggradC_brc' \
+            'TabRefIrc krakenc target/reference/TabRefCoef/run1/neggradC_irc.env target/reference/TabRefCoef/run1/neggradC_irc' \
+            'BroadBandMunk kraken target/reference/cases/BroadBand/MunkK.env target/reference/BroadBand-MunkK-kraken/MunkK' \
+            'GulfAd kraken target/reference/profile-cases/GulfAd.env target/reference/GulfAd-kraken/GulfAd' \
+            'GulfCm kraken target/reference/profile-cases/GulfCm.env target/reference/GulfCm-kraken/GulfCm'; do
+            set -- $mapping
+            json="$PWD/target/reference/json/$1.json"
+            target/release/kraken export "$3" --solver "$2" > "$json"
+            KRAKEN_JSON_INPUT="$json" KRAKEN_JSON_ENV="$PWD/$3" KRAKEN_JSON_REFERENCE_ROOT="$PWD/$4" \
+              cargo test --release -p kraken --test differential_reference \
+                json_fields_match_fresh_reference -- --ignored --exact --nocapture
+            target/release/kraken run "$json" --output "${json%.json}.h5"
+            KRAKEN_HDF5_RESULT="${json%.json}.h5" KRAKEN_JSON_INPUT="$json" \
+            KRAKEN_JSON_ENV="$PWD/$3" KRAKEN_JSON_REFERENCE_ROOT="$PWD/$4" \
+              cargo test --release -p kraken --test differential_reference \
+                json_fields_match_fresh_reference -- --ignored --exact --nocapture
+          done
       - name: Critical boundary/interface rays
         run: tools/reference/check-critical-rays.sh
       - name: Official full-grid coherent field (MunkB_Coh)

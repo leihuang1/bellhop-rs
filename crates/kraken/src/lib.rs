@@ -6,6 +6,7 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use num_complex::Complex64;
+use serde::{Deserialize, Serialize};
 
 mod attenuation;
 mod complex_modes;
@@ -13,6 +14,7 @@ mod elastic;
 mod field;
 mod layers;
 pub use field::{FieldCase, FieldPropagation, ProfileSimulationResult, solve_field};
+pub mod json;
 pub mod legacy;
 mod modes;
 #[cfg(test)]
@@ -107,7 +109,8 @@ impl fmt::Display for DiagnosticReport {
 
 impl Error for DiagnosticReport {}
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Interpolation {
     N2Linear,
     CLinear,
@@ -117,26 +120,30 @@ pub enum Interpolation {
     AnalyticMunk,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ModeSolver {
     Kraken,
     Krakenc,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SourceGeometry {
     Line,
     Point,
     ScaledCylindrical,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ModeAddition {
     Coherent,
     Incoherent,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SourcePatternPoint {
     pub angle_degrees: f64,
     /// Linear pressure amplitude.
@@ -144,7 +151,13 @@ pub struct SourcePatternPoint {
 }
 
 /// Smooth boundary; compressional material values live in the corresponding case fields.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    content = "data",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum Boundary {
     Vacuum,
     FluidHalfSpace,
@@ -166,17 +179,21 @@ pub enum Boundary {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReflectionPoint {
     pub angle_degrees: f64,
     pub magnitude: f64,
     pub phase_radians: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ImpedancePoint {
     pub wavenumber_squared: f64,
+    #[serde(with = "json::complex")]
     pub f: Complex64,
+    #[serde(with = "json::complex")]
     pub g: Complex64,
     pub power: i32,
 }
@@ -198,7 +215,8 @@ impl Boundary {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SoundSpeedPoint {
     pub depth_m: f64,
     pub sound_speed_mps: f64,
@@ -206,7 +224,8 @@ pub struct SoundSpeedPoint {
 
 /// A finite fluid layer below the first water layer. Depths are absolute metres.
 /// Interpolation and attenuation conventions are shared with the enclosing case.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FluidLayer {
     pub bottom_depth_m: f64,
     pub density_g_cm3: f64,
@@ -219,7 +238,8 @@ pub struct FluidLayer {
 
 /// A homogeneous finite elastic layer outside the contiguous fluid stack.
 /// Depths are absolute metres; losses are solve-frequency dB/wavelength.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ElasticLayer {
     pub bottom_depth_m: f64,
     pub compressional_sound_speed_mps: f64,
@@ -233,7 +253,8 @@ pub struct ElasticLayer {
 
 /// Unvalidated contiguous fluid stack with smooth boundaries and optional homogeneous solid caps. The water fields
 /// define its first layer; `additional_fluid_layers` contains only subsequent layers.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CaseDefinition {
     pub title: String,
     pub mode_solver: ModeSolver,

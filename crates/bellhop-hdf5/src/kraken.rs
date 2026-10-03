@@ -1,4 +1,4 @@
-//! Sequential legacy KRAKEN/KRAKENC runs with atomic HDF5 schema-v1 output.
+//! Sequential legacy/JSON KRAKEN/KRAKENC runs with atomic HDF5 schema-v1 output.
 //! This schema is independent of BELLHOP schema v3; no solver result types are unified.
 
 use std::fmt;
@@ -132,6 +132,49 @@ pub fn run_legacy(
     {
         inputs.push((resource.0, resource.1.as_path(), resource.2.as_str()));
     }
+    run_cases(&cases, &inputs, output_path, overwrite, max_output_bytes)
+}
+
+/// Run a strict self-contained JSON snapshot without reading auxiliary files.
+/// `solver`, if supplied, must match the document; it never overrides its physics.
+/// Uses the same quotas, HDF5 v1 writer and atomic publication as `run_legacy`.
+/// # Errors
+/// Returns input, numerical or output errors; no incomplete product is published.
+pub fn run_json(
+    path: &Path,
+    output_path: &Path,
+    solver: Option<ModeSolver>,
+    overwrite: bool,
+    max_output_bytes: u64,
+) -> Result<RunSummary, RunError> {
+    let source = read_source(path)?;
+    let cases = kraken::json::load_case_document_named(source.as_bytes(), path)
+        .map_err(|report| RunError::Input(report.to_string()))?;
+    if solver.is_some_and(|solver| solver != cases[0].profiles()[0].mode_solver) {
+        return Err(RunError::Input(
+            "error[KR0202]: --solver must match the JSON document (mode_solver)".into(),
+        ));
+    }
+    run_cases(
+        &cases,
+        &[("json", path, source.as_str())],
+        output_path,
+        overwrite,
+        max_output_bytes,
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_cases(
+    cases: &[FieldCase],
+    inputs: &[(&str, &Path, &str)],
+    output_path: &Path,
+    overwrite: bool,
+    max_output_bytes: u64,
+) -> Result<RunSummary, RunError> {
+    if max_output_bytes == 0 {
+        return Err(RunError::Output("max_output_bytes must be positive".into()));
+    }
     protect_inputs(
         output_path,
         &inputs.iter().map(|(_, path, _)| *path).collect::<Vec<_>>(),
@@ -181,7 +224,7 @@ pub fn run_legacy(
             payload: 0,
             maximum: max_output_bytes,
         };
-        write_header(&file, &cases, &inputs, &mut budget).map_err(RunError::Output)?;
+        write_header(&file, cases, inputs, &mut budget).map_err(RunError::Output)?;
         check_file(&file, &cleanup.0, max_output_bytes).map_err(RunError::Output)?;
         let frequencies = file
             .create_group("frequencies")
@@ -383,6 +426,7 @@ fn write_frequency(
     file: &File,
     path: &Path,
 ) -> Result<(), String> {
+    write_string_attribute(group, "title", &case.profiles()[0].title)?;
     write_profile_metadata(group, &case.profiles()[0])?;
     write_modes(group, &result.modes[0], budget)?;
     write_field(group, &result.field, budget)?;

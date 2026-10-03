@@ -14,7 +14,7 @@ use crate::{
 pub const MAX_INPUT_BYTES: u64 = 1_048_576;
 
 const MAX_PROFILE_POINTS: usize = MAX_VECTOR_LENGTH;
-const MAX_FREQUENCIES: usize = 1000;
+pub(crate) const MAX_FREQUENCIES: usize = 1000;
 const MAX_FREQUENCY_INPUT_VALUES: usize = 5_000_000;
 
 /// Load the supported layered-fluid subset of a KRAKEN `.env` and FIELD `.flp` pair.

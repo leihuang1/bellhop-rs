@@ -85,8 +85,12 @@ has no production HDF5 dependency.
 
 Input limits are unchanged: 1 MiB per UTF-8 file, 1,000 frequencies, and
 5,000,000 total copied case-vector entries. Inputs are read once into bounded
-snapshots, parsed through `legacy::load_field_cases_with_resources`, and
-hashed from those exact bytes. JSON instead parses one bounded snapshot through
+snapshots through `input::load_legacy`, parsed through the existing
+`legacy::load_field_cases_with_resources`, and hashed from those exact bytes.
+The returned read-only `FieldInput` keeps frequency cases with every consumed
+resource role/path/source. `legacy::load_field_cases` delegates to this same
+acquisition path, so export and HDF5 do not reassemble resource inventories.
+Explicit snapshot parsing and existing single-profile entry points stay intact. JSON instead parses one bounded snapshot through
 `json::load_case_document_named` and records only `/inputs/json`; its exact
 bytes are hashed, including whitespace. Metadata is never obtained by rereading
 an input after solving.
@@ -107,6 +111,11 @@ frequency**; this output quota is not a cumulative CPU budget, timeout or
 cancellation mechanism. A scratch file can temporarily exceed the physical
 quota during the header or one bounded frequency's writes, before its flush check; there is
 no hard byte-limited HDF5 filesystem driver.
+
+The private publication module is shared with local BELLHOP output; its v3
+schema and absence of a KRAKEN byte quota remain separate. KRAKEN payload
+accounting and header/profile/frequency flush checks stay in the v1 writer;
+the shared publisher checks its existing physical quota again after close.
 
 `<output>.tmp` is exclusively created by HDF5 and is never a truncated
 pre-existing file. After all frequencies succeed, HDF5 flush/close and file

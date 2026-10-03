@@ -4,10 +4,21 @@ KRAKEN/KRAKENC use a [separate schema v1](kraken-output-format.md); this
 BELLHOP v3 contract is unchanged.
 
 Schema version 3 is written by both `bellhop run` and `POST /v1/run` through the
-shared `bellhop-hdf5` crate. The CLI installs a file only after a complete
-simulation succeeds, using `<output>.tmp` followed by an atomic rename. The HTTP
-service builds a temporary file and returns its bytes directly as
-`application/x-hdf5`.
+shared `bellhop-hdf5` crate. Local BELLHOP and KRAKEN runs share one publication
+implementation, not a numerical model or schema. BELLHOP exclusively creates
+`<output>.tmp`, writes schema v3, closes and syncs it, then installs the complete
+file: an atomic hard link without `--overwrite`, an atomic rename with it.
+Destinations appearing during the run are not clobbered without that flag.
+Primary inputs, consumed auxiliary inputs and their symlink aliases cannot be
+destinations. Pre-existing scratch is never truncated or removed; failure removes
+only owned scratch and preserves the previous result. The output parent must
+exist, with same-filesystem hard-link/rename support; this is not a directory
+power-loss durability guarantee. No KRAKEN byte quota is imposed on BELLHOP.
+
+Rust callers can use `write_hdf5_atomic` with all consumed input paths for this
+policy. The existing `write_hdf5` remains a low-level path writer for trusted
+private files; the HTTP implementation still uses it in a private temporary
+directory and returns its bytes directly as `application/x-hdf5`.
 
 ## Root attributes
 
@@ -23,8 +34,8 @@ service builds a temporary file and returns its bytes directly as
 - `coordinate_convention`
 - `warnings` (one-dimensional variable-length UTF-8 string array)
 
-For CLI runs, input metadata describes the exact primary `.env` or `.json` file
-bytes. For HTTP runs it describes the exact request-body bytes and uses
+For CLI runs, input metadata describes the exact parsed primary `.env` or `.json`
+snapshot, retained during loading rather than reread after validation. For HTTP runs it describes the exact request-body bytes and uses
 `request.json` as the filename. Input contents and legacy auxiliary files are
 not embedded. `legacy_run_options` is empty for modern JSON cases.
 

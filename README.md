@@ -15,8 +15,9 @@ cargo run -p bellhop-cli -- run case.json --output result.h5
 `validate` and `run` accept legacy `.env` or modern `.json` cases. `export`
 resolves legacy auxiliary files and emits one canonical JSON document. `run`
 writes a [versioned HDF5 result](docs/output-format.md) through the shared
-`bellhop-hdf5` crate, using a temporary file and atomic rename. Existing outputs
-require `--overwrite`.
+`bellhop-hdf5` crate, using the same exclusive-scratch, atomic publication policy
+as KRAKEN. Existing outputs require `--overwrite`; consumed inputs and their
+symlink aliases cannot be destinations.
 
 ## HTTP service
 

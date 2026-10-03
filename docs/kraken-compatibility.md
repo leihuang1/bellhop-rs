@@ -38,6 +38,8 @@ caps now pass the separate [finite-layer checkpoint](kraken-finite-elastic-layer
 KRAKENC layered fluids, KRAKEN one fluid, including original elsed/ice.
 KRAKEN retains the pinned elastic-loss omission; use KRAKENC for that attenuation.
 
+For code navigation and ownership, see the [implementation map](kraken-internals.md).
+
 ## Products
 
 The target is the two-dimensional normal-mode workflow:

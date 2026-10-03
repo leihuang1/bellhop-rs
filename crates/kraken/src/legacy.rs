@@ -3,9 +3,11 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::attenuation::{VolumeLoss, db_per_wavelength};
+mod material;
+
+use crate::attenuation::VolumeLoss;
 use crate::{
-    BottomBoundary, Case, CaseDefinition, Diagnostic, DiagnosticReport, FluidLayer, Interpolation,
+    BottomBoundary, Case, CaseDefinition, Diagnostic, DiagnosticReport, Interpolation,
     MAX_VECTOR_LENGTH, ModeAddition, ModeSolver, SoundSpeedPoint, SourceGeometry,
     SourcePatternPoint, SurfaceBoundary,
 };
@@ -615,14 +617,8 @@ fn environment_cases(
     }
     // ReadSzRz stores depths in single precision. Keep samples at either fluid
     // interface on the exact f64 boundary, whether the f32 spelling rounds up or down.
-    let bottom_depth = environment
-        .additional_layers
-        .last()
-        .map_or(environment.water_depth_m, |layer| layer.bottom_depth_m);
-    let top_depth = environment
-        .top_elastic_layers
-        .last()
-        .map_or(0.0, |layer| layer.bottom_depth_m);
+    let bottom_depth = environment.materials.fluid_bottom();
+    let top_depth = environment.materials.fluid_top();
     #[allow(clippy::cast_possible_truncation)]
     let boundaries = [bottom_depth, top_depth].map(|depth| (f64::from(depth as f32), depth));
     for depths in [
@@ -658,31 +654,33 @@ fn environment_cases(
     };
     let env_locations = environment.locations;
     let field_locations = field.locations;
+    // Geometry/options template; Materials supplies canonical material fields
+    // only after the cumulative frequency budget has passed.
     let definition = CaseDefinition {
         title: environment.title,
         mode_solver,
         frequency_hz: environment.frequency_hz,
         mesh_reference_frequency_hz: environment.broadband.then_some(environment.frequency_hz),
-        water_depth_m: environment.water_depth_m,
+        water_depth_m: 0.0,
         interpolation: environment.interpolation,
         surface_boundary: environment.surface_boundary,
-        surface_sound_speed_mps: environment.surface_speed,
-        surface_density_g_cm3: environment.surface_density,
+        surface_sound_speed_mps: 0.0,
+        surface_density_g_cm3: 0.0,
         surface_attenuation_db_per_wavelength: 0.0,
-        sound_speed_profile: environment.profile,
-        water_density_g_cm3: environment.water_density,
+        sound_speed_profile: Vec::new(),
+        water_density_g_cm3: 0.0,
         water_attenuation_db_per_wavelength: Vec::new(),
-        additional_fluid_layers: environment.additional_layers,
-        top_elastic_layers: environment.top_elastic_layers,
-        bottom_elastic_layers: environment.bottom_elastic_layers,
+        additional_fluid_layers: Vec::new(),
+        top_elastic_layers: Vec::new(),
+        bottom_elastic_layers: Vec::new(),
         bottom_boundary: environment.bottom_boundary,
-        bottom_sound_speed_mps: environment.bottom_speed,
-        bottom_density_g_cm3: environment.bottom_density,
-        bottom_attenuation_db_per_wavelength: environment.bottom_attenuation,
+        bottom_sound_speed_mps: 0.0,
+        bottom_density_g_cm3: 0.0,
+        bottom_attenuation_db_per_wavelength: 0.0,
         source_geometry: field.source_geometry,
         mode_addition: field.mode_addition,
         source_pattern: field.source_pattern,
-        mesh_points: environment.mesh_points,
+        mesh_points: 0,
         c_low_mps: environment.c_low,
         c_high_mps: environment.c_high,
         max_range_m: environment.max_range_m,
@@ -702,19 +700,10 @@ fn environment_cases(
         SurfaceBoundary::Reflection(points) => points.len(),
         _ => 0,
     };
-    let values = 7 * (definition.top_elastic_layers.len() + definition.bottom_elastic_layers.len())
+    let values = environment.materials.input_values()
         + table_values
         + surface_values
         + 2 * definition.source_pattern.len()
-        + environment.water_attenuation.len()
-        + definition
-            .additional_fluid_layers
-            .iter()
-            .map(|layer| {
-                1 + layer.sound_speed_profile.len() + layer.attenuation_db_per_wavelength.len()
-            })
-            .sum::<usize>()
-        + definition.sound_speed_profile.len()
         + definition.mode_sample_depths_m.len()
         + definition.source_depths_m.len()
         + definition.receiver_depths_m.len()
@@ -740,136 +729,9 @@ fn environment_cases(
         .frequencies_hz
         .into_iter()
         .map(|frequency_hz| {
-            let mut input = definition.clone();
-            input.frequency_hz = frequency_hz;
-            input.water_attenuation_db_per_wavelength = input
-                .sound_speed_profile
-                .iter()
-                .zip(&environment.water_attenuation)
-                .map(|(p, &a)| {
-                    db_per_wavelength(
-                        environment.attenuation_unit,
-                        &environment.volume_loss,
-                        a,
-                        p.depth_m,
-                        p.sound_speed_mps,
-                        frequency_hz,
-                        environment.water_power_law,
-                    )
-                })
-                .collect();
-            if input
-                .water_attenuation_db_per_wavelength
-                .iter()
-                .all(|&a| a == 0.0)
-            {
-                input.water_attenuation_db_per_wavelength.clear();
-            }
-            for (layer, &power) in input
-                .additional_fluid_layers
-                .iter_mut()
-                .zip(&environment.additional_power_laws)
-            {
-                for (point, loss) in layer
-                    .sound_speed_profile
-                    .iter()
-                    .zip(&mut layer.attenuation_db_per_wavelength)
-                {
-                    *loss = db_per_wavelength(
-                        environment.attenuation_unit,
-                        &environment.volume_loss,
-                        *loss,
-                        point.depth_m,
-                        point.sound_speed_mps,
-                        frequency_hz,
-                        power,
-                    );
-                }
-                if layer
-                    .attenuation_db_per_wavelength
-                    .iter()
-                    .all(|&a| a == 0.0)
-                {
-                    layer.attenuation_db_per_wavelength.clear();
-                }
-            }
-            for (layers, powers, mut top) in [
-                (
-                    &mut input.top_elastic_layers,
-                    &environment.top_elastic_power_laws,
-                    0.0,
-                ),
-                (
-                    &mut input.bottom_elastic_layers,
-                    &environment.bottom_elastic_power_laws,
-                    definition.fluid_bottom_depth_m(),
-                ),
-            ] {
-                for (layer, &power) in layers.iter_mut().zip(powers) {
-                    layer.compressional_attenuation_db_per_wavelength = db_per_wavelength(
-                        environment.attenuation_unit,
-                        &environment.volume_loss,
-                        layer.compressional_attenuation_db_per_wavelength,
-                        top,
-                        layer.compressional_sound_speed_mps,
-                        frequency_hz,
-                        power,
-                    );
-                    layer.shear_attenuation_db_per_wavelength = db_per_wavelength(
-                        environment.attenuation_unit,
-                        &environment.volume_loss,
-                        layer.shear_attenuation_db_per_wavelength,
-                        top,
-                        layer.shear_sound_speed_mps,
-                        frequency_hz,
-                        power,
-                    );
-                    top = layer.bottom_depth_m;
-                }
-            }
-            if input.surface_boundary.is_half_space() {
-                input.surface_attenuation_db_per_wavelength = db_per_wavelength(
-                    environment.attenuation_unit,
-                    &environment.volume_loss,
-                    environment.surface_attenuation,
-                    f64::MAX,
-                    input.surface_sound_speed_mps,
-                    frequency_hz,
-                    environment.water_power_law,
-                );
-            }
-            if input.bottom_boundary.is_half_space() {
-                input.bottom_attenuation_db_per_wavelength = db_per_wavelength(
-                    environment.attenuation_unit,
-                    &environment.volume_loss,
-                    environment.bottom_attenuation,
-                    // UpdateHSLoss excludes depth-local biological layers using HUGE.
-                    f64::MAX,
-                    input.bottom_sound_speed_mps,
-                    frequency_hz,
-                    environment.bottom_power_law,
-                );
-            }
-            for (boundary, power) in [
-                (&mut input.surface_boundary, environment.water_power_law),
-                (&mut input.bottom_boundary, environment.bottom_power_law),
-            ] {
-                if let crate::Boundary::ElasticHalfSpace {
-                    shear_sound_speed_mps,
-                    shear_attenuation_db_per_wavelength,
-                } = boundary
-                {
-                    *shear_attenuation_db_per_wavelength = db_per_wavelength(
-                        environment.attenuation_unit,
-                        &environment.volume_loss,
-                        *shear_attenuation_db_per_wavelength,
-                        f64::MAX,
-                        *shear_sound_speed_mps,
-                        frequency_hz,
-                        power,
-                    );
-                }
-            }
+            let input = environment
+                .materials
+                .case_definition(&definition, frequency_hz);
             Case::from_definition(input)
                 .and_then(|case| {
                     if case.mesh_reference_frequency_hz.is_some() {
@@ -1267,8 +1129,8 @@ fn number(token: &Token, path: &Path, field: &str) -> Result<f64, DiagnosticRepo
 }
 
 enum FiniteMedium {
-    Fluid(FluidLayer),
-    Elastic(crate::ElasticLayer),
+    Fluid(material::Fluid),
+    Elastic(material::Elastic),
 }
 
 struct Environment {
@@ -1276,30 +1138,10 @@ struct Environment {
     frequency_hz: f64,
     frequencies_hz: Vec<f64>,
     broadband: bool,
-    water_depth_m: f64,
     interpolation: Interpolation,
     surface_boundary: SurfaceBoundary,
-    surface_speed: f64,
-    surface_density: f64,
-    surface_attenuation: f64,
-    profile: Vec<SoundSpeedPoint>,
-    water_density: f64,
-    water_attenuation: Vec<f64>,
-    additional_layers: Vec<FluidLayer>,
-    additional_power_laws: Vec<(f64, f64, f64)>,
-    top_elastic_layers: Vec<crate::ElasticLayer>,
-    bottom_elastic_layers: Vec<crate::ElasticLayer>,
-    top_elastic_power_laws: Vec<(f64, f64, f64)>,
-    bottom_elastic_power_laws: Vec<(f64, f64, f64)>,
-    attenuation_unit: u8,
-    volume_loss: VolumeLoss,
-    water_power_law: (f64, f64, f64),
-    bottom_power_law: (f64, f64, f64),
     bottom_boundary: BottomBoundary,
-    bottom_speed: f64,
-    bottom_density: f64,
-    bottom_attenuation: f64,
-    mesh_points: usize,
+    materials: material::Materials,
     c_low: f64,
     c_high: f64,
     max_range_m: f64,
@@ -1460,18 +1302,14 @@ fn read_environment(
         [0.0, 1500.0, 0.0, 1.0, 0.0, 0.0]
     };
     let mut water = None;
-    let mut water_power_law = (0.0, 0.0, 0.0);
     let mut inherited = defaults;
     let mut additional_layers = Vec::new();
-    let mut additional_power_laws = Vec::new();
     let mut top_elastic_layers = Vec::new();
     let mut bottom_elastic_layers = Vec::new();
-    let mut top_elastic_power_laws = Vec::new();
-    let mut bottom_elastic_power_laws = Vec::new();
     let mut top = 0.0;
     let mut profile_points = 0;
     for index in 0..medium_count {
-        let (medium, power, last, point_count) = read_finite_layer(
+        let (medium, last, point_count) = read_finite_layer(
             reader,
             interpolation,
             option(2),
@@ -1511,12 +1349,10 @@ fn read_environment(
                 top = layer.bottom_depth_m;
                 if water.is_none() {
                     water = Some(layer);
-                    water_power_law = power;
                     ("water_header".to_owned(), "sound_speed_profile".to_owned())
                 } else {
                     let prefix = format!("additional_fluid_layers[{}]", additional_layers.len());
                     additional_layers.push(layer);
-                    additional_power_laws.push(power);
                     (
                         format!("{prefix}.header"),
                         format!("{prefix}.sound_speed_profile"),
@@ -1536,12 +1372,10 @@ fn read_environment(
                 let prefix = if water.is_none() {
                     let prefix = format!("top_elastic_layers[{}]", top_elastic_layers.len());
                     top_elastic_layers.push(layer);
-                    top_elastic_power_laws.push(power);
                     prefix
                 } else {
                     let prefix = format!("bottom_elastic_layers[{}]", bottom_elastic_layers.len());
                     bottom_elastic_layers.push(layer);
-                    bottom_elastic_power_laws.push(power);
                     prefix
                 };
                 (
@@ -1565,10 +1399,6 @@ fn read_environment(
             "medium_count",
         )
     })?;
-    let water_depth_m = water.bottom_depth_m;
-    let mesh_points = water.mesh_points;
-    let water_density = water.density_g_cm3;
-
     let bottom_option = reader.record("bottom_options")?;
     if bottom_option.tokens.len() != if option(2) == b'm' { 4 } else { 2 }
         || !matches!(
@@ -1626,7 +1456,7 @@ fn read_environment(
         if bottom[2] > 0.0 {
             bottom_boundary = crate::Boundary::ElasticHalfSpace {
                 shear_sound_speed_mps: bottom[2],
-                shear_attenuation_db_per_wavelength: bottom[5],
+                shear_attenuation_db_per_wavelength: 0.0,
             };
         }
     }
@@ -1664,7 +1494,6 @@ fn read_environment(
         frequency_hz,
         frequencies_hz,
         broadband,
-        water_depth_m,
         interpolation,
         surface_boundary: match option(1) {
             b'V' => SurfaceBoundary::Vacuum,
@@ -1672,31 +1501,27 @@ fn read_environment(
             b'F' => SurfaceBoundary::Reflection(Vec::new()),
             _ if surface[2] > 0.0 => SurfaceBoundary::ElasticHalfSpace {
                 shear_sound_speed_mps: surface[2],
-                shear_attenuation_db_per_wavelength: surface[5],
+                shear_attenuation_db_per_wavelength: 0.0,
             },
             _ => SurfaceBoundary::FluidHalfSpace,
         },
-        surface_speed: surface[1],
-        surface_density: surface[3],
-        surface_attenuation: surface[4],
-        water_attenuation: water.attenuation_db_per_wavelength,
-        additional_layers,
-        additional_power_laws,
-        top_elastic_layers,
-        bottom_elastic_layers,
-        top_elastic_power_laws,
-        bottom_elastic_power_laws,
-        attenuation_unit: option(2),
-        volume_loss,
-        water_power_law,
-        bottom_power_law,
-        profile: water.sound_speed_profile,
-        water_density,
         bottom_boundary,
-        bottom_speed: bottom[1],
-        bottom_density: bottom[3],
-        bottom_attenuation: bottom[4],
-        mesh_points,
+        materials: material::Materials {
+            surface_half_space: material::HalfSpace {
+                values: surface,
+                power_law: water.power_law,
+            },
+            bottom_half_space: material::HalfSpace {
+                values: bottom,
+                power_law: bottom_power_law,
+            },
+            water,
+            additional: additional_layers,
+            top: top_elastic_layers,
+            bottom: bottom_elastic_layers,
+            unit: option(2),
+            volume: volume_loss,
+        },
         c_low: limits[0],
         c_high: limits[1],
         max_range_m,
@@ -1720,7 +1545,7 @@ fn read_finite_layer(
     index: usize,
     top: f64,
     mut inherited: [f64; 6],
-) -> Result<(FiniteMedium, (f64, f64, f64), [f64; 6], usize), DiagnosticReport> {
+) -> Result<(FiniteMedium, [f64; 6], usize), DiagnosticReport> {
     let header_field = if index == 0 {
         "water_header".into()
     } else {
@@ -1826,35 +1651,35 @@ fn read_finite_layer(
     if points.first().is_some_and(|p| p[2] > 0.0) {
         let p = points[0];
         return Ok((
-            FiniteMedium::Elastic(crate::ElasticLayer {
+            FiniteMedium::Elastic(material::Elastic {
                 bottom_depth_m: bottom,
-                compressional_sound_speed_mps: p[1],
-                shear_sound_speed_mps: p[2],
+                compressional_speed: p[1],
+                shear_speed: p[2],
                 density_g_cm3: p[3],
-                compressional_attenuation_db_per_wavelength: p[4],
-                shear_attenuation_db_per_wavelength: p[5],
+                compressional_attenuation: p[4],
+                shear_attenuation: p[5],
                 mesh_points,
+                power_law: power,
             }),
-            power,
             inherited,
             points.len(),
         ));
     }
     Ok((
-        FiniteMedium::Fluid(FluidLayer {
+        FiniteMedium::Fluid(material::Fluid {
             bottom_depth_m: bottom,
             density_g_cm3: points.first().map_or(1.0, |p| p[3]),
             mesh_points,
-            sound_speed_profile: points
+            points: points
                 .iter()
                 .map(|p| SoundSpeedPoint {
                     depth_m: p[0],
                     sound_speed_mps: p[1],
                 })
                 .collect(),
-            attenuation_db_per_wavelength: points.iter().map(|p| p[4]).collect(),
+            attenuation: points.iter().map(|p| p[4]).collect(),
+            power_law: power,
         }),
-        power,
         inherited,
         points.len(),
     ))

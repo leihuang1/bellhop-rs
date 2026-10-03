@@ -1,0 +1,204 @@
+// Adapted from Acoustics Toolbox v2023.5 Kraken/kraken.f90 and krakenc.f90.
+// Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
+//! Mesh-history ownership, not a shared root solver. Raw Neville seeds remain
+//! separate from the Richardson table; shapes/loss come only from mesh one.
+use crate::{Case, DiagnosticReport, ModeSet, ModeSolver, NormalMode, solver::error};
+use num_complex::Complex64;
+use std::ops::{Div, Sub};
+
+pub(crate) const MULTIPLIERS: [usize; 5] = [1, 2, 4, 8, 16];
+
+pub(crate) struct Refinement<T> {
+    table: Vec<Vec<T>>,
+    seeds: Vec<(f64, Vec<Complex64>)>,
+    modes: Vec<NormalMode>,
+}
+
+impl<T> Refinement<T> {
+    pub fn new() -> Self {
+        Self {
+            table: Vec::new(),
+            seeds: Vec::new(),
+            modes: Vec::new(),
+        }
+    }
+
+    pub fn seed(&self, index: usize, h: f64) -> Option<Complex64> {
+        // Solve2 keeps the original scan on mesh two. Mesh three is the first
+        // with two raw-root histories, including cLow-excluded deflation roots.
+        if self.seeds.len() < 2 {
+            return None;
+        }
+        let mut values = self
+            .seeds
+            .iter()
+            .map(|(_, roots)| roots.get(index).copied())
+            .collect::<Option<Vec<_>>>()?;
+        for width in 1..values.len() {
+            for j in 0..values.len() - width {
+                let a = self.seeds[j].0.powi(2);
+                let b = self.seeds[j + width].0.powi(2);
+                values[j] = ((h * h - b) * values[j] - (h * h - a) * values[j + 1]) / (a - b);
+            }
+        }
+        values.first().copied()
+    }
+}
+
+impl Refinement<f64> {
+    pub fn accept(
+        &mut self,
+        roots: Vec<f64>,
+        seed_h: Option<f64>,
+        case: &Case,
+        mode: impl FnMut(f64) -> Result<NormalMode, DiagnosticReport>,
+    ) -> Result<Option<ModeSet>, DiagnosticReport> {
+        if let Some(h) = seed_h {
+            self.seeds
+                .push((h, roots.iter().map(|&x| Complex64::new(x, 0.0)).collect()));
+        }
+        self.advance(roots, case, mode, f64::abs, |x, mode| {
+            // KRAKEN retains the first-mesh loss perturbation, not extrapolated Im(k²).
+            let loss_k2 = mode.horizontal_wavenumber_rad_per_m.powi(2).im;
+            Complex64::new(x, loss_k2).sqrt()
+        })
+    }
+}
+
+impl Refinement<Complex64> {
+    pub fn accept(
+        &mut self,
+        roots: Vec<Complex64>,
+        seed_h: f64,
+        case: &Case,
+        mode: impl FnMut(Complex64) -> Result<NormalMode, DiagnosticReport>,
+    ) -> Result<Option<ModeSet>, DiagnosticReport> {
+        self.seeds.push((seed_h, roots.clone()));
+        let high_k2 = (2.0 * std::f64::consts::PI * case.frequency_hz / case.c_low_mps).powi(2);
+        let mut selected: Vec<_> = roots.into_iter().filter(|x| x.re <= high_k2).collect();
+        if case.bottom_boundary.is_tabulated()
+            || case.surface_boundary.is_tabulated()
+            || crate::elastic::has_half_space(case)
+            || crate::elastic::has_layers(case)
+        {
+            selected.sort_by(|a, b| b.re.total_cmp(&a.re));
+        }
+        if selected.is_empty() {
+            return Err(error(
+                "KR0301",
+                "no complex modes inside spectral limits",
+                "phase_speed_limits",
+            ));
+        }
+        if self.table.is_empty()
+            && selected
+                .len()
+                .checked_mul(case.mode_sample_depths_m.len())
+                .is_none_or(|w| w > 5_000_000)
+        {
+            return Err(error(
+                "KR0302",
+                "mode shape sample limit exceeded",
+                "mode_sample_depths_m",
+            ));
+        }
+        self.advance(selected, case, mode, Complex64::norm, |x, _| x.sqrt())
+    }
+}
+
+impl<T: Copy + Sub<Output = T> + Div<f64, Output = T>> Refinement<T> {
+    #[allow(clippy::cast_precision_loss)]
+    fn advance(
+        &mut self,
+        roots: Vec<T>,
+        case: &Case,
+        mode: impl FnMut(T) -> Result<NormalMode, DiagnosticReport>,
+        magnitude: impl FnOnce(T) -> f64,
+        wavenumber: impl Fn(T, &NormalMode) -> Complex64,
+    ) -> Result<Option<ModeSet>, DiagnosticReport> {
+        let set = self.table.len();
+        let multiplier = MULTIPLIERS[set];
+        if set == 0 {
+            self.modes = roots
+                .iter()
+                .copied()
+                .map(mode)
+                .collect::<Result<Vec<_>, _>>()?;
+        } else if roots.len() != self.modes.len() {
+            return Err(error(
+                "KR0303",
+                if case.mode_solver == ModeSolver::Kraken {
+                    format!(
+                        "mode count changed during mesh refinement ({} -> {} at multiplier {multiplier}); move spectral limits away from roots",
+                        self.modes.len(),
+                        roots.len()
+                    )
+                } else {
+                    "mode count changed during KRAKENC mesh refinement; move spectral limits away from roots".into()
+                },
+                "phase_speed_limits",
+            ));
+        }
+        let key = 2 * self.modes.len() / 3;
+        let previous = self.table.first().map(|row| row[key]);
+        self.table.push(roots);
+        for j in (0..set).rev() {
+            let denominator = (multiplier as f64 / MULTIPLIERS[j] as f64).powi(2) - 1.0;
+            let (earlier, later) = self.table.split_at_mut(j + 1);
+            for (value, &next) in earlier[j].iter_mut().zip(&later[0]) {
+                *value = next - (*value - next) / denominator;
+            }
+        }
+        let delta = previous.map_or(1e10, |x| magnitude(self.table[0][key] - x));
+        let converged = delta * case.max_range_m < 1.0;
+        if !converged {
+            return Ok(None);
+        }
+        let omega = 2.0 * std::f64::consts::PI * case.frequency_hz;
+        for (mode, &x) in self.modes.iter_mut().zip(&self.table[0]) {
+            let k = wavenumber(x, mode);
+            mode.horizontal_wavenumber_rad_per_m = k;
+            mode.phase_speed_mps = omega / k.re;
+            mode.attenuation_nepers_per_m = -k.im;
+        }
+        if self.modes.iter().any(|mode| {
+            !mode.phase_speed_mps.is_finite()
+                || !mode.group_speed_mps.is_finite()
+                || !mode.attenuation_nepers_per_m.is_finite()
+                || !mode.horizontal_wavenumber_rad_per_m.re.is_finite()
+                || !mode.horizontal_wavenumber_rad_per_m.im.is_finite()
+                || mode
+                    .eigenfunction
+                    .iter()
+                    .any(|v| !v.re.is_finite() || !v.im.is_finite())
+        }) {
+            return Err(if case.mode_solver == ModeSolver::Kraken {
+                error("KR0302", "non-finite mode result", "modes")
+            } else {
+                error("KR0303", "invalid complex mode result", "modes")
+            });
+        }
+        Ok(Some(ModeSet {
+            frequency_hz: case.frequency_hz,
+            sampled_depths_m: case.mode_sample_depths_m.clone(),
+            modes: std::mem::take(&mut self.modes),
+        }))
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn neville_seeds_start_on_the_third_mesh_and_use_raw_roots() {
+    let mut refinement = Refinement::<Complex64>::new();
+    refinement
+        .seeds
+        .push((1.0, vec![Complex64::new(10.0, -2.0)]));
+    assert_eq!(refinement.seed(0, 0.5), None);
+    refinement
+        .seeds
+        .push((0.5, vec![Complex64::new(7.0, -1.25)]));
+    let value = refinement.seed(0, 0.25).unwrap();
+    assert_eq!(value.re.to_bits(), 6.25_f64.to_bits());
+    assert_eq!(value.im.to_bits(), (-1.0625_f64).to_bits());
+    assert_eq!(refinement.seed(1, 0.25), None);
+}

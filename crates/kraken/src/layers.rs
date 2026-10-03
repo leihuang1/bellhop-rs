@@ -1,8 +1,8 @@
 //! Finite fluid-layer geometry, shared by both backends. Interfaces have two
 //! material samples but one pressure unknown; no averaging of density or mesh step.
 use crate::{
-    Case, CaseDefinition, DiagnosticReport, MAX_MESH_POINTS, MAX_VECTOR_LENGTH, SoundSpeedPoint,
-    error, profile::Profile, solver,
+    Case, CaseDefinition, DiagnosticReport, Interpolation, MAX_MESH_POINTS, MAX_VECTOR_LENGTH,
+    SoundSpeedPoint, error, profile::Profile, solver,
 };
 
 pub(crate) const MAX_LAYERS: usize = 500;
@@ -71,8 +71,27 @@ pub(crate) fn iter(case: &CaseDefinition) -> impl Iterator<Item = Layer<'_>> {
     )
 }
 
-#[allow(clippy::float_cmp)]
-pub(crate) fn validate(case: &CaseDefinition, diagnostics: &mut DiagnosticReport) {
+#[allow(clippy::float_cmp, clippy::too_many_lines)]
+pub(crate) fn validate(
+    case: &CaseDefinition,
+    diagnostics: &mut DiagnosticReport,
+) -> Option<Result<f64, DiagnosticReport>> {
+    let analytic = case.interpolation == Interpolation::AnalyticMunk;
+    let first = iter(case).next().unwrap();
+    let first_invalid = profile_invalid(first, analytic);
+    let first_bad_loss = loss_invalid(first, analytic);
+    if first_invalid {
+        diagnostics.push(error("sound_speed_profile", if analytic {
+            "analytic Munk profile has no point records"
+        } else {
+            "require finite increasing depths from the first fluid top to its bottom and positive sound speeds"
+        }));
+    }
+    if first_bad_loss {
+        diagnostics.push(error("water_attenuation_db_per_wavelength", "require one finite nonnegative loss per SSP node, Im(c) <= Re(c); analytic Munk remains lossless"));
+    }
+    let first_valid = !first_invalid && !first_bad_loss;
+    let mut minima = Vec::new();
     if case.additional_fluid_layers.len()
         + case.top_elastic_layers.len()
         + case.bottom_elastic_layers.len()
@@ -108,25 +127,8 @@ pub(crate) fn validate(case: &CaseDefinition, diagnostics: &mut DiagnosticReport
                 "density must be finite and positive",
             ));
         }
-        let invalid = !(2..=MAX_VECTOR_LENGTH).contains(&layer.points.len())
-            || layer.points.iter().any(|p| {
-                !p.depth_m.is_finite() || !p.sound_speed_mps.is_finite() || p.sound_speed_mps <= 0.0
-            })
-            || layer.points.first().is_none_or(|p| p.depth_m != layer.top)
-            || layer
-                .points
-                .last()
-                .is_none_or(|p| p.depth_m != layer.bottom)
-            || layer
-                .points
-                .windows(2)
-                .any(|p| p[1].depth_m <= p[0].depth_m);
-        let bad_loss = !layer.loss.is_empty()
-            && (layer.loss.len() != layer.points.len()
-                || layer
-                    .loss
-                    .iter()
-                    .any(|&a| !(0.0..=8.685_889_6 * 2.0 * std::f64::consts::PI).contains(&a)));
+        let invalid = profile_invalid(layer, false);
+        let bad_loss = loss_invalid(layer, false);
         if invalid {
             diagnostics.push(error(format!("{field}.sound_speed_profile"), "require increasing absolute depths from the previous interface to this layer bottom and positive sound speeds"));
         }
@@ -142,33 +144,66 @@ pub(crate) fn validate(case: &CaseDefinition, diagnostics: &mut DiagnosticReport
                 "mesh points must be 0 or in 10..=1000000",
             ));
         }
-        if !invalid
-            && !bad_loss
-            && let Err(report) = Profile::new_layer(case, layer)
+        if (!invalid && !bad_loss)
+            || (first_valid
+                && layer.points.len() >= 2
+                && (layer.loss.is_empty() || layer.loss.len() == layer.points.len()))
         {
-            let d = &report.diagnostics()[0];
-            diagnostics.push(error(profile_field(index - 1, &d.field), &d.message));
-        }
-    }
-}
-
-pub(crate) fn minimum_speed(case: &CaseDefinition) -> Result<f64, DiagnosticReport> {
-    let mut minimum = Profile::new(case)?.minimum_speed();
-    for (index, layer) in iter(case).enumerate().skip(1) {
-        // Malformed additional layers have already been diagnosed before interpolation.
-        if layer.points.len() >= 2
-            && (layer.loss.is_empty() || layer.loss.len() == layer.points.len())
-        {
-            let profile = Profile::new_layer(case, layer).map_err(|mut report| {
+            let minimum = Profile::new_layer(case, layer).map(|p| p.minimum_speed());
+            if !invalid
+                && !bad_loss
+                && let Err(report) = &minimum
+            {
+                let d = &report.diagnostics()[0];
+                diagnostics.push(error(profile_field(index - 1, &d.field), &d.message));
+            }
+            minima.push(minimum.map_err(|mut report| {
                 for diagnostic in &mut report.diagnostics {
                     diagnostic.field = profile_field(index - 1, &diagnostic.field);
                 }
                 report
-            })?;
-            minimum = minimum.min(profile.minimum_speed());
+            }));
         }
     }
-    Ok(minimum)
+    // Defer the minimum-speed diagnostic to the caller's existing position in
+    // the aggregate report. Each layer's interpolation is constructed only once.
+    first_valid.then(|| {
+        let mut minimum = Profile::new(case)?.minimum_speed();
+        for layer_minimum in minima {
+            minimum = minimum.min(layer_minimum?);
+        }
+        Ok(minimum)
+    })
+}
+
+#[allow(clippy::float_cmp)]
+fn profile_invalid(layer: Layer<'_>, analytic: bool) -> bool {
+    if analytic {
+        return !layer.points.is_empty();
+    }
+    !(2..=MAX_VECTOR_LENGTH).contains(&layer.points.len())
+        || layer.points.iter().any(|p| {
+            !p.depth_m.is_finite() || !p.sound_speed_mps.is_finite() || p.sound_speed_mps <= 0.0
+        })
+        || layer.points.first().is_none_or(|p| p.depth_m != layer.top)
+        || layer
+            .points
+            .last()
+            .is_none_or(|p| p.depth_m != layer.bottom)
+        || layer
+            .points
+            .windows(2)
+            .any(|p| p[1].depth_m <= p[0].depth_m)
+}
+
+fn loss_invalid(layer: Layer<'_>, analytic: bool) -> bool {
+    !layer.loss.is_empty()
+        && (analytic
+            || layer.loss.len() != layer.points.len()
+            || layer
+                .loss
+                .iter()
+                .any(|&a| !(0.0..=8.685_889_6 * 2.0 * std::f64::consts::PI).contains(&a)))
 }
 
 fn profile_field(index: usize, field: &str) -> String {

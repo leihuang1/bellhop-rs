@@ -817,6 +817,8 @@ version = "0.2.0"
 dependencies = [
  "hdf5-metno",
  "num-complex",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -827,6 +829,7 @@ dependencies = [
  "clap",
  "hdf5-metno",
  "kraken",
+ "serde_json",
  "sha2 0.10.9",
 ]
 

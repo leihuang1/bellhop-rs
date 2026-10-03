@@ -97,7 +97,12 @@ JSON input is at most 1 MiB, with the same per-case vector/medium/work limits an
 JSON and a terminal newline. They serialize fully before stdout: validation or
 size failures emit no partial document. An expanded legacy case may exceed the
 JSON byte ceiling even when compressed legacy vectors fit; export rejects it,
-rather than producing an unreadable document. Explicit frequency blocks
+rather than producing an unreadable document. The library `export_case_document`
+also checks compact serialized bytes using a fixed 1 MiB sizing buffer, including
+UTF-8 and JSON escaping; compact output exactly at the limit remains valid. The
+CLI separately checks its additional terminal newline. Pretty-printing or
+modifying a returned document can increase its size and requires revalidation.
+Explicit frequency blocks
 intentionally duplicate geometry; templates are not part of v1.
 
 Legacy `--solver` still defaults to KRAKEN. For JSON, the engine is in the

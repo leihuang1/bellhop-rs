@@ -52,6 +52,62 @@ fn accepted_legacy_fixtures_round_trip_without_changing_case_definitions() {
 }
 
 #[test]
+fn library_export_enforces_canonical_json_bytes_not_vector_or_character_counts() {
+    let mut empty = document("Pekeris", ModeSolver::Kraken);
+    empty.frequencies[0].profiles[0].title.clear();
+    let overhead = serde_json::to_vec(&empty).unwrap().len();
+    let limit = usize::try_from(legacy::MAX_INPUT_BYTES).unwrap();
+    for title in [
+        "a".repeat(limit - overhead),
+        "a".repeat(limit - overhead + 1),
+        "\"".repeat((limit - overhead) / 2 + 1),
+        "é".repeat((limit - overhead) / 2 + 1),
+    ] {
+        let mut definition = empty.frequencies[0].profiles[0].clone();
+        definition.title = title;
+        let case = kraken::FieldCase::new(
+            vec![kraken::Case::from_definition(definition).unwrap()],
+            vec![0.0],
+            kraken::FieldPropagation::RangeIndependent,
+        )
+        .unwrap();
+        // All are valid cases with identical small vectors, irrespective of serialized title size.
+        let mut expected = empty.clone();
+        expected.frequencies[0].profiles[0].title = case.profiles()[0].title.clone();
+        let expected_bytes = serde_json::to_vec(&expected).unwrap();
+        let cases = [case];
+        if expected_bytes.len() <= limit {
+            let exported = json::export_case_document(&cases).unwrap();
+            assert_eq!(serde_json::to_vec(&exported).unwrap(), expected_bytes);
+            assert_eq!(json::load_case_document(&expected_bytes).unwrap(), cases);
+        } else {
+            let report = json::export_case_document(&cases)
+                .map(drop)
+                .expect_err("library export must reject oversized canonical JSON");
+            assert_eq!(report.diagnostics()[0].code, "KR0101");
+            assert_eq!(report.diagnostics()[0].field, "json");
+        }
+    }
+    // A compact vector-rich case also exceeds the byte limit while remaining below entry budgets.
+    let mut definition = empty.frequencies[0].profiles[0].clone();
+    definition.receiver_ranges_m = (0..100_000).map(|value| f64::from(value) / 3.0).collect();
+    let case = kraken::FieldCase::new(
+        vec![kraken::Case::from_definition(definition).unwrap()],
+        vec![0.0],
+        kraken::FieldPropagation::RangeIndependent,
+    )
+    .unwrap();
+    assert_eq!(
+        json::export_case_document(&[case])
+            .map(drop)
+            .unwrap_err()
+            .diagnostics()[0]
+            .code,
+        "KR0101"
+    );
+}
+
+#[test]
 fn strict_json_rejects_malformed_nested_fields_and_shared_semantic_failures() {
     let original = serde_json::to_value(document("TabRefIrcC", ModeSolver::Krakenc)).unwrap();
     for (pointer, replacement, code, field) in [

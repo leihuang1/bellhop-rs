@@ -95,11 +95,12 @@ pub fn load_case_document_named(
 /// Export already validated cases without changing precision, units or frequency order.
 /// Losses are effective dB/wavelength at each block's solve frequency, including volume loss.
 /// # Errors
-/// Rejects empty/oversized collections or mixed backends, as does the JSON loader.
+/// Rejects empty/oversized collections, mixed backends or compact JSON over 1 MiB.
 pub fn export_case_document(cases: &[FieldCase]) -> Result<CaseDocument, DiagnosticReport> {
-    validate_sequences(cases, Path::new("<json>"))?;
+    let path = Path::new("<json>");
+    validate_sequences(cases, path)?;
     // ponytail: explicit frequency blocks duplicate geometry; add templates only if document size matters.
-    Ok(CaseDocument {
+    let document = CaseDocument {
         schema_version: SCHEMA_VERSION,
         frequencies: cases
             .iter()
@@ -114,7 +115,25 @@ pub fn export_case_document(cases: &[FieldCase]) -> Result<CaseDocument, Diagnos
                     .collect(),
             })
             .collect(),
-    })
+    };
+    let oversized = || error(path, "KR0101", "exported JSON exceeds 1 MiB", "json");
+    let mut buffer = vec![
+        0;
+        crate::legacy::MAX_INPUT_BYTES
+            .try_into()
+            .map_err(|_| oversized())?
+    ];
+    // A fixed slice bounds the sizing pass, even when a valid case has huge titles or vectors.
+    serde_json::to_writer(std::io::Cursor::new(buffer.as_mut_slice()), &document).map_err(
+        |cause| {
+            if cause.is_io() {
+                oversized()
+            } else {
+                error(path, "KR0103", &cause.to_string(), "json")
+            }
+        },
+    )?;
+    Ok(document)
 }
 
 fn validate_sequences(cases: &[FieldCase], path: &Path) -> Result<(), DiagnosticReport> {

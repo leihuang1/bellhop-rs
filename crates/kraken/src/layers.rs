@@ -91,7 +91,9 @@ pub(crate) fn validate(
         diagnostics.push(error("water_attenuation_db_per_wavelength", "require one finite nonnegative loss per SSP node, Im(c) <= Re(c); analytic Munk remains lossless"));
     }
     let first_valid = !first_invalid && !first_bad_loss;
-    let mut minima = Vec::new();
+    // Compute once, but return the numeric error for the caller's existing
+    // position in the aggregate report rather than emitting it here.
+    let mut minimum = first_valid.then(|| Profile::new(case).map(|p| p.minimum_speed()));
     if case.additional_fluid_layers.len()
         + case.top_elastic_layers.len()
         + case.bottom_elastic_layers.len()
@@ -144,36 +146,33 @@ pub(crate) fn validate(
                 "mesh points must be 0 or in 10..=1000000",
             ));
         }
-        if (!invalid && !bad_loss)
-            || (first_valid
-                && layer.points.len() >= 2
-                && (layer.loss.is_empty() || layer.loss.len() == layer.points.len()))
+        let cached = (!invalid && !bad_loss)
+            .then(|| Profile::new_layer(case, layer).map(|p| p.minimum_speed()));
+        if let Some(Err(report)) = &cached {
+            let d = &report.diagnostics()[0];
+            diagnostics.push(error(profile_field(index - 1, &d.field), &d.message));
+        }
+        // Retain deferred numeric diagnostics for malformed layers, but only
+        // while the minimum calculation has not already failed.
+        if let Some(Ok(current)) = &mut minimum
+            && layer.points.len() >= 2
+            && (layer.loss.is_empty() || layer.loss.len() == layer.points.len())
         {
-            let minimum = Profile::new_layer(case, layer).map(|p| p.minimum_speed());
-            if !invalid
-                && !bad_loss
-                && let Err(report) = &minimum
-            {
-                let d = &report.diagnostics()[0];
-                diagnostics.push(error(profile_field(index - 1, &d.field), &d.message));
-            }
-            minima.push(minimum.map_err(|mut report| {
-                for diagnostic in &mut report.diagnostics {
-                    diagnostic.field = profile_field(index - 1, &diagnostic.field);
-                }
-                report
-            }));
+            let previous = *current;
+            minimum = Some(
+                cached
+                    .unwrap_or_else(|| Profile::new_layer(case, layer).map(|p| p.minimum_speed()))
+                    .map(|value| previous.min(value))
+                    .map_err(|mut report| {
+                        for diagnostic in &mut report.diagnostics {
+                            diagnostic.field = profile_field(index - 1, &diagnostic.field);
+                        }
+                        report
+                    }),
+            );
         }
     }
-    // Defer the minimum-speed diagnostic to the caller's existing position in
-    // the aggregate report. Each layer's interpolation is constructed only once.
-    first_valid.then(|| {
-        let mut minimum = Profile::new(case)?.minimum_speed();
-        for layer_minimum in minima {
-            minimum = minimum.min(layer_minimum?);
-        }
-        Ok(minimum)
-    })
+    minimum
 }
 
 #[allow(clippy::float_cmp)]

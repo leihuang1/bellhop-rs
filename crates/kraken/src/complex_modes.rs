@@ -46,7 +46,6 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         Complex64::new(0.0, 0.0)
     };
     let low_k2 = (omega / case.c_high_mps).powi(2);
-    let high_k2 = (omega / case.c_low_mps).powi(2);
     if !low_k2.is_finite() || !bottom_k2.re.is_finite() || !bottom_k2.im.is_finite() {
         return Err(error(
             "KR0302",
@@ -59,12 +58,9 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         .water_attenuation_db_per_wavelength
         .iter()
         .any(|&a| a != 0.0);
-    let mut table: Vec<Vec<Complex64>> = Vec::new();
-    let mut seed_meshes: Vec<(f64, Vec<Complex64>)> = Vec::new();
-    let mut modes = Vec::new();
+    let mut refinement = crate::refinement::Refinement::<Complex64>::default();
     let mut work = 0;
-    for set in 0..5 {
-        let multiplier = 1_usize << set;
+    for multiplier in crate::refinement::MULTIPLIERS {
         let layers = crate::layers::mesh_layers(case, multiplier)?;
         let h = layers[0].h;
         let mut min_speed = f64::INFINITY;
@@ -166,7 +162,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             };
             // Solve2 seeds refined meshes with unmodified EVMat roots, then
             // Neville interpolation in h²; restarting from above can skip roots.
-            let guess = refinement_seed(&seed_meshes, index - 1, seed_h).unwrap_or(guess);
+            let guess = refinement.seed(index - 1, seed_h).unwrap_or(guess);
             let root = secant(guess, &roots, &b, &layers, &bottom, &mut work)?;
             if ((tabulated || elastic) && root.sqrt().re < omega / case.c_high_mps)
                 || (!(tabulated || elastic) && root.re <= low_k2)
@@ -194,80 +190,10 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
                 "phase_speed_limits",
             ));
         }
-        seed_meshes.push((seed_h, roots.clone()));
-        let mut selected: Vec<_> = roots.into_iter().filter(|x| x.re <= high_k2).collect();
-        if tabulated || elastic {
-            selected.sort_by(|a, b| b.re.total_cmp(&a.re));
-        }
-        if selected.is_empty() {
-            return Err(error(
-                "KR0301",
-                "no complex modes inside spectral limits",
-                "phase_speed_limits",
-            ));
-        }
-        // Upstream computes shapes/group speeds only on the first mesh.
-        if set == 0 {
-            if selected
-                .len()
-                .checked_mul(case.mode_sample_depths_m.len())
-                .is_none_or(|w| w > 5_000_000)
-            {
-                return Err(error(
-                    "KR0302",
-                    "mode shape sample limit exceeded",
-                    "mode_sample_depths_m",
-                ));
-            }
-            modes = selected
-                .iter()
-                .map(|&root| mode(case, &b, &layers, omega, bottom_c, &bottom, root))
-                .collect::<Result<Vec<_>, _>>()?;
-        } else if selected.len() != modes.len() {
-            return Err(error(
-                "KR0303",
-                "mode count changed during KRAKENC mesh refinement; move spectral limits away from roots",
-                "phase_speed_limits",
-            ));
-        }
-
-        let key = 2 * modes.len() / 3;
-        let previous = table.first().map(|row| row[key]);
-        table.push(selected);
-        // Richardson-extrapolate complex k² with mesh ratios 1, 2, 4, 8, 16.
-        for j in (0..set).rev() {
-            let denominator = (multiplier as f64 / (1_usize << j) as f64).powi(2) - 1.0;
-            let (earlier, later) = table.split_at_mut(j + 1);
-            for (value, &next) in earlier[j].iter_mut().zip(&later[0]) {
-                *value = next - (*value - next) / denominator;
-            }
-        }
-        let delta = previous.map_or(1e10, |x| (table[0][key] - x).norm());
-        if delta * case.max_range_m < 1.0 {
-            for (mode, &x) in modes.iter_mut().zip(&table[0]) {
-                let k = x.sqrt();
-                mode.horizontal_wavenumber_rad_per_m = k;
-                mode.phase_speed_mps = omega / k.re;
-                mode.attenuation_nepers_per_m = -k.im;
-            }
-            if modes.iter().any(|mode| {
-                !mode.phase_speed_mps.is_finite()
-                    || !mode.group_speed_mps.is_finite()
-                    || !mode.attenuation_nepers_per_m.is_finite()
-                    || !mode.horizontal_wavenumber_rad_per_m.re.is_finite()
-                    || !mode.horizontal_wavenumber_rad_per_m.im.is_finite()
-                    || mode
-                        .eigenfunction
-                        .iter()
-                        .any(|v| !v.re.is_finite() || !v.im.is_finite())
-            }) {
-                return Err(error("KR0303", "invalid complex mode result", "modes"));
-            }
-            return Ok(ModeSet {
-                frequency_hz: case.frequency_hz,
-                sampled_depths_m: case.mode_sample_depths_m.clone(),
-                modes,
-            });
+        if let Some(result) = refinement.accept(roots, seed_h, case, |root| {
+            mode(case, &b, &layers, omega, bottom_c, &bottom, root)
+        })? {
+            return Ok(result);
         }
     }
     Err(error(
@@ -275,30 +201,6 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         "KRAKENC eigenvalue extrapolation did not converge within five meshes",
         "max_range_m",
     ))
-}
-
-pub(crate) fn refinement_seed(
-    meshes: &[(f64, Vec<Complex64>)],
-    index: usize,
-    h: f64,
-) -> Option<Complex64> {
-    // Solve2 leaves the upper/previous-root scan in place on mesh 2.
-    // Neville seeds start only on mesh 3, after two raw-root meshes exist.
-    if meshes.len() < 2 {
-        return None;
-    }
-    let mut values = meshes
-        .iter()
-        .map(|(_, roots)| roots.get(index).copied())
-        .collect::<Option<Vec<_>>>()?;
-    for width in 1..values.len() {
-        for j in 0..values.len() - width {
-            let a = meshes[j].0.powi(2);
-            let b = meshes[j + width].0.powi(2);
-            values[j] = ((h * h - b) * values[j] - (h * h - a) * values[j + 1]) / (a - b);
-        }
-    }
-    values.first().copied()
 }
 
 // The upstream PekerisRoot branch is not the principal complex square root.
@@ -871,17 +773,6 @@ fn mode(
         attenuation_nepers_per_m: -k.im,
         eigenfunction,
     })
-}
-
-#[cfg(test)]
-#[test]
-fn neville_seeds_start_on_the_third_mesh_and_use_raw_roots() {
-    let mut meshes = vec![(1.0, vec![Complex64::new(10.0, -2.0)])];
-    assert_eq!(refinement_seed(&meshes, 0, 0.5), None);
-    meshes.push((0.5, vec![Complex64::new(7.0, -1.25)]));
-    let value = refinement_seed(&meshes, 0, 0.25).unwrap();
-    assert_eq!(value.re.to_bits(), 6.25_f64.to_bits());
-    assert_eq!(value.im.to_bits(), (-1.0625_f64).to_bits());
 }
 
 #[cfg(test)]

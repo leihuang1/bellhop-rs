@@ -19,12 +19,6 @@ const MAX_SHAPES: usize = 5_000_000;
 const MAX_WORK: usize = 2_500_000_000;
 const ROOT_STEPS: usize = 64;
 
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    clippy::too_many_lines
-)]
 pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let omega = 2.0 * PI * case.frequency_hz;
     let (bottom_k2, bottom_complex_k2) = if case.bottom_boundary.is_half_space() {
@@ -55,83 +49,25 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             "mesh_points",
         ));
     }
-    let mut table: Vec<Vec<f64>> = Vec::new();
-    let mut modes = Vec::new();
-    let mut seed_meshes = Vec::new();
+    let mut refinement = crate::refinement::Refinement::<f64>::default();
     let mut work = 0_usize;
-    for set in 0..5 {
-        let multiplier = 1 << set;
+    for multiplier in crate::refinement::MULTIPLIERS {
         let layers = crate::layers::mesh_layers(case, multiplier)?;
         let mut mesh = Mesh::new(case, &profiles, layers, omega, bottom_k2, bottom_complex_k2)?;
         mesh.top_solids = crate::elastic::SolidMesh::build(case, multiplier, true, true)?;
         mesh.bottom_solids = crate::elastic::SolidMesh::build(case, multiplier, false, true)?;
         let roots = if crate::elastic::has_layers(case) {
-            mesh.solid_roots(&seed_meshes, &mut work)?
+            mesh.solid_roots(&refinement, &mut work)?
         } else {
             mesh.roots(&mut work)?
         };
-        if crate::elastic::has_layers(case) {
-            seed_meshes.push((
-                mesh.top_solids
-                    .first()
-                    .map_or(mesh.h, crate::elastic::SolidMesh::spacing),
-                roots.iter().map(|&x| Complex64::new(x, 0.0)).collect(),
-            ));
-        }
-        if set == 0 {
-            modes = roots
-                .iter()
-                .map(|&x| mesh.mode(x))
-                .collect::<Result<Vec<_>, _>>()?;
-        } else if roots.len() != modes.len() {
-            return Err(error(
-                "KR0303",
-                format!(
-                    "mode count changed during mesh refinement ({} -> {} at multiplier {multiplier}); move spectral limits away from roots",
-                    modes.len(),
-                    roots.len()
-                ),
-                "phase_speed_limits",
-            ));
-        }
-        let key = 2 * modes.len() / 3;
-        let previous = table.first().map(|row| row[key]);
-        table.push(roots);
-        for j in (0..set).rev() {
-            let denominator = (multiplier as f64 / f64::from(1 << j)).powi(2) - 1.0;
-            let (earlier, later) = table.split_at_mut(j + 1);
-            for (value, &next) in earlier[j].iter_mut().zip(&later[0]) {
-                *value = next - (*value - next) / denominator;
-            }
-        }
-        let delta = previous.map_or(1e10, |x| (table[0][key] - x).abs());
-        if delta * case.max_range_m < 1.0 {
-            for (mode, &x) in modes.iter_mut().zip(&table[0]) {
-                // KRAKEN combines extrapolated real k² with the first-mesh loss perturbation.
-                let loss_k2 = mode.horizontal_wavenumber_rad_per_m.powi(2).im;
-                let k = Complex64::new(x, loss_k2).sqrt();
-                mode.horizontal_wavenumber_rad_per_m = k;
-                mode.phase_speed_mps = omega / k.re;
-                mode.attenuation_nepers_per_m = -k.im;
-            }
-            if modes.iter().any(|mode| {
-                !mode.phase_speed_mps.is_finite()
-                    || !mode.group_speed_mps.is_finite()
-                    || !mode.attenuation_nepers_per_m.is_finite()
-                    || !mode.horizontal_wavenumber_rad_per_m.re.is_finite()
-                    || !mode.horizontal_wavenumber_rad_per_m.im.is_finite()
-                    || mode
-                        .eigenfunction
-                        .iter()
-                        .any(|v| !v.re.is_finite() || !v.im.is_finite())
-            }) {
-                return Err(error("KR0302", "non-finite mode result", "modes"));
-            }
-            return Ok(ModeSet {
-                frequency_hz: case.frequency_hz,
-                sampled_depths_m: case.mode_sample_depths_m.clone(),
-                modes,
-            });
+        let seed_h = crate::elastic::has_layers(case).then(|| {
+            mesh.top_solids
+                .first()
+                .map_or(mesh.h, crate::elastic::SolidMesh::spacing)
+        });
+        if let Some(result) = refinement.accept(roots, seed_h, case, |x| mesh.mode(x))? {
+            return Ok(result);
         }
     }
     Err(error(
@@ -429,7 +365,7 @@ impl<'a> Mesh<'a> {
     #[allow(clippy::cast_precision_loss, clippy::too_many_lines)]
     fn solid_roots(
         &self,
-        seeds: &[(f64, Vec<Complex64>)],
+        refinement: &crate::refinement::Refinement<f64>,
         work: &mut usize,
     ) -> Result<Vec<f64>, DiagnosticReport> {
         let c_high = crate::elastic::maximum_speed(self.case);
@@ -455,14 +391,14 @@ impl<'a> Mesh<'a> {
         let mut x = (self.omega / c_low).powi(2);
         for _ in 0..MAX_MODE_LIMIT {
             x *= f64::from(1.000_01_f32);
-            x = crate::complex_modes::refinement_seed(
-                seeds,
-                roots.len(),
-                self.top_solids
-                    .first()
-                    .map_or(self.h, crate::elastic::SolidMesh::spacing),
-            )
-            .map_or(x, |v| v.re);
+            x = refinement
+                .seed(
+                    roots.len(),
+                    self.top_solids
+                        .first()
+                        .map_or(self.h, crate::elastic::SolidMesh::spacing),
+                )
+                .map_or(x, |v| v.re);
             let tolerance = x.abs() * (self.b1.len() + points) as f64 * 1e-14;
             let mut evaluate = |x| {
                 *work += self.b1.len() + 5 * points + roots.len();

@@ -771,12 +771,7 @@ fn export_range_dependent_sound_speed(
 
 fn import_boundary_shape(shape: BoundaryShapeDocument) -> BoundaryShape {
     BoundaryShape {
-        interpolation: match shape.interpolation {
-            BoundaryInterpolationDocument::PiecewiseLinear => {
-                BoundaryInterpolation::PiecewiseLinear
-            }
-            BoundaryInterpolationDocument::Curvilinear => BoundaryInterpolation::Curvilinear,
-        },
+        interpolation: import_boundary_interpolation(shape.interpolation),
         points: shape
             .points
             .into_iter()
@@ -791,12 +786,7 @@ fn import_boundary_shape(shape: BoundaryShapeDocument) -> BoundaryShape {
 
 fn export_boundary_shape(shape: &BoundaryShape) -> BoundaryShapeDocument {
     BoundaryShapeDocument {
-        interpolation: match shape.interpolation {
-            BoundaryInterpolation::PiecewiseLinear => {
-                BoundaryInterpolationDocument::PiecewiseLinear
-            }
-            BoundaryInterpolation::Curvilinear => BoundaryInterpolationDocument::Curvilinear,
-        },
+        interpolation: export_boundary_interpolation(shape.interpolation),
         points: shape
             .points
             .iter()
@@ -956,51 +946,25 @@ fn export_source_pattern(pattern: &SourceBeamPattern) -> SourceBeamPatternDocume
 
 fn import_cerveny(options: CervenyDocument) -> CervenyOptions {
     CervenyOptions {
-        width: match options.width {
-            BeamWidthDocument::SpaceFilling => BeamWidth::SpaceFilling,
-            BeamWidthDocument::Minimum => BeamWidth::Minimum,
-            BeamWidthDocument::Wkb => BeamWidth::Wkb,
-        },
-        curvature: match options.curvature {
-            CurvatureConditionDocument::Double => CurvatureCondition::Double,
-            CurvatureConditionDocument::Standard => CurvatureCondition::Standard,
-            CurvatureConditionDocument::Zero => CurvatureCondition::Zero,
-        },
+        width: import_beam_width(options.width),
+        curvature: import_curvature(options.curvature),
         epsilon_multiplier: options.epsilon_multiplier,
         loop_range: options.loop_range,
         image_count: options.image_count,
         beam_window: options.beam_window,
-        component: match options.component {
-            BeamComponentDocument::Pressure => BeamComponent::Pressure,
-            BeamComponentDocument::Vertical => BeamComponent::Vertical,
-            BeamComponentDocument::Horizontal => BeamComponent::Horizontal,
-            BeamComponentDocument::Displacement => BeamComponent::Displacement,
-        },
+        component: import_beam_component(options.component),
     }
 }
 
 fn export_cerveny(options: &CervenyOptions) -> CervenyDocument {
     CervenyDocument {
-        width: match options.width {
-            BeamWidth::SpaceFilling => BeamWidthDocument::SpaceFilling,
-            BeamWidth::Minimum => BeamWidthDocument::Minimum,
-            BeamWidth::Wkb => BeamWidthDocument::Wkb,
-        },
-        curvature: match options.curvature {
-            CurvatureCondition::Double => CurvatureConditionDocument::Double,
-            CurvatureCondition::Standard => CurvatureConditionDocument::Standard,
-            CurvatureCondition::Zero => CurvatureConditionDocument::Zero,
-        },
+        width: export_beam_width(options.width),
+        curvature: export_curvature(options.curvature),
         epsilon_multiplier: options.epsilon_multiplier,
         loop_range: options.loop_range,
         image_count: options.image_count,
         beam_window: options.beam_window,
-        component: match options.component {
-            BeamComponent::Pressure => BeamComponentDocument::Pressure,
-            BeamComponent::Vertical => BeamComponentDocument::Vertical,
-            BeamComponent::Horizontal => BeamComponentDocument::Horizontal,
-            BeamComponent::Displacement => BeamComponentDocument::Displacement,
-        },
+        component: export_beam_component(options.component),
     }
 }
 
@@ -1075,6 +1039,18 @@ macro_rules! enum_map {
     };
 }
 
+enum_map!(import_boundary_interpolation, export_boundary_interpolation, BoundaryInterpolationDocument, BoundaryInterpolation, {
+    PiecewiseLinear, Curvilinear
+});
+enum_map!(import_beam_width, export_beam_width, BeamWidthDocument, BeamWidth, {
+    SpaceFilling, Minimum, Wkb
+});
+enum_map!(import_curvature, export_curvature, CurvatureConditionDocument, CurvatureCondition, {
+    Double, Standard, Zero
+});
+enum_map!(import_beam_component, export_beam_component, BeamComponentDocument, BeamComponent, {
+    Pressure, Vertical, Horizontal, Displacement
+});
 enum_map!(import_ssp_interpolation, export_ssp_interpolation, SspInterpolationDocument, SspInterpolation, {
     N2Linear, CLinear, Pchip, CubicSpline, Quadrilateral, AnalyticMunk
 });

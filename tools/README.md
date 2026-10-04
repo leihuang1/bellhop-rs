@@ -43,6 +43,18 @@ for case in Pekeris PekerisFiltered PekerisDense PekerisDenseLoss PekerisRefined
 done
 ```
 
+For a same-stem pair using the multi-frequency comparator, compare the full
+Rust API result and then the actual legacy CLI/HDF5 result with one helper:
+
+```sh
+cargo build --release -p kraken-cli
+tools/reference/compare-kraken-hdf5.sh krakenc crates/kraken/tests/fixtures/LayeredFluidPower.env
+```
+
+The helper runs fresh Fortran first and requires its HDF5 destination not to
+exist. CI shares this sequence across the six material/FIELD groups; their
+case lists, exclusions, reference checks and tolerances remain independent.
+
 For the derived KRAKENC Pekeris and reduced 1 km, seven-knot MunkLeakyPartial
 cases (`PekerisComplexBlank`, `PekerisComplexRefined`,
 `MunkLeakyPartialLoss` and `MunkLeakyPartialC` also have separately derived

@@ -25,7 +25,7 @@ use bellhop::solver::{
     SourceField, run as run_simulation,
 };
 use serde::Serialize;
-use serde::ser::{SerializeSeq, SerializeStruct, Serializer};
+use serde::ser::{SerializeStruct, Serializer};
 use tokio::sync::Semaphore;
 use tower::limit::ConcurrencyLimitLayer;
 use tower::timeout::TimeoutLayer;
@@ -351,11 +351,7 @@ impl Serialize for BorrowedArrivalSources<'_> {
     where
         S: Serializer,
     {
-        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
-        for source in self.0 {
-            sequence.serialize_element(&BorrowedArrivalSource(source))?;
-        }
-        sequence.end()
+        serializer.collect_seq(self.0.iter().map(BorrowedArrivalSource))
     }
 }
 
@@ -376,11 +372,7 @@ impl Serialize for BorrowedArrivalReceivers<'_> {
     where
         S: Serializer,
     {
-        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
-        for receiver in self.0 {
-            sequence.serialize_element(&BorrowedArrivalReceiver(receiver))?;
-        }
-        sequence.end()
+        serializer.collect_seq(self.0.iter().map(BorrowedArrivalReceiver))
     }
 }
 
@@ -402,11 +394,7 @@ impl Serialize for BorrowedArrivals<'_> {
     where
         S: Serializer,
     {
-        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
-        for arrival in self.0 {
-            sequence.serialize_element(&BorrowedArrival(arrival))?;
-        }
-        sequence.end()
+        serializer.collect_seq(self.0.iter().map(BorrowedArrival))
     }
 }
 
@@ -433,11 +421,7 @@ impl Serialize for BorrowedFieldSources<'_> {
     where
         S: Serializer,
     {
-        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
-        for source in self.0 {
-            sequence.serialize_element(&BorrowedFieldSource(source))?;
-        }
-        sequence.end()
+        serializer.collect_seq(self.0.iter().map(BorrowedFieldSource))
     }
 }
 
@@ -458,11 +442,7 @@ impl Serialize for BorrowedFieldReceivers<'_> {
     where
         S: Serializer,
     {
-        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
-        for sample in self.0 {
-            sequence.serialize_element(&BorrowedFieldReceiver(sample))?;
-        }
-        sequence.end()
+        serializer.collect_seq(self.0.iter().map(BorrowedFieldReceiver))
     }
 }
 
@@ -762,59 +742,19 @@ async fn run_case(
     let outcome = parse_document(&body)?;
     let request_bytes = body.to_vec();
     let limits = state.simulation_limits;
-    let worker_permit = state
-        .worker_slots
-        .clone()
-        .acquire_owned()
-        .await
-        .map_err(|error| {
-            tracing::error!(%error, "simulation worker semaphore closed");
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "worker_pool_failed",
-                "simulation worker pool failed",
-            )
-        })?;
-    let task = tokio::task::spawn_blocking(move || {
-        let _worker_permit = worker_permit;
+    let bytes = match blocking_worker(&state, move || {
         simulate_to_hdf5(&outcome.value, &request_bytes, &outcome.warnings, limits)
-    });
-    let bytes = match task.await {
-        Ok(Ok(bytes)) => bytes,
-        Ok(Err(WorkerError::Simulation(report))) => {
-            let limit_exceeded = report
-                .diagnostics()
-                .iter()
-                .any(|diagnostic| diagnostic.code == "BH0303");
-            let (status, code, message) = if limit_exceeded {
-                (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "resource_limit_exceeded",
-                    "simulation exceeded a server resource limit",
-                )
-            } else {
-                (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "simulation_failed",
-                    "the case could not be simulated",
-                )
-            };
-            return Err(ApiError::from_report(status, code, message, &report));
-        }
-        Ok(Err(WorkerError::Output(message))) => {
+    })
+    .await?
+    {
+        Ok(bytes) => bytes,
+        Err(WorkerError::Simulation(report)) => return Err(simulation_error(&report)),
+        Err(WorkerError::Output(message)) => {
             tracing::error!(%message, "failed to build HDF5 response");
             return Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "output_failed",
                 "unable to create the HDF5 result",
-            ));
-        }
-        Err(error) => {
-            tracing::error!(%error, "blocking simulation task failed");
-            return Err(ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "execution_failed",
-                "simulation worker failed",
             ));
         }
     };
@@ -919,7 +859,59 @@ async fn simulate_to_json(
     let limits = state.simulation_limits;
     let max_json_response_bytes = state.max_json_response_bytes;
     let warnings = outcome.warnings;
-    let worker_permit = state
+    let bytes = match blocking_worker(&state, move || {
+        let result = run_simulation(&outcome.value, limits).map_err(JsonWorkerError::Simulation)?;
+        match output {
+            JsonOutput::Arrivals => serialize_arrivals(&result, &warnings, max_json_response_bytes),
+            JsonOutput::Field(run_kind) => {
+                serialize_field(&result, &warnings, run_kind, max_json_response_bytes)
+            }
+        }
+    })
+    .await?
+    {
+        Ok(bytes) => bytes,
+        Err(JsonWorkerError::Simulation(report)) => return Err(simulation_error(&report)),
+        Err(JsonWorkerError::NonFinite(error)) => {
+            tracing::error!(
+                field = error.field,
+                "simulation produced non-finite JSON output"
+            );
+            return Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "output_failed",
+                "simulation produced a non-finite JSON output value",
+            ));
+        }
+        Err(JsonWorkerError::ResponseTooLarge) => {
+            return Err(ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "resource_limit_exceeded",
+                "JSON response exceeded the configured byte limit",
+            ));
+        }
+        Err(JsonWorkerError::Serialization(message)) => {
+            tracing::error!(%message, "failed to serialize JSON simulation response");
+            return Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "output_failed",
+                "unable to serialize the JSON simulation result",
+            ));
+        }
+    };
+
+    let mut response = bytes.into_response();
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static(JSON_MEDIA_TYPE));
+    Ok(response)
+}
+
+async fn blocking_worker<T: Send + 'static>(
+    state: &AppState,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, ApiError> {
+    let permit = state
         .worker_slots
         .clone()
         .acquire_owned()
@@ -932,79 +924,37 @@ async fn simulate_to_json(
                 "simulation worker pool failed",
             )
         })?;
-    let task = tokio::task::spawn_blocking(move || {
-        let _worker_permit = worker_permit;
-        let result = run_simulation(&outcome.value, limits).map_err(JsonWorkerError::Simulation)?;
-        match output {
-            JsonOutput::Arrivals => serialize_arrivals(&result, &warnings, max_json_response_bytes),
-            JsonOutput::Field(run_kind) => {
-                serialize_field(&result, &warnings, run_kind, max_json_response_bytes)
-            }
-        }
-    });
-    let bytes = match task.await {
-        Ok(Ok(bytes)) => bytes,
-        Ok(Err(JsonWorkerError::Simulation(report))) => {
-            let limit_exceeded = report
-                .diagnostics()
-                .iter()
-                .any(|diagnostic| diagnostic.code == "BH0303");
-            let (status, code, message) = if limit_exceeded {
-                (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "resource_limit_exceeded",
-                    "simulation exceeded a server resource limit",
-                )
-            } else {
-                (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "simulation_failed",
-                    "the case could not be simulated",
-                )
-            };
-            return Err(ApiError::from_report(status, code, message, &report));
-        }
-        Ok(Err(JsonWorkerError::NonFinite(error))) => {
-            tracing::error!(
-                field = error.field,
-                "simulation produced non-finite JSON output"
-            );
-            return Err(ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "output_failed",
-                "simulation produced a non-finite JSON output value",
-            ));
-        }
-        Ok(Err(JsonWorkerError::ResponseTooLarge)) => {
-            return Err(ApiError::new(
-                StatusCode::TOO_MANY_REQUESTS,
-                "resource_limit_exceeded",
-                "JSON response exceeded the configured byte limit",
-            ));
-        }
-        Ok(Err(JsonWorkerError::Serialization(message))) => {
-            tracing::error!(%message, "failed to serialize JSON simulation response");
-            return Err(ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "output_failed",
-                "unable to serialize the JSON simulation result",
-            ));
-        }
-        Err(error) => {
-            tracing::error!(%error, "blocking simulation task failed");
-            return Err(ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "execution_failed",
-                "simulation worker failed",
-            ));
-        }
-    };
+    // Dropping the request (including timeout) does not cancel blocking work.
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, "blocking simulation task failed");
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "execution_failed",
+            "simulation worker failed",
+        )
+    })
+}
 
-    let mut response = bytes.into_response();
-    response
-        .headers_mut()
-        .insert(CONTENT_TYPE, HeaderValue::from_static(JSON_MEDIA_TYPE));
-    Ok(response)
+fn simulation_error(report: &DiagnosticReport) -> ApiError {
+    let (status, code, message) = if report.diagnostics().iter().any(|d| d.code == "BH0303") {
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            "resource_limit_exceeded",
+            "simulation exceeded a server resource limit",
+        )
+    } else {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "simulation_failed",
+            "the case could not be simulated",
+        )
+    };
+    ApiError::from_report(status, code, message, report)
 }
 
 fn extract_json_body(
@@ -1141,6 +1091,44 @@ mod tests {
             .header(header::CONTENT_TYPE, "application/json")
             .body(body.into())
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn dropped_requests_keep_worker_slots_until_blocking_work_finishes() {
+        let state = super::AppState {
+            simulation_limits: super::SimulationLimits::default(),
+            max_json_response_bytes: 1024,
+            auth_token: None,
+            worker_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+        };
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let request_state = state.clone();
+        let request = tokio::spawn(async move {
+            super::blocking_worker(&request_state, move || {
+                started.send(()).unwrap();
+                wait.recv().unwrap();
+            })
+            .await
+            .is_ok()
+        });
+        ready.await.unwrap();
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+        assert!(state.worker_slots.clone().try_acquire_owned().is_err());
+        release.send(()).unwrap();
+        let permit = state.worker_slots.clone().acquire_owned().await.unwrap();
+        drop(permit);
+        assert_eq!(super::blocking_worker(&state, || 7).await.ok(), Some(7));
+        let error = super::blocking_worker(&state, || panic!("worker failure"))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.code, "execution_failed");
+        assert_eq!(state.worker_slots.available_permits(), 1);
+        state.worker_slots.close();
+        let error = super::blocking_worker(&state, || ()).await.err().unwrap();
+        assert_eq!(error.code, "worker_pool_failed");
     }
 
     #[tokio::test]

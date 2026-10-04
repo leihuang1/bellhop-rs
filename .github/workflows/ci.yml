@@ -94,17 +94,7 @@ jobs:
             set -- $mapping
             case=$1
             engine=$2
-            env="$PWD/crates/kraken/tests/fixtures/$case.env"
-            reference="$PWD/target/reference/$case-$engine/$case"
-            tools/reference/run-kraken-case.sh "$engine" "$env"
-            KRAKEN_FREQUENCY_SOLVER="$engine" KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
-              cargo test --release -p kraken --test differential_reference \
-                multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
-            target/release/kraken run "$env" --solver "$engine" --output "$reference.h5"
-            KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_FREQUENCY_SOLVER="$engine" \
-            KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
-              cargo test --release -p kraken --test differential_reference \
-                multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+            tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
           done
       - name: Multi-profile adiabatic and coupled FIELD plus actual CLI HDF5
         run: |
@@ -157,17 +147,7 @@ jobs:
           for engine in kraken krakenc; do
             for case in WaterLossN WaterLossC WaterLossP WaterLossS WaterLossUnitN WaterLossUnitM WaterLossUnitF WaterLossUnitQ WaterLossUnitL WaterLossPower WaterLossThorp WaterLossFg WaterLossBio WaterLossLeaky; do
               if [ "$case" = WaterLossLeaky ] && [ "$engine" = kraken ]; then continue; fi
-              env="$PWD/crates/kraken/tests/fixtures/$case.env"
-              reference="$PWD/target/reference/$case-$engine/$case"
-              tools/reference/run-kraken-case.sh "$engine" "$env"
-              KRAKEN_FREQUENCY_SOLVER="$engine" KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
-                cargo test --release -p kraken --test differential_reference \
-                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
-              target/release/kraken run "$env" --solver "$engine" --output "$reference.h5"
-              KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_FREQUENCY_SOLVER="$engine" \
-              KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
-                cargo test --release -p kraken --test differential_reference \
-                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+              tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             done
           done
       - name: Smooth boundary and TRC modes, FIELD and actual CLI HDF5 differential
@@ -176,17 +156,7 @@ jobs:
           for engine in kraken krakenc; do
             for case in FluidBoundaryVV FluidBoundaryVR FluidBoundaryVA FluidBoundaryRV FluidBoundaryRR FluidBoundaryRA FluidBoundaryAV FluidBoundaryAR FluidBoundaryAA FluidRigidPlaneLoss FluidBoundaryAir FluidTrcN FluidTrcC FluidTrcRigid; do
               if [ "$engine" = kraken ] && { [ "$case" = FluidBoundaryAir ] || [[ "$case" == FluidTrc* ]]; }; then continue; fi
-              env="$PWD/crates/kraken/tests/fixtures/$case.env"
-              reference="$PWD/target/reference/$case-$engine/$case"
-              tools/reference/run-kraken-case.sh "$engine" "$env"
-              KRAKEN_FREQUENCY_SOLVER="$engine" KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
-                cargo test --release -p kraken --test differential_reference \
-                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
-              target/release/kraken run "$env" --solver "$engine" --output "$reference.h5"
-              KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_FREQUENCY_SOLVER="$engine" \
-              KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
-                cargo test --release -p kraken --test differential_reference \
-                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+              tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             done
           done
       - name: Layered fluid modes, FIELD and actual CLI HDF5 differential
@@ -195,17 +165,7 @@ jobs:
           for engine in kraken krakenc; do
             for case in LayeredFluidN LayeredFluidC LayeredFluidP LayeredFluidS LayeredBoundaryVV LayeredBoundaryVR LayeredBoundaryRV LayeredBoundaryRR LayeredBoundaryRA LayeredBoundaryAV LayeredBoundaryAR LayeredBoundaryAA LayeredFluidThree LayeredFluidThreeWide LayeredFluidPlane LayeredFluidPower LayeredFluidBio LayeredFluidLeaky LayeredDoubleRefined LayeredNormalization LayeredFluidFractional; do
               if [ "$case" = LayeredFluidLeaky ] && [ "$engine" = kraken ]; then continue; fi
-              env="$PWD/crates/kraken/tests/fixtures/$case.env"
-              reference="$PWD/target/reference/$case-$engine/$case"
-              tools/reference/run-kraken-case.sh "$engine" "$env"
-              KRAKEN_FREQUENCY_SOLVER="$engine" KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
-                cargo test --release -p kraken --test differential_reference \
-                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
-              target/release/kraken run "$env" --solver "$engine" --output "$reference.h5"
-              KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_FREQUENCY_SOLVER="$engine" \
-              KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
-                cargo test --release -p kraken --test differential_reference \
-                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+              tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             done
             # Fortran smoke is not Rust acceptance: retain the original coarse input as a failure.
             tools/reference/run-kraken-case.sh "$engine" crates/kraken/tests/fixtures/OriginalLayeredDouble.env
@@ -228,17 +188,7 @@ jobs:
           for engine in kraken krakenc; do
             for case in ElasticHalfBottomN ElasticHalfBottomC ElasticHalfBottomP ElasticHalfBottomS ElasticHalfTopN ElasticHalfTopC ElasticHalfTopP ElasticHalfTopS ElasticHalfBothN ElasticHalfBothC ElasticHalfBothP ElasticHalfBothS ElasticHalfLeaky ElasticHalfPower ElasticHalfShearOnly OriginalElasticScholte OriginalElasticNormal OriginalElasticFlused; do
               if [ "$engine" = kraken ] && { [[ "$case" == ElasticHalfTop* ]] || [[ "$case" == ElasticHalfBoth* ]] || [ "$case" = ElasticHalfLeaky ]; }; then continue; fi
-              env="$PWD/crates/kraken/tests/fixtures/$case.env"
-              reference="$PWD/target/reference/$case-$engine/$case"
-              tools/reference/run-kraken-case.sh "$engine" "$env"
-              KRAKEN_FREQUENCY_SOLVER="$engine" KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
-                cargo test --release -p kraken --test differential_reference \
-                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
-              target/release/kraken run "$env" --solver "$engine" --output "$reference.h5"
-              KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_FREQUENCY_SOLVER="$engine" \
-              KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
-                cargo test --release -p kraken --test differential_reference \
-                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+              tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             done
           done
           cargo test --release -p kraken-cli --test run \
@@ -259,17 +209,7 @@ jobs:
           for engine in kraken krakenc; do
             for case in FiniteElasticBothC FiniteElasticBothN FiniteElasticBothP FiniteElasticBothS FiniteElasticBottomC FiniteElasticBottomN FiniteElasticBottomP FiniteElasticBottomS FiniteElasticPower FiniteElasticRigid FiniteElasticShearOnly FiniteElasticStack FiniteElasticTopC FiniteElasticTopN FiniteElasticTopP FiniteElasticTopS FiniteElasticVacuum FiniteSingleIceC FiniteSingleIceP FiniteSingleIceS FiniteSingleSedimentC FiniteSingleSedimentP FiniteSingleSedimentS OriginalElasticIce OriginalElasticSediment; do
               if [ "$engine" = kraken ] && [[ "$case" == FiniteElastic* ]]; then continue; fi
-              env="$PWD/crates/kraken/tests/fixtures/$case.env"
-              reference="$PWD/target/reference/$case-$engine/$case"
-              tools/reference/run-kraken-case.sh "$engine" "$env"
-              KRAKEN_FREQUENCY_SOLVER="$engine" KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
-                cargo test --release -p kraken --test differential_reference \
-                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
-              target/release/kraken run "$env" --solver "$engine" --output "$reference.h5"
-              KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_FREQUENCY_SOLVER="$engine" \
-              KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
-                cargo test --release -p kraken --test differential_reference \
-                  multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+              tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             done
           done
           cargo test --release -p kraken-cli --test run \

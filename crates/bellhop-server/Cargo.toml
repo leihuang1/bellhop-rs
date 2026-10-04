@@ -11,7 +11,7 @@ name = "bellhop-server"
 path = "src/main.rs"
 
 [dependencies]
-axum = { version = "0.8", features = ["macros"] }
+axum = "0.8"
 bellhop = { path = "../bellhop" }
 bellhop-hdf5 = { path = "../bellhop-hdf5" }
 clap = { version = "4.5.41", features = ["derive", "env"] }

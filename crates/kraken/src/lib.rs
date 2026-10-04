@@ -21,6 +21,7 @@ mod modes;
 #[cfg(test)]
 mod pekeris;
 mod profile;
+mod refinement;
 mod reflection;
 mod solver;
 
@@ -373,51 +374,8 @@ impl Case {
         if definition.water_depth_m <= 0.0 {
             diagnostics.push(error("water_depth_m", "water depth must be positive"));
         }
-        let profile = &definition.sound_speed_profile;
+        let minimum_speed = layers::validate(&definition, &mut diagnostics);
         let analytic = definition.interpolation == Interpolation::AnalyticMunk;
-        let profile_invalid = if analytic {
-            !profile.is_empty()
-        } else {
-            !(2..=MAX_VECTOR_LENGTH).contains(&profile.len())
-                || profile.iter().any(|point| {
-                    !point.depth_m.is_finite()
-                        || !point.sound_speed_mps.is_finite()
-                        || point.sound_speed_mps <= 0.0
-                })
-                || profile
-                    .first()
-                    .is_none_or(|point| point.depth_m != definition.fluid_top_depth_m())
-                || profile
-                    .last()
-                    .is_none_or(|point| point.depth_m != definition.water_depth_m)
-                || profile
-                    .windows(2)
-                    .any(|pair| pair[1].depth_m <= pair[0].depth_m)
-        };
-        if profile_invalid {
-            diagnostics.push(error(
-                "sound_speed_profile",
-                if analytic {
-                    "analytic Munk profile has no point records"
-                } else {
-                    "require finite increasing depths from the first fluid top to its bottom and positive sound speeds"
-                },
-            ));
-        }
-        let water_loss = &definition.water_attenuation_db_per_wavelength;
-        let loss_invalid = !water_loss.is_empty()
-            && (analytic
-                || water_loss.len() != profile.len()
-                || water_loss
-                    .iter()
-                    .any(|&a| !(0.0..=8.685_889_6 * 2.0 * std::f64::consts::PI).contains(&a)));
-        if loss_invalid {
-            diagnostics.push(error(
-                "water_attenuation_db_per_wavelength",
-                "require one finite nonnegative loss per SSP node, Im(c) <= Re(c); analytic Munk remains lossless",
-            ));
-        }
-        layers::validate(&definition, &mut diagnostics);
         if analytic {
             if !definition.additional_fluid_layers.is_empty() {
                 diagnostics.push(error(
@@ -438,8 +396,8 @@ impl Case {
                 ));
             }
         }
-        if !profile_invalid && !loss_invalid {
-            match layers::minimum_speed(&definition) {
+        if let Some(minimum_speed) = minimum_speed {
+            match minimum_speed {
                 Ok(minimum_speed) => {
                     if definition.mode_solver == ModeSolver::Kraken
                         && definition.surface_boundary == SurfaceBoundary::FluidHalfSpace

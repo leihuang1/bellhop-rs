@@ -1039,8 +1039,8 @@ is only differential readback evidence, not a golden.
 
 ## Elastic half-spaces: original and derived acceptance
 
-Same unmodified source/compiler/flags. Eighteen input pairs (15 derived, three
-original) give 27 workflows, 33 frequency blocks, 415 modes and 4,707 pressures.
+Same unmodified source/compiler/flags. Nineteen input pairs (16 derived, three
+original) give 37 workflows, 49 frequency blocks, 473 modes and 5,715 pressures.
 Every .mod/.shd is byte-identical in three independent runs. Only trailing
 whitespace is stripped from .prt; timings remain. Direct API and actual CLI/HDF5
 compare every mode/pressure and elastic P/S material at unchanged numerical
@@ -1049,8 +1049,9 @@ tolerances; the local maximum pressure error is 6.67e-8. HDF5 is not a golden.
 | Inputs | Engines | Modes per frequency | Pressures per engine |
 |---|---|---|---:|
 | ElasticHalfBottomN/C/P/S | both, each input | 5 | 63 |
-| ElasticHalfTopN/C/P/S | KRAKENC, each input | 6 | 63 |
-| ElasticHalfBothN/C/P/S | KRAKENC, each input | 5 | 63 |
+| ElasticHalfTopN/C/P/S | KRAKEN / KRAKENC | 4 / 6 | 63 |
+| ElasticHalfBothN/C/P/S | KRAKEN / KRAKENC | 3 / 5 | 63 |
+| ElasticHalfTopBroadband (50/25/37.5/25 Hz) | KRAKEN / KRAKENC | 4/3/3/3 / 6/3/5/3 | 252 |
 | ElasticHalfLeaky | KRAKENC | 5 | 63 |
 | ElasticHalfPower (75/50/62.5/50 Hz) | both | 7/5/6/5 | 252 |
 | ElasticHalfShearOnly (line source) | both | 5 | 63 |
@@ -1063,6 +1064,14 @@ inputs/FLP, changing title and A bottom to cp=4000, cs=2000, rho=2, W P/S loss=.
 ElasticHalfTopN/C/P/S retain the original acoustic bottom and add an A top with
 cp=4500, cs=2300, rho=1.1, W P/S loss=.3/.5; Both applies both elastic changes.
 All finite media remain fluid; cLow/cHigh=1400/1800 and RMax=1000 km are unchanged.
+ElasticHalfTopBroadband derives from TopC by adding B and the ordered
+50/25/37.5/25 Hz vector; its materials, nominal NG and FLP remain unchanged.
+This is a derived representative, not an upstream original. Real top/both use
+shared isolation/Brent then non-deflated Solve2. The solver selects M from the
+previous Richardson row with native MINLOC semantics, not reference counts.
+Top-A compressional loss remains active in real Normalize; shear loss does not.
+Some MOD files retain bounded stale first-mesh records after declared M shrinks;
+all declared modes, k, shapes and pressures still compare strictly.
 ElasticHalfLeaky uses N, cp=3000/cs=1000 at the bottom with the same losses and
 all other parameters unchanged (radiating shear; KRAKENC only).
 ElasticHalfPower derives from BottomP: W is encoded as m at nominal 50 Hz using
@@ -1086,12 +1095,13 @@ Fresh CI compares their bytes to the installed pinned sources before running.
 17365befbd165b21fa3b89d80d7805dd5a51f240af491c8dd30bf27a7a399f2d  tests/TLslices/fieldbat.flp
 ```
 
-All 117 records (36 inputs + 81 artifacts) are in
+All 149 records (38 inputs + 111 artifacts) are in
 [`elastic-halfspace.sha256`](elastic-halfspace.sha256), paths relative to the
 fixture directory; verify with `shasum -a 256 -c golden/elastic-halfspace.sha256`.
-No earlier golden or tolerance was changed. KRAKEN elastic top is explicitly
-rejected; finite solids are outside this half-space checkpoint and failed
-constructed slow-interface probes are **not** accepted. Original elsed/ice now
+No earlier golden or tolerance was changed. The ten added workflows (58 modes,
+1,008 pressures) have maximum |dp|=1.877140660839749e-9. WRITE-only Fortran tracing
+kept MOD/SHD byte controls. Finite solids are outside this half-space checkpoint;
+failed slow-interface and 75 Hz top/both broadband probes are **not** accepted. Original elsed/ice now
 pass the separate finite-cap checkpoint below. The existing layered exception
 does not waive any elastic failure. See the [half-space checkpoint](../../../../../docs/kraken-elastic-halfspaces.md).
 

@@ -67,14 +67,23 @@ fn elastic_materials_are_validated_at_the_case_boundary() {
 #[test]
 fn elastic_top_and_unvalidated_combinations_are_explicit() {
     let source = include_str!("fixtures/ElasticHalfTopN.env");
-    assert!(cases(source, ModeSolver::Krakenc).is_ok());
-    let report = cases(source, ModeSolver::Kraken).unwrap_err();
-    assert!(report.to_string().contains("elastic top requires KRAKENC"));
+    for solver in [ModeSolver::Kraken, ModeSolver::Krakenc] {
+        assert!(cases(source, solver).is_ok());
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/FiniteElasticTopN");
+    let mut finite = legacy::load_case(root.with_extension("env"), root.with_extension("flp"))
+        .unwrap()
+        .into_definition();
+    finite.surface_boundary = Boundary::ElasticHalfSpace {
+        shear_sound_speed_mps: 2300.0,
+        shear_attenuation_db_per_wavelength: 0.5,
+    };
+    finite.surface_sound_speed_mps = 4500.0;
     assert!(
-        report
-            .diagnostics()
-            .iter()
-            .any(|d| d.field == "surface_boundary" && d.line == 5)
+        Case::from_definition(finite)
+            .unwrap_err()
+            .to_string()
+            .contains("elastic top half-space with finite solids")
     );
     let mut input = cases(source, ModeSolver::Krakenc)
         .unwrap()
@@ -86,6 +95,104 @@ fn elastic_top_and_unvalidated_combinations_are_explicit() {
             .unwrap_err()
             .to_string()
             .contains("smooth V/R/A")
+    );
+}
+
+#[test]
+fn real_elastic_top_and_both_boundaries_keep_complete_pinned_spectra() {
+    for (name, count) in [
+        ("ElasticHalfTopN", 4),
+        ("ElasticHalfTopC", 4),
+        ("ElasticHalfTopP", 4),
+        ("ElasticHalfTopS", 4),
+        ("ElasticHalfBothN", 3),
+        ("ElasticHalfBothC", 3),
+        ("ElasticHalfBothP", 3),
+        ("ElasticHalfBothS", 3),
+    ] {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name);
+        let case =
+            legacy::load_case(root.with_extension("env"), root.with_extension("flp")).unwrap();
+        let result = solve(&case).unwrap();
+        assert_eq!(result.modes.modes.len(), count, "{name}");
+        assert_eq!(result.field.pressure.len(), 63);
+    }
+}
+
+#[test]
+fn elastic_top_frequency_runs_preserve_order_duplicates_and_reset() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ElasticHalfTopBroadband");
+    for (solver, counts) in [
+        (ModeSolver::Kraken, [4, 3, 3, 3]),
+        (ModeSolver::Krakenc, [6, 3, 5, 3]),
+    ] {
+        let cases = legacy::load_field_cases(
+            root.with_extension("env"),
+            root.with_extension("flp"),
+            solver,
+        )
+        .unwrap();
+        assert_eq!(
+            cases
+                .iter()
+                .map(|case| case.profiles()[0].frequency_hz)
+                .collect::<Vec<_>>(),
+            [50.0, 25.0, 37.5, 25.0]
+        );
+        let results = kraken::solve_frequencies(&cases)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| result.modes[0].modes.len())
+                .collect::<Vec<_>>(),
+            counts
+        );
+        assert_eq!(results[1], results[3]);
+        assert_eq!(
+            kraken::solve_frequencies(&cases)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            results
+        );
+    }
+}
+
+#[test]
+fn real_elastic_top_keeps_pinned_compressional_but_not_shear_loss() {
+    let case = cases(
+        include_str!("fixtures/ElasticHalfTopN.env"),
+        ModeSolver::Kraken,
+    )
+    .unwrap()
+    .remove(0);
+    let expected = solve(&case).unwrap();
+    let mut input = case.into_definition();
+    let Boundary::ElasticHalfSpace {
+        shear_attenuation_db_per_wavelength,
+        ..
+    } = &mut input.surface_boundary
+    else {
+        unreachable!()
+    };
+    *shear_attenuation_db_per_wavelength = 0.0;
+    assert_eq!(
+        solve(&Case::from_definition(input.clone()).unwrap()).unwrap(),
+        expected
+    );
+    input.surface_attenuation_db_per_wavelength = 0.0;
+    let without_loss = solve(&Case::from_definition(input).unwrap()).unwrap();
+    assert_eq!(without_loss.modes.modes.len(), expected.modes.modes.len());
+    assert!(
+        without_loss
+            .modes
+            .modes
+            .iter()
+            .zip(&expected.modes.modes)
+            .any(|(a, b)| (a.attenuation_nepers_per_m - b.attenuation_nepers_per_m).abs() > 1e-8)
     );
 }
 

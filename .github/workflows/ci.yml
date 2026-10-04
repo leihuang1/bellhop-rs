@@ -186,8 +186,8 @@ jobs:
           done
           cargo build --release -p kraken-cli
           for engine in kraken krakenc; do
-            for case in ElasticHalfBottomN ElasticHalfBottomC ElasticHalfBottomP ElasticHalfBottomS ElasticHalfTopN ElasticHalfTopC ElasticHalfTopP ElasticHalfTopS ElasticHalfBothN ElasticHalfBothC ElasticHalfBothP ElasticHalfBothS ElasticHalfLeaky ElasticHalfPower ElasticHalfShearOnly OriginalElasticScholte OriginalElasticNormal OriginalElasticFlused; do
-              if [ "$engine" = kraken ] && { [[ "$case" == ElasticHalfTop* ]] || [[ "$case" == ElasticHalfBoth* ]] || [ "$case" = ElasticHalfLeaky ]; }; then continue; fi
+            for case in ElasticHalfBottomN ElasticHalfBottomC ElasticHalfBottomP ElasticHalfBottomS ElasticHalfTopN ElasticHalfTopC ElasticHalfTopP ElasticHalfTopS ElasticHalfBothN ElasticHalfBothC ElasticHalfBothP ElasticHalfBothS ElasticHalfLeaky ElasticHalfTopBroadband ElasticHalfPower ElasticHalfShearOnly OriginalElasticScholte OriginalElasticNormal OriginalElasticFlused; do
+              if [ "$engine" = kraken ] && [ "$case" = ElasticHalfLeaky ]; then continue; fi
               tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             done
           done
@@ -318,6 +318,9 @@ jobs:
             'FiniteElasticTopN kraken crates/kraken/tests/fixtures/FiniteElasticTopN.env target/reference/FiniteElasticTopN-kraken/FiniteElasticTopN' \
             'FiniteElasticShearOnly kraken crates/kraken/tests/fixtures/FiniteElasticShearOnly.env target/reference/FiniteElasticShearOnly-kraken/FiniteElasticShearOnly' \
             'FiniteElasticPower kraken crates/kraken/tests/fixtures/FiniteElasticPower.env target/reference/FiniteElasticPower-kraken/FiniteElasticPower' \
+            'ElasticHalfTopN kraken crates/kraken/tests/fixtures/ElasticHalfTopN.env target/reference/ElasticHalfTopN-kraken/ElasticHalfTopN' \
+            'ElasticHalfBothS kraken crates/kraken/tests/fixtures/ElasticHalfBothS.env target/reference/ElasticHalfBothS-kraken/ElasticHalfBothS' \
+            'ElasticHalfTopBroadband kraken crates/kraken/tests/fixtures/ElasticHalfTopBroadband.env target/reference/ElasticHalfTopBroadband-kraken/ElasticHalfTopBroadband' \
             'TabRefBrc krakenc target/reference/TabRefCoef/run1/neggradC_brc.env target/reference/TabRefCoef/run1/neggradC_brc' \
             'TabRefIrc krakenc target/reference/TabRefCoef/run1/neggradC_irc.env target/reference/TabRefCoef/run1/neggradC_irc' \
             'BroadBandMunk kraken target/reference/cases/BroadBand/MunkK.env target/reference/BroadBand-MunkK-kraken/MunkK' \

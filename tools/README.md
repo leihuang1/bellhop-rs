@@ -159,7 +159,7 @@ KRAKEN_JSON_ENV="$env" KRAKEN_JSON_REFERENCE_ROOT="$reference" \
     json_fields_match_fresh_reference -- --ignored --exact --nocapture
 ```
 
-CI repeats this for ten fixed existing routes, including original BRC/IRC,
+CI repeats this for sixteen representative routes, including original BRC/IRC,
 BroadBand/MunkK and both Gulf paths. JSON/HDF5 are not Fortran goldens; the
 numerical tolerances and source provenance remain unchanged.
 
@@ -328,16 +328,16 @@ Analytic Munk and F/P/TRC remain single-layer. The test-only `.mod` reader walks
 all finite fluid media and has a last-medium corruption regression.
 
 Elastic half-spaces use the same full comparator and actual-CLI-HDF5 commands
-(for example, `case=ElasticHalfPower`). Eighteen pairs give 27 workflows:
-15 derived inputs plus original TLslices scholte/normal/flused with the official
+(for example, `case=ElasticHalfTopBroadband`). Nineteen pairs give 37 workflows:
+16 derived inputs plus original TLslices scholte/normal/flused with the official
 shared fieldbat.flp. CI verifies those originals against the installed fixed
 source, then compares every mode/pressure and elastic P/S material record.
 The HDF5 reader checks solve-frequency shear-loss and attenuation-model metadata.
-KRAKENC accepts top/bottom elasticity; KRAKEN accepts bottom only and retains
-pinned real elastic-loss omission. KRAKEN elastic top is an explicit validation
-failure, not a skipped passing workflow. Finite solid layers remain excluded.
+Both engines accept top/bottom elasticity. Real tops retain shared isolation,
+Brent and non-deflated Solve2, with top-A compressional but not shear/bottom
+elastic absorption. Finite solid layers remain outside this half-space block.
 See [scope/provenance](../docs/kraken-elastic-halfspaces.md) and
-`golden/elastic-halfspace.sha256` (117 input/artifact records).
+`golden/elastic-halfspace.sha256` (149 input/artifact records).
 
 Homogeneous finite caps additionally use 25 pairs / 50 full workflows / 56
 frequency blocks (933 modes, 10,536 pressures), including byte-identical original

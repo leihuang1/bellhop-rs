@@ -38,10 +38,12 @@ separate Implementations.
 - mesh multipliers remain 1, 2, 4, 8, 16;
 - raw root history is separate from the Richardson table, and includes
   cLow-excluded roots used for KRAKENC deflation;
-- mesh two still uses the original scan; Neville seeds start on mesh three;
+- finite-solid mesh two still uses the original scan; Neville seeds start on
+  mesh three. Real elastic tops first use Solve1's shared intervals and ZBRENTX,
+  then non-deflated Solve2; `selected_count` retains MINLOC's prior-row semantics;
 - first-mesh shapes/group speeds are retained; ordinary fluid and KRAKENC
-  mode-count changes are rejected, while real finite solids retain surviving
-  first-mesh data when Solve2 reduces its search bound;
+  mode-count changes are rejected, while real finite solids and elastic tops
+  retain surviving first-mesh data when Solve2/MINLOC reduces the search bound;
 - KRAKEN extrapolates real k² and retains first-mesh loss; KRAKENC extrapolates
   complex k². Standard arithmetic bounds share bookkeeping, not a new numerical
   trait or plugin Interface.

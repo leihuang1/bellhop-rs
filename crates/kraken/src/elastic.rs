@@ -1,7 +1,7 @@
 // Adapted from Acoustics Toolbox v2023.5 Kraken/BCImpedanceMod.f90 and
 // BCImpedancecMod.f90, Copyright (C) 2009 Michael B. Porter.
 // GPL-3.0-or-later; see LICENSE.
-//! Elastic half-space impedance. Finite solid layers are not implemented here yet.
+//! Elastic half-space impedance and finite homogeneous solid-cap transfer.
 use crate::{Boundary, CaseDefinition, DiagnosticReport, Interpolation, ModeSolver, error};
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -9,11 +9,12 @@ use std::f64::consts::PI;
 #[allow(clippy::too_many_lines)]
 pub(crate) fn validate(case: &CaseDefinition, diagnostics: &mut DiagnosticReport) {
     if case.mode_solver == ModeSolver::Kraken
+        && has_layers(case)
         && matches!(case.surface_boundary, Boundary::ElasticHalfSpace { .. })
     {
         diagnostics.push(error(
             "surface_boundary",
-            "elastic top requires KRAKENC; KRAKEN top-elastic mode counting is not validated",
+            "KRAKEN elastic top half-space with finite solids is not validated",
         ));
     }
     for (boundary, cp, field) in [

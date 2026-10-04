@@ -1,5 +1,5 @@
-// Adapted from Acoustics Toolbox v2023.5 Kraken/kraken.f90 and
-// Kraken/InverseIterationMod.f90, Copyright (C) 2009 Michael B. Porter.
+// Adapted from Acoustics Toolbox v2023.5 Kraken/kraken.f90,
+// RootFinderBrent.f90 and InverseIterationMod.f90, Copyright (C) 2009 Michael B. Porter.
 // GPL-3.0-or-later; see LICENSE. Distributed without warranty.
 //!
 //! Real, layered-fluid finite-difference path from KRAKEN v2023.5.
@@ -49,6 +49,11 @@ pub(super) fn solve(case: &Case, mut root_limit: usize) -> Result<ModeSet, Diagn
             "mesh_points",
         ));
     }
+    let elastic_top = matches!(
+        case.surface_boundary,
+        SurfaceBoundary::ElasticHalfSpace { .. }
+    );
+    let elastic_search = crate::elastic::has_layers(case) || elastic_top;
     let mut refinement = crate::refinement::Refinement::<f64>::default();
     let mut work = 0_usize;
     for multiplier in crate::refinement::MULTIPLIERS {
@@ -56,14 +61,19 @@ pub(super) fn solve(case: &Case, mut root_limit: usize) -> Result<ModeSet, Diagn
         let mut mesh = Mesh::new(case, &profiles, layers, omega, bottom_k2, bottom_complex_k2)?;
         mesh.top_solids = crate::elastic::SolidMesh::build(case, multiplier, true, true)?;
         mesh.bottom_solids = crate::elastic::SolidMesh::build(case, multiplier, false, true)?;
-        let roots = if crate::elastic::has_layers(case) {
-            let roots = mesh.solid_roots(&refinement, root_limit, &mut work)?;
-            root_limit = roots.len();
-            roots
+        let mut roots = if crate::elastic::has_layers(case) || (elastic_top && multiplier > 2) {
+            mesh.solid_roots(&refinement, root_limit, &mut work)?
         } else {
             mesh.roots(&mut work)?
         };
-        let seed_h = crate::elastic::has_layers(case).then(|| {
+        if elastic_top && !crate::elastic::has_layers(case) {
+            let low = omega * omega / crate::elastic::maximum_speed(case).powi(2);
+            roots.truncate(refinement.selected_count(&roots, low)?);
+        }
+        if elastic_search {
+            root_limit = roots.len();
+        }
+        let seed_h = elastic_search.then(|| {
             mesh.top_solids
                 .first()
                 .map_or(mesh.h, crate::elastic::SolidMesh::spacing)
@@ -213,11 +223,15 @@ impl<'a> Mesh<'a> {
     }
 
     fn surface_admittance(&self, x: f64) -> f64 {
-        if !self.top_solids.is_empty() {
+        if !self.top_solids.is_empty()
+            || matches!(
+                self.case.surface_boundary,
+                SurfaceBoundary::ElasticHalfSpace { .. }
+            )
+        {
             let (f, g, _) = self.solid_boundary(x, true);
-            return -(f / g).re;
-        }
-        if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+            -(f / g).re
+        } else if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
             self.surface_gamma(x).re / self.case.surface_density_g_cm3
         } else {
             0.0
@@ -412,7 +426,14 @@ impl<'a> Mesh<'a> {
                         "mesh_points",
                     ));
                 }
-                let value = self.solid_dispersion(x, &roots);
+                let value = self.solid_dispersion(
+                    x,
+                    if crate::elastic::has_layers(self.case) {
+                        &roots
+                    } else {
+                        &[]
+                    },
+                );
                 if !value.0.is_finite() {
                     return Err(error(
                         "KR0303",
@@ -458,9 +479,11 @@ impl<'a> Mesh<'a> {
             if x < low {
                 break;
             }
-            if roots.iter().any(|&r: &f64| {
-                (r - x).abs() < x.abs().max(r.abs()) * (self.b1.len() + points) as f64 * 1e-14
-            }) {
+            if crate::elastic::has_layers(self.case)
+                && roots.iter().any(|&r: &f64| {
+                    (r - x).abs() < x.abs().max(r.abs()) * (self.b1.len() + points) as f64 * 1e-14
+                })
+            {
                 return Err(error(
                     "KR0303",
                     "elastic real root search repeated a mode",
@@ -648,8 +671,20 @@ impl<'a> Mesh<'a> {
         } else {
             self.min_speed
         };
-        let low = 1.00001 * (self.omega / c_high).powi(2);
-        let mut high = (self.omega / self.case.c_low_mps.max(minimum)).powi(2);
+        let elastic_top = matches!(
+            self.case.surface_boundary,
+            SurfaceBoundary::ElasticHalfSpace { .. }
+        );
+        let low = if elastic_top {
+            1.00001 * (self.omega * self.omega) / c_high.powi(2)
+        } else {
+            1.00001 * (self.omega / c_high).powi(2)
+        };
+        let mut high = if elastic_top {
+            self.omega * self.omega / self.case.c_low_mps.max(minimum).powi(2)
+        } else {
+            (self.omega / self.case.c_low_mps.max(minimum)).powi(2)
+        };
         if self.case.surface_boundary == SurfaceBoundary::Rigid
             && self.case.bottom_boundary == BottomBoundary::Rigid
             && self.case.c_low_mps <= self.min_speed
@@ -700,6 +735,9 @@ impl<'a> Mesh<'a> {
                 "mode_sample_depths_m",
             ));
         }
+        if elastic_top {
+            return self.bracketed_roots(low, high, above, count, work);
+        }
         *work = count
             .checked_mul(self.b1.len())
             .and_then(|n| n.checked_mul(ROOT_STEPS + 5))
@@ -722,6 +760,96 @@ impl<'a> Mesh<'a> {
                 }
             }
             roots.push(left.midpoint(right));
+        }
+        Ok(roots)
+    }
+
+    // Solve1 shares isolating intervals, then refines signed dispersion with
+    // ZBRENTX. Independent inertia bisections can converge to an impedance pole.
+    #[allow(clippy::float_cmp)]
+    fn bracketed_roots(
+        &self,
+        low: f64,
+        high: f64,
+        above: usize,
+        count: usize,
+        work: &mut usize,
+    ) -> Result<Vec<f64>, DiagnosticReport> {
+        let mut charge = || {
+            *work += self.b1.len();
+            if *work > MAX_WORK {
+                Err(error(
+                    "KR0302",
+                    "modal mesh-work limit exceeded",
+                    "mesh_points",
+                ))
+            } else {
+                Ok(())
+            }
+        };
+        let mut left = vec![low; count + 1];
+        let mut right = vec![high; count + 1];
+        for mode in 0..count - 1 {
+            if left[mode] != low {
+                continue;
+            }
+            let mut x2 = right[mode];
+            let mut x1 = left[mode + 1..count].iter().copied().fold(low, f64::max);
+            for _ in 0..50 {
+                let x = x1 + (x2 - x1) / 2.0;
+                charge()?;
+                let zeros = self
+                    .count(x)
+                    .checked_sub(above)
+                    .filter(|&n| n <= count)
+                    .ok_or_else(|| {
+                        error(
+                            "KR0303",
+                            "elastic isolation count escaped its interval",
+                            "phase_speed_limits",
+                        )
+                    })?;
+                if zeros < mode + 1 {
+                    x2 = x;
+                    right[mode] = x;
+                } else {
+                    x1 = x;
+                    if right[zeros] >= x {
+                        right[zeros] = x;
+                    }
+                    if left[zeros - 1] <= x {
+                        left[zeros - 1] = x;
+                    }
+                }
+                if left[mode] != low {
+                    break;
+                }
+            }
+        }
+        let mut roots = Vec::with_capacity(count);
+        for (&a, &b) in left[..count].iter().zip(&right[..count]) {
+            let result = brent(a, b, b.abs() * 1e-13, |x| {
+                charge()?;
+                let value = self.solid_dispersion(x, &[]);
+                if value.0.is_finite() {
+                    Ok(value)
+                } else {
+                    Err(error(
+                        "KR0303",
+                        "non-finite elastic dispersion",
+                        "surface_boundary",
+                    ))
+                }
+            })?;
+            // ZBRENTX warns and leaves Solve1's last x untouched on a same-sign
+            // interval. Retain that raw history; Solve's MINLOC selects M.
+            roots.push(result.or_else(|| roots.last().copied()).ok_or_else(|| {
+                error(
+                    "KR0303",
+                    "elastic isolation did not bracket the first mode",
+                    "phase_speed_limits",
+                )
+            })?);
         }
         Ok(roots)
     }
@@ -784,19 +912,26 @@ impl<'a> Mesh<'a> {
                     / (self.omega * self.omega * layer.h * layer.h);
             }
         }
-        if !self.top_solids.is_empty() {
+        if !self.top_solids.is_empty()
+            || matches!(
+                self.case.surface_boundary,
+                SurfaceBoundary::ElasticHalfSpace { .. }
+            )
+        {
             let x1 = 0.999_999_9 * x;
             let x2 = 1.000_000_1 * x;
             norm += (self.surface_admittance(x2) - self.surface_admittance(x1)) / (x2 - x1)
                 * phi[0].powi(2);
         }
-        if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+        if self.case.surface_boundary.is_half_space() {
             let gamma = (x - self.surface_complex_k2.re).sqrt();
-            let x1 = 0.999_999_9 * x;
-            let x2 = 1.000_000_1 * x;
-            let derivative = (self.surface_gamma(x2).re - self.surface_gamma(x1).re)
-                / (self.case.surface_density_g_cm3 * (x2 - x1));
-            norm += derivative * phi[0].powi(2);
+            if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+                let x1 = 0.999_999_9 * x;
+                let x2 = 1.000_000_1 * x;
+                let derivative = (self.surface_gamma(x2).re - self.surface_gamma(x1).re)
+                    / (self.case.surface_density_g_cm3 * (x2 - x1));
+                norm += derivative * phi[0].powi(2);
+            }
             slow += phi[0].powi(2)
                 / (2.0
                     * gamma
@@ -865,7 +1000,7 @@ impl<'a> Mesh<'a> {
         // BCImpedance returns the real admittance for mode finding and the
         // complex admittance for first-order attenuation (Normalize in kraken.f90).
         // Pinned top-half-space perturbation takes a default-kind CMPLX/SQRT.
-        let top_loss = if self.case.surface_boundary == SurfaceBoundary::FluidHalfSpace {
+        let top_loss = if self.case.surface_boundary.is_half_space() {
             let z = Complex64::new(x, 0.0) - self.surface_complex_k2;
             -f64::from(
                 num_complex::Complex32::new(z.re as f32, z.im as f32)
@@ -891,6 +1026,101 @@ impl<'a> Mesh<'a> {
             attenuation_nepers_per_m: -k.im,
             eigenfunction,
         })
+    }
+}
+
+// RootFinderBrent.f90::ZBRENTX, including sequential assignments and its
+// extended decimal exponent arithmetic. None is the pinned same-sign warning.
+#[allow(clippy::float_cmp, clippy::many_single_char_names)]
+fn brent(
+    mut a: f64,
+    mut b: f64,
+    tolerance: f64,
+    mut evaluate: impl FnMut(f64) -> Result<(f64, i32), DiagnosticReport>,
+) -> Result<Option<f64>, DiagnosticReport> {
+    let (mut fa, mut pa) = evaluate(a)?;
+    let (mut fb, mut pb) = evaluate(b)?;
+    if (fa > 0.0 && fb > 0.0) || (fa < 0.0 && fb < 0.0) {
+        return Ok(None);
+    }
+    let (mut c, mut fc, mut pc, mut d, mut e) = (a, fa, pa, 0.0, 0.0);
+    let (mut f1, mut f2) = (0.0_f64, 0.0_f64);
+    let mut reset = true;
+    loop {
+        if reset {
+            c = a;
+            fc = fa;
+            pc = pa;
+            e = b - a;
+            d = e;
+            (f1, f2) = if pa < pb {
+                (fc * 10_f64.powi(pc - pb), fb)
+            } else {
+                (fc, fb * 10_f64.powi(pb - pc))
+            };
+        }
+        if f1.abs() < f2.abs() {
+            a = b;
+            b = c;
+            c = a;
+            fa = fb;
+            pa = pb;
+            fb = fc;
+            pb = pc;
+            fc = fa;
+            pc = pa;
+        }
+        let tol = 2.0 * f64::from(1e-16_f32) * b.abs() + tolerance;
+        let m = 0.5 * (c - b);
+        if m.abs() <= tol || fb == 0.0 {
+            return Ok(Some(b));
+        }
+        (f1, f2) = if pa < pb {
+            (fa * 10_f64.powi(pa - pb), fb)
+        } else {
+            (fa, fb * 10_f64.powi(pb - pa))
+        };
+        if e.abs() < tol || f1.abs() <= f2.abs() {
+            e = m;
+            d = e;
+        } else {
+            let mut s = fb / fa * 10_f64.powi(pb - pa);
+            let (mut p, mut q) = if a == c {
+                (2.0 * m * s, 1.0 - s)
+            } else {
+                let q = fa / fc * 10_f64.powi(pa - pc);
+                let r = fb / fc * 10_f64.powi(pb - pc);
+                (
+                    s * (2.0 * m * q * (q - r) - (b - a) * (r - 1.0)),
+                    (q - 1.0) * (r - 1.0) * (s - 1.0),
+                )
+            };
+            if p > 0.0 {
+                q = -q;
+            } else {
+                p = -p;
+            }
+            s = e;
+            e = d;
+            if 2.0 * p < 3.0 * m * q - (tol * q).abs() && p < (0.5 * s * q).abs() {
+                d = p / q;
+            } else {
+                e = m;
+                d = e;
+            }
+        }
+        a = b;
+        fa = fb;
+        pa = pb;
+        b += if d.abs() > tol {
+            d
+        } else if m > 0.0 {
+            tol
+        } else {
+            -tol
+        };
+        (fb, pb) = evaluate(b)?;
+        reset = (fb > 0.0) == (fc > 0.0);
     }
 }
 
@@ -965,9 +1195,37 @@ fn inverse_iteration(d: &[f64], e: &[f64]) -> Result<Vec<f64>, DiagnosticReport>
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_MODE_LIMIT, solve};
+    use super::{MAX_MODE_LIMIT, MAX_WORK, Mesh, brent, solve};
     use crate::{Case, Interpolation, legacy::load_case, pekeris, profile::Profile};
     use std::path::Path;
+
+    #[test]
+    fn scaled_brent_and_elastic_isolation_remain_bounded() {
+        let evaluate = |x: f64| {
+            let power = if x < 1.4 { -80 } else { 80 };
+            Ok(((x * x - 2.0) * 10_f64.powi(-power), power))
+        };
+        let root = brent(1.0, 2.0, 1e-13, evaluate).unwrap().unwrap();
+        assert!((root - 2.0_f64.sqrt()).abs() < 1e-12);
+        assert_eq!(brent(2.0, 3.0, 1e-13, evaluate).unwrap(), None);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ElasticHalfTopN");
+        let case = load_case(root.with_extension("env"), root.with_extension("flp")).unwrap();
+        let profiles = crate::layers::iter(&case)
+            .map(|layer| Profile::new_layer(&case, layer).unwrap())
+            .collect::<Vec<_>>();
+        let mesh = Mesh::new(
+            &case,
+            &profiles,
+            crate::layers::mesh_layers(&case, 1).unwrap(),
+            2.0 * std::f64::consts::PI * case.frequency_hz,
+            0.0,
+            0.0.into(),
+        )
+        .unwrap();
+        let mut work = MAX_WORK;
+        let report = mesh.roots(&mut work).unwrap_err();
+        assert_eq!(report.diagnostics()[0].code, "KR0302");
+    }
 
     #[test]
     fn interpolation_and_mesh_work_limit() {

@@ -8,7 +8,8 @@ homogeneous solid caps above/below a contiguous N/C/P/S fluid stack:
   P/S attenuation. Outer solid boundary must be V, R or elastic A.
 - **KRAKEN:** multiple contiguous fluid layers and homogeneous solid caps,
   retaining pinned real stiffness and elastic-loss omission. Elastic top
-  half-spaces remain unsupported; the existing bottom-half-space scope is unchanged.
+  half-spaces combined with finite solids remain unvalidated; fluid-only tops
+  pass the separate half-space block.
 - Finite cp/cs/density/loss are constant within each solid; jumps between solids
   are allowed, with full compound state carried across each interface. Roughness,
   graded solids, solids interleaved with fluids, pure-solid cases, analytic Munk,
@@ -106,7 +107,7 @@ no altered seed, tolerance, numerical reference or solver budget is accepted.
 The TopN, ShearOnly and ordered Power cases also pass self-contained JSON API
 and actual JSON CLI/HDF5 comparison against the same references.
 
-Graded/interleaved solids, real elastic top-half-spaces and the other excluded
+Graded/interleaved solids, real elastic-top/finite-solid combinations and the other excluded
 combinations above remain outside this checkpoint. The existing KRAKENC
 three-layer refinement gap is unchanged; no new parity waiver is added.
 Separate [multi-profile FIELD](kraken-multi-profile-field.md) and

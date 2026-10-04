@@ -39,10 +39,11 @@ builds it using the existing static HDF5 dependency.
   previous output, even after 50 Hz was written to scratch. KRAKEN acceptance
   of the same pair is unchanged.
 - N/C/P/S fluid stacks also support [elastic A half-spaces](kraken-elastic-halfspaces.md):
-  bottom through both engines, top through KRAKENC only. KRAKEN elastic top is
-  rejected (exit 2); elastic/table/analytic combinations remain unsupported. KRAKEN retains the reference's cs cutoff and **omitted elastic
-  material attenuation**; use KRAKENC for elastic attenuation. Requested P/S loss
-  and the real/complex model are recorded separately in additive HDF5 metadata.
+  top/bottom through both engines. Elastic/table/analytic combinations remain
+  unsupported. KRAKEN retains the reference's cs cutoff, top-A compressional
+  perturbation and omitted elastic shear/bottom absorption; use KRAKENC for full
+  elastic loss. Requested P/S loss and the real/complex model are recorded
+  separately in additive HDF5 metadata.
 - [Finite homogeneous solid caps](kraken-finite-elastic-layers.md) are supported
   above/below contiguous N/C/P/S fluid stacks through both engines. Original
   elsed/ice pass both engines; graded/interleaved solids remain excluded.
@@ -192,8 +193,9 @@ with prefix `surface_` or `bottom_`:
 - `sound_speed_mps`, `shear_sound_speed_mps`, `density_g_cm3`: float64 material;
 - `attenuation_db_per_wavelength`, `shear_attenuation_db_per_wavelength`: float64
   requested losses converted for this solve frequency, not inferred mode losses;
-- `elastic_attenuation_model`: UTF-8 `reference_real` (KRAKEN's ignored elastic
-  material attenuation) or `complex` (KRAKENC).
+- `elastic_attenuation_model`: UTF-8 `reference_real` (KRAKEN's real impedance,
+  top-A compressional perturbation and omitted elastic shear/bottom absorption)
+  or `complex` (KRAKENC).
 
 These additive v1 attributes do not change datasets, schema identity or BELLHOP
 v3. Older v1 files and nonelastic boundaries may omit them. They are material

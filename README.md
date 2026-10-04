@@ -74,17 +74,17 @@ A [known wide three-layer KRAKENC refinement gap](docs/kraken-layered-refinement
 remains outside acceptance as a non-blocking release exception: Rust can return
 five modes where the pinned reference returns four. CLI success is not a guarantee
 of arbitrary-input reference parity; the extra mode may affect coherent FIELD.
-[Elastic half-spaces](docs/kraken-elastic-halfspaces.md) now cover KRAKENC top/bottom
-and KRAKEN bottom A boundaries: 27 full API/CLI-HDF5 workflows, including original
-TLslices `scholte/normal/flused` (415 modes, 4,707 pressures). KRAKEN elastic top
-is explicitly rejected; KRAKEN retains the reference's elastic-loss omission,
-so use KRAKENC for elastic attenuation.
+[Elastic half-spaces](docs/kraken-elastic-halfspaces.md) cover top/bottom A boundaries
+through both engines: 37 full API/CLI-HDF5 workflows, including original TLslices
+`scholte/normal/flused` (473 modes, 5,715 pressures). Real tops retain pinned
+shared isolation/Brent/Solve2 and normalization: top compressional loss acts,
+while elastic shear/bottom absorption is omitted. Use KRAKENC for full elastic loss.
 [Homogeneous finite elastic caps](docs/kraken-finite-elastic-layers.md) now pass
 50 full API/CLI-HDF5 workflows, including original `elsed/ice` (933 modes,
 10,536 pressures). Both engines support contiguous fluid stacks; KRAKEN retains
 its reference real-stiffness/loss limitation. `solve_frequencies` preserves
 ordered finite-elastic search state across a run.
-Graded/interleaved solids and KRAKEN elastic top-half-space remain later work.
+Graded/interleaved solids and real elastic-top/finite-solid combinations remain later work.
 Analytic Munk and F/P/TRC boundaries remain single-layer.
 `legacy::load_frequency_cases` supports discrete multi-frequency KRAKEN/KRAKENC
 runs; original `BroadBand/MunkK` passes through KRAKEN at 50 and 500 Hz (102/1,023 modes,

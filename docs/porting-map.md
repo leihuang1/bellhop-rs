@@ -32,8 +32,9 @@
 | `Bellhop/ArrMod.f90::AddArr` | `bellhop::solver::influence::add_arrival` | Golden verified |
 | `Kraken/BCImpedance{c}Mod.f90::{ElasticUP,ElasticDN}` | `kraken::elastic::{SolidMesh,cap_impedance}` | Homogeneous finite caps and contiguous fluid stacks verified through both engines, FIELD and CLI-HDF5 |
 | `Kraken/kraken.f90::Solve2` finite-solid real search | `kraken::modes::Mesh::solid_roots` | Deflated secants/raw-root Neville and ordered M search bound verified for single/multi-fluid finite elasticity |
-| `Kraken/BCImpedance{c}Mod.f90` elastic A half-space formula | `kraken::elastic::half_space` | KRAKEN bottom / KRAKENC top+bottom, full modes/FIELD/CLI-HDF5 differential verified |
-| `Kraken/kraken.f90::{FUNCT,AcousticLayers}` elastic-bottom mode count | `kraken::modes::Mesh::elastic_count` | Verified half-space subset; KRAKEN elastic top explicitly rejected |
+| `Kraken/BCImpedance{c}Mod.f90` elastic A half-space formula | `kraken::elastic::half_space` | KRAKEN/KRAKENC top+bottom, full modes/FIELD/CLI-HDF5 differential verified |
+| `Kraken/kraken.f90::{FUNCT,AcousticLayers,Solve1,Bisection}` elastic mode count/isolation | `kraken::modes::Mesh::elastic_count` | Verified real top/bottom; shared intervals, ZBRENTX and subsequent non-deflated Solve2 |
+| `Kraken/RootFinderBrent.f90::ZBRENTX` extended-range real root refinement | `kraken::modes::brent` | Pinned exponents, sequential assignments and same-sign initialized-root history retained |
 | `Kraken/kraken{c}.f90::Normalize` half-space admittance derivative | `kraken::{modes,complex_modes}` | Real/complex elastic half-space normalization verified; pinned group/loss limitations retained |
 | `KrakenField/EvaluateMod.f90::Evaluate` | `kraken::solver::synthesize_field` | Single-profile X/R/S and coherent/incoherent addition verified |
 | `misc/beampattern.f90::ReadPat` + `interp1` | `kraken::legacy` + `kraken::solver` | SBP parsing, dB conversion and take-off-angle shading verified |

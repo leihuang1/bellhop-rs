@@ -157,15 +157,16 @@ FIELD. None is claimed as accepted by the fluid-stack stage. The wider-spectrum
 three-layer experiment described in the compatibility/golden provenance remains
 unaccepted; a matched subset is not advertised as full original acceptance.
 
-Elastic-half-space acceptance adds 15 derived and three original input pairs:
-27 workflows, 33 frequency blocks, 415 modes and 4,707 pressures, through API and
+Elastic-half-space acceptance adds 16 derived and three original input pairs:
+37 workflows, 49 frequency blocks, 473 modes and 5,715 pressures, through API and
 actual CLI/HDF5. The original scholte/normal/flused environments and official
 shared fieldbat.flp are byte copies of the pinned TLslices sources; no shear is
 removed and NG is unchanged. All .mod/.shd agree in three runs; local maximum
-pressure error is 6.67e-8 at unchanged tolerances. The 117-record
+pressure error is 6.67e-8 at unchanged tolerances. The 149-record
 `golden/elastic-halfspace.sha256` manifest and fresh CI source-byte comparisons
-lock provenance. KRAKEN elastic top-half-space and failed slow-interface probes remain outside
-acceptance. Original elsed/ice now pass the distinct finite-cap checkpoint.
+lock provenance. Real elastic tops retain shared isolation/Brent, non-deflated
+Solve2 and MINLOC selection; failed slow-interface and 75 Hz broadband probes
+remain unaccepted. Original elsed/ice pass the distinct finite-cap checkpoint.
 See the [scope and evidence](kraken-elastic-halfspaces.md); no new parity waiver.
 
 Homogeneous finite elasticity adds 25 pairs (23 constructed/derived, two
@@ -197,10 +198,10 @@ three original Gulf files) and six small reference files are SHA-locked in
 not committed large goldens. CI checks original input bytes against the pinned
 source tree. See [profile propagation](kraken-multi-profile-field.md).
 
-The [self-contained KRAKEN JSON checkpoint](kraken-json-input.md) reuses thirteen
-existing representative references: water power-law loss, source patterns,
-TRC, layered-fluid power laws, finite elastic stacks and real TopN/ShearOnly/Power,
-original TabRefCoef
+The [self-contained KRAKEN JSON checkpoint](kraken-json-input.md) reuses sixteen
+representative references: water power-law loss, source patterns, TRC,
+layered-fluid power laws, finite elastic stacks and real TopN/ShearOnly/Power,
+real half-space TopN/BothS/TopBroadband, original TabRefCoef
 BRC/IRC, BroadBand/MunkK and both Gulf paths. Complete exported definitions are
 checked against legacy definitions before JSON API and actual JSON CLI/HDF5
 mode/shape/pressure comparisons. The test entry is

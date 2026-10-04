@@ -39,6 +39,27 @@ impl<T> Refinement<T> {
 }
 
 impl Refinement<f64> {
+    // Solve selects M from the previous Richardson row (the raw roots on mesh
+    // one), before incorporating the current mesh. Equal minima keep the first.
+    pub fn selected_count(&self, roots: &[f64], low: f64) -> Result<usize, DiagnosticReport> {
+        self.table
+            .first()
+            .map_or(roots, Vec::as_slice)
+            .iter()
+            .take(roots.len())
+            .enumerate()
+            .filter(|(_, x)| **x > low)
+            .min_by(|(i, a), (j, b)| a.total_cmp(b).then_with(|| i.cmp(j)))
+            .map(|(i, _)| i + 1)
+            .ok_or_else(|| {
+                error(
+                    "KR0301",
+                    "no elastic modes inside spectral limits",
+                    "phase_speed_limits",
+                )
+            })
+    }
+
     pub fn accept(
         &mut self,
         roots: Vec<f64>,
@@ -185,6 +206,24 @@ impl<T: Copy + Sub<Output = T> + Div<f64, Output = T>> Refinement<T> {
             modes: std::mem::take(&mut self.modes),
         }))
     }
+}
+
+#[cfg(test)]
+#[test]
+fn real_selection_uses_previous_row_current_bound_and_first_tie() {
+    let mut refinement = Refinement::<f64>::default();
+    assert_eq!(refinement.selected_count(&[9.0, 7.0, 7.0], 1.0).unwrap(), 2);
+    refinement.table.push(vec![9.0, 7.0, 8.0, 1.5]);
+    assert_eq!(refinement.selected_count(&[8.0, 6.0, 5.0], 1.0).unwrap(), 2);
+    assert_eq!(refinement.selected_count(&[8.0], 1.0).unwrap(), 1);
+    assert_eq!(
+        refinement
+            .selected_count(&[8.0], 10.0)
+            .unwrap_err()
+            .diagnostics()[0]
+            .code,
+        "KR0301"
+    );
 }
 
 #[cfg(test)]

@@ -365,6 +365,7 @@ fn cli_round_trips_elastic_half_spaces() {
         "ElasticHalfBothP",
         "ElasticHalfBothS",
         "ElasticHalfLeaky",
+        "ElasticHalfTopBroadband",
         "ElasticHalfPower",
         "ElasticHalfShearOnly",
         "OriginalElasticScholte",
@@ -372,11 +373,7 @@ fn cli_round_trips_elastic_half_spaces() {
         "OriginalElasticFlused",
     ] {
         for engine in ["kraken", "krakenc"] {
-            if engine == "kraken"
-                && (name.starts_with("ElasticHalfTop")
-                    || name.starts_with("ElasticHalfBoth")
-                    || name == "ElasticHalfLeaky")
-            {
+            if engine == "kraken" && name == "ElasticHalfLeaky" {
                 continue;
             }
             let env = fixture(name).with_extension("env");
@@ -466,14 +463,22 @@ fn elastic_failures_preserve_output_and_remove_scratch() {
     let root = directory("elastic-failures");
     let output = root.join("previous.h5");
     fs::write(&output, b"old elastic output").unwrap();
-    let process = run(
-        &fixture("ElasticHalfTopN.env"),
-        &output,
-        "kraken",
-        &["--overwrite"],
-    );
+    let invalid = root.join("invalid.env");
+    fs::write(
+        &invalid,
+        fs::read_to_string(fixture("ElasticHalfTopN.env"))
+            .unwrap()
+            .replace("4500.0 2300.0", "2000.0 2300.0"),
+    )
+    .unwrap();
+    fs::copy(
+        fixture("ElasticHalfTopN.flp"),
+        invalid.with_extension("flp"),
+    )
+    .unwrap();
+    let process = run(&invalid, &output, "kraken", &["--overwrite"]);
     assert_failure(&process, 2, &output, b"old elastic output");
-    assert!(String::from_utf8_lossy(&process.stderr).contains("elastic top requires KRAKENC"));
+    assert!(String::from_utf8_lossy(&process.stderr).contains("cp² > 4/3 cs²"));
 
     let env = root.join("outside.env");
     fs::write(

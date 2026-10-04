@@ -1,62 +1,79 @@
 # Elastic half-space checkpoint
 
-This is the first elastic capability block, **not finite elastic-layer support**.
-The oracle remains unmodified Acoustics Toolbox v2023.5, commit
+The oracle is unmodified Acoustics Toolbox v2023.5, commit
 `475108519289c6fb488b58980c644ea14eccc604`, Linux x86-64 / GNU Fortran 12.2.0,
-with the existing pinned flags and unchanged numerical tolerances.
+with the existing pinned flags and unchanged numerical tolerances. This is
+half-space support, not graded finite elasticity or arbitrary-spectrum certification.
 
 ## Supported boundary subset
 
-- N/C/P/S constant-density finite fluid stacks over an elastic A bottom:
-  KRAKEN and KRAKENC modes, coherent FIELD and actual CLI/HDF5.
-- Elastic A top, including simultaneous elastic A bottom: **KRAKENC only**.
+- N/C/P/S constant-density finite fluid stacks with elastic A bottom, top or
+  simultaneous top/bottom: both KRAKEN and KRAKENC, modes, FIELD and actual CLI/HDF5.
 - Positive shear speed, positive density and bulk modulus (`cp² > 4/3 cs²`),
   finite nonnegative compressional/shear losses with `Im(c) <= Re(c)`.
 - Existing frequency ordering, independent fluid meshes, refinement and shared
   budgets remain in force. No new root-work allowance or partial publication.
-- Source/receiver/modal depths remain inside the finite **fluid** stack. These
-  are pressure eigenfunctions, not elastic displacement/strain samples.
-- Analytic Munk, F/P/TRC combinations, finite solids, roughness and multi-profile
-  FIELD are not enabled by this block. Unsupported combinations fail explicitly.
+- Source/receiver/modal depths stay inside the finite **fluid** stack. These are
+  pressure eigenfunctions, not elastic displacement/strain samples.
+- Analytic Munk, F/P/TRC combinations, roughness and elastic coupled FIELD remain
+  excluded. Real elastic top half-spaces combined with finite solids remain
+  explicitly unvalidated; the separate [finite-cap block](kraken-finite-elastic-layers.md)
+  retains its published scope.
 
 `Boundary::ElasticHalfSpace { shear_sound_speed_mps,
 shear_attenuation_db_per_wavelength }` supplies shear material; the existing
-surface/bottom sound-speed, density and loss fields supply compressional
-material. Both losses are canonical solve-frequency dB/wavelength. Legacy A
-records with cs>0 select this variant; conversion is repeated per frequency,
-including shear power-law/volume loss. A fluid cs=0 record still forbids shear
-loss. No elastic boundary is replaced with a fictitious fluid half-space.
+boundary sound-speed, density and loss fields supply compressional material.
+Losses are canonical solve-frequency dB/wavelength. Legacy A records with cs>0
+select this variant; conversion is repeated per frequency. A fluid cs=0 record
+still forbids shear loss. No elastic boundary becomes a fictitious fluid.
 
-The implementation ports `BCImpedance{c}Mod`'s pressure/normal-velocity impedance
-and its normalization derivative. Real KRAKEN adds the elastic boundary's
-mode-count contribution and caps effective cHigh at the shear speed; the
-reference's 0.85*cMin adjustment permits interface-wave roots. KRAKENC retains
-complex P/S radiation roots and bounded deflated secant search. Root completeness
-and arbitrary-input parity are not inferred from successful fixture comparisons.
+## Reference arithmetic and search
 
-**Reference limitation retained:** KRAKEN's real elastic boundary ignores
-elastic material attenuation, even when the input records nonzero P/S loss.
-Fluid volume loss still acts. Use KRAKENC for elastic attenuation. HDF5 records
-requested losses and `*_elastic_attenuation_model=reference_real|complex` so this
-is not mistaken for implemented elastic-loss perturbation. Group speeds follow
-the pinned compressional half-space slowness formula; matching them is not an
-independent validation of full elastic energy/group dispersion.
+`BCImpedance{c}Mod` provides pressure/normal-velocity impedance and its
+normalization derivative. Real KRAKEN includes each elastic boundary's mode-count
+contribution, caps cHigh at cs and retains the default-kind 0.85*cMin adjustment.
+KRAKENC retains its separate complex radiation roots, deflation and work limits.
+
+Real elastic tops use Solve1's **shared** isolating intervals and extended-range
+ZBRENTX on meshes one/two, then non-deflated Solve2 with raw Neville history.
+Independent per-root inertia bisections can follow an impedance pole instead.
+The pinned same-sign warning retains the preceding initialized root; these raw
+repeats are not silently removed. Solve's MINLOC selects M from the previous
+Richardson row before adding the current mesh, with first-index tie handling.
+Surviving shapes, group speeds and loss remain first-mesh data. No reference
+count is read by the solver or used as a root cap.
+
+`solve_frequencies` provides ordered run-local execution and stops on the first
+error. Solve1 recounts modes on the first two meshes of each half-space frequency;
+finite-solid Solve2 runs instead retain their preceding search bound. Independent
+`solve`/`solve_field` calls start fresh runs. Blocks must share one backend.
+
+**Reference loss limitations:** real elastic impedance ignores P/S material
+loss. Bottom elastic absorption is omitted. However `Normalize` still applies
+the generic top-A **compressional** loss perturbation (default-kind complex
+square root), even when the top is elastic; top shear loss is ignored. Fluid
+volume loss remains active. This is not a full elastic absorption model: use
+KRAKENC for that. Group speeds follow the pinned compressional half-space
+slowness formula, not independently verified elastic energy/group dispersion.
+HDF5 records requested losses and `*_elastic_attenuation_model=reference_real|complex`;
+`reference_real` identifies these reference rules, not zero modal attenuation.
 
 ## Complete acceptance evidence
 
-18 input pairs: **15 derived** and **3 unmodified original environments with
-their official shared FIELD geometry**. They produce 27 workflows, 33 frequency
-blocks, 415 modes and 4,707 pressures. Every mode/sample/pressure is compared
-through the API and actual CLI/HDF5. Each `.mod/.shd` is byte-identical in three
-independent pinned runs. Local maximum pressure error is 6.67e-8. No mode is
-trimmed and no numeric tolerance increased; shear-only loss uses the existing
-lossy imaginary-wavenumber tolerance, not the lossless exact-zero comparison.
+19 input pairs: **16 derived** and **3 unmodified original environments with
+their official shared FIELD geometry**. They produce **37 workflows, 49 frequency
+blocks, 473 modes and 5,715 pressures**. Every declared mode, sampled shape and
+pressure is compared through the API and actual CLI/HDF5. MOD/SHD are byte-identical
+in three independent pinned runs. Local maximum pressure error remains 6.67e-8;
+the ten added workflows have maximum |dp|=1.877140660839749e-9. Tolerances, budgets
+and earlier goldens are unchanged. Rust HDF5 is readback evidence, never a golden.
 
 | Inputs | Engines | Modes per frequency | Pressures per engine |
 |---|---|---|---:|
 | ElasticHalfBottomN/C/P/S | both, each input | 5 | 63 |
-| ElasticHalfTopN/C/P/S | KRAKENC, each input | 6 | 63 |
-| ElasticHalfBothN/C/P/S | KRAKENC, each input | 5 | 63 |
+| ElasticHalfTopN/C/P/S | KRAKEN / KRAKENC | 4 / 6 | 63 |
+| ElasticHalfBothN/C/P/S | KRAKEN / KRAKENC | 3 / 5 | 63 |
+| ElasticHalfTopBroadband, 50/25/37.5/25 Hz | KRAKEN / KRAKENC | 4/3/3/3 / 6/3/5/3 | 252 |
 | ElasticHalfLeaky | KRAKENC | 5 | 63 |
 | ElasticHalfPower, 75/50/62.5/50 Hz | both | 7/5/6/5 | 252 |
 | ElasticHalfShearOnly, coherent line source | both | 5 | 63 |
@@ -64,45 +81,47 @@ lossy imaginary-wavenumber tolerance, not the lossless exact-zero comparison.
 | OriginalElasticNormal | both | 44 | 501 |
 | OriginalElasticFlused | both | 46 | 501 |
 
+TopBroadband explicitly derives from TopC by adding the B frequency vector;
+materials, NG, RMax and FIELD geometry stay unchanged. It is not an upstream
+original. The eight newly accepted real single-frequency cases retain their
+existing input bytes. WRITE-only diagnostic Fortran rebuilds preserve MOD/SHD
+byte controls; no seed or tolerance perturbation supplies acceptance evidence.
+
 Original environments are byte copies of `tests/TLslices/{scholte,normal,flused}.env`.
-All three FLPs are byte copies of `tests/TLslices/fieldbat.flp`, selected by the
-unmodified upstream `runtests.m`. In particular original normal retains bottom
-cs=2000; it is independent of the previous shear-removed `LayeredNormalization`.
-Fresh CI checks the input bytes against the installed pinned source before
-running the complete comparisons. See [golden provenance](../crates/kraken/tests/fixtures/golden/README.md)
-and the 117-record `golden/elastic-halfspace.sha256` manifest. Rust HDF5 is
-readback evidence, never a replacement golden.
+Their FLPs are byte copies of `tests/TLslices/fieldbat.flp`, selected by upstream
+`runtests.m`. Original normal retains bottom cs=2000, independently of the earlier
+shear-removed LayeredNormalization. Fresh CI checks source bytes before the
+complete comparisons. See [golden provenance](../crates/kraken/tests/fixtures/golden/README.md)
+and the **149-record** `golden/elastic-halfspace.sha256` manifest.
 
-Ordinary tests check material validation/source locations, per-frequency shear
-conversion, repeated frequencies, reference real-loss omission/cutoff, HDF5
-metadata and preservation/cleanup on input, numerical and quota failures.
-The merged layered-review diagnostic issue is also locked down: an additional
-layer's interpolation error no longer falsely blames the first water layer.
+WriteMode can leave bounded stale first-mesh records after a smaller declared
+spectrum; they are not additional modes. Finite-solid reference search starts
+at M=3000; half-space Solve1 counts at most one sign change per acoustic interval,
+two elastic-boundary contributions and the final dispersion sign. The comparator
+checks declared modes, k, shapes and pressure strictly and bounds only this
+writer-specific tail; other file-length checks stay exact.
 
-## Work deliberately left open
+Ordinary tests cover material diagnostics, per-frequency conversion/order,
+repeated frequencies, reset, reference cutoff, top compressional versus shear
+loss, decimal-exponent Brent arithmetic/work bounds, HDF5 metadata and output
+preservation. Real TopN, BothS and TopBroadband additionally pass self-contained
+JSON API and actual JSON CLI/HDF5 against the same oracle.
 
-**KRAKEN elastic top is rejected at Case validation / CLI exit 2**, not returned
-as an unverified successful result. On the constructed ElasticHalfTopN input,
-the initial real port's mode count jumps 3→1 at adjacent floating-point x around
-0.04252483222633925; its first putative root fails inverse iteration. Pinned
-Fortran itself counts five roots on its first meshes but publishes four after
-refinement, whereas KRAKENC publishes six. The current per-root bisection cannot
-be assumed equivalent to Fortran's coupled interval isolation/Brent/Solve2
-trajectory. This motivates the explicit restriction; it does not establish
-which search found every mathematical root. Temporary Rust tracing was removed.
-No additional release-parity exception is introduced.
+## Remaining limits
 
-A separate constructed slow-shear Scholte probe (cp=3000, cs=1000, 100 m water)
-reached a group speed near 17344.62 m/s in both ports, while the pinned G14.6
-print rounded to 17344.6. It did not pass the existing 0.005 comparison. A cp=1800
-probe also failed the strict checks (KRAKEN inverse iteration; KRAKENC print
-precision). Neither probe is a committed/accepted fixture; the comparator was
-not relaxed and neither proves low-speed interface-wave acceptance.
+Successful execution is not a promise of all mathematical roots or fixed-oracle
+parity for arbitrary branch-sensitive spectra. A 75/50/62.5/50 Hz top/both
+broadband probe produced a first-root same-sign Brent warning and failed inverse
+iteration in unmodified real Fortran; FIELD then failed reading the incomplete
+MOD. Those probes are not accepted fixtures or goldens. Rust diagnoses a first
+unbracketed root rather than retaining uninitialized reference output.
 
-The subsequent [homogeneous finite-cap block](kraken-finite-elastic-layers.md)
-now validates compound-matrix transfer and original `elsed/ice` through both
-engines, FIELD and actual CLI/HDF5. Graded/interleaved solids and KRAKEN
-elastic-top-half-space isolation remain later work. Multi-profile FIELD, JSON/HTTP,
-BOUNCE generation and time-domain synthesis remain later work. The existing
-[wide layered refinement exception](kraken-layered-refinement-gap.md) is unchanged
-and is not a waiver for new elastic failures.
+The older slow-shear Scholte probes remain unaccepted: cp=3000/cs=1000 reached
+a group speed near 17344.62 m/s while pinned G14.6 prints 17344.6, outside the
+existing 0.005 comparison; cp=1800 also failed strict checks. Neither is promoted
+by this block. The [wide layered refinement exception](kraken-layered-refinement-gap.md)
+and original `double` rejection are unchanged, not waivers for elastic failures.
+
+Graded/interleaved solids, real elastic-top/finite-solid combinations and an
+elastic multi-profile matrix remain later work. BOUNCE generation, HTTP, elastic
+displacement and time-domain synthesis are not added.

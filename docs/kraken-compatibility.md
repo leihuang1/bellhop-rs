@@ -31,12 +31,13 @@ the full matrix below; unsupported physics is rejected. Numerical parity is
 verified for the complete workflows below, not promised for every arbitrary
 branch-sensitive secant spectrum.
 [Elastic A half-spaces](kraken-elastic-halfspaces.md) additionally support
-KRAKENC top/bottom and KRAKEN bottom boundaries over N/C/P/S fluid stacks.
-Original TLslices scholte/normal/flused now pass both engines, FIELD and CLI/HDF5.
-KRAKEN elastic top-half-space is explicitly rejected. Homogeneous finite solid
+top/bottom boundaries through both engines over N/C/P/S fluid stacks.
+Original TLslices scholte/normal/flused pass both engines, FIELD and CLI/HDF5.
+Real elastic tops retain shared isolation/Brent/Solve2. Homogeneous finite solid
 caps now pass the separate [finite-layer checkpoint](kraken-finite-elastic-layers.md):
 both backends with contiguous layered fluids, including original elsed/ice.
-KRAKEN retains the pinned elastic-loss omission; use KRAKENC for that attenuation.
+KRAKEN retains pinned real-stiffness/loss rules, including the top-A compressional
+perturbation but omitted elastic shear/bottom absorption; use KRAKENC for full elastic loss.
 
 For code navigation and ownership, see the [implementation map](kraken-internals.md).
 
@@ -68,9 +69,9 @@ The KRAKEN `load_case`/`solve` path currently accepts a narrow legacy
   end. A boundaries carry material/volume attenuation; V/R have no half-space
   record or material properties. Real KRAKEN requires cHigh no larger than
   either fluid A-half-space speed; KRAKENC also accepts radiating/leaky half-spaces.
-  N/C/P/S water additionally accepts elastic A bottoms (both engines) or elastic
-  tops (KRAKENC only), as detailed below. KRAKEN caps elastic cHigh at cs and
-  retains the reference's omitted elastic attenuation. N/C/P/S water supports
+  N/C/P/S water additionally accepts elastic A top/bottom through both engines,
+  as detailed below. KRAKEN caps elastic cHigh at cs and retains the reference's
+  limited loss model (top compressional perturbation, omitted elastic shear/bottom absorption). N/C/P/S water supports
   nonnegative absorption; analytic A remains lossless. Homogeneous finite solids outside the contiguous
   fluid interval are supported separately; graded/interleaved solids and rough
   boundaries remain unsupported;
@@ -362,25 +363,25 @@ fields carry compressional material. Validation requires positive bulk modulus
 layers remain fluid, constant-density and independently meshed. Analytic Munk,
 F/P/TRC, rough interfaces and finite solid layers are not enabled.
 
-KRAKEN accepts elastic bottoms only, with the pinned cs cutoff and 0.85*cMin
-adjustment for interface waves. Its real elastic impedance **ignores elastic
-material attenuation** as in Fortran; water loss still acts. KRAKENC accepts
-elastic top/bottom and complex attenuation/radiating shear roots. Both follow
-the reference's compressional half-space group-speed expression, not an
-independently verified full elastic energy/group-dispersion calculation.
-KRAKEN elastic tops explicitly fail validation instead of publishing unverified
-roots; the reference's top search cannot be reproduced by the current isolation.
+Both engines accept elastic top/bottom. KRAKEN retains the pinned cs cutoff and
+0.85*cMin adjustment. Real impedance ignores P/S loss, but Normalize retains the
+top-A compressional perturbation; shear and bottom elastic absorption are omitted.
+KRAKENC includes complex attenuation/radiating shear roots. Both retain the
+compressional half-space group-speed expression, not independently verified
+elastic energy/group dispersion. Real tops use shared Solve1 intervals/ZBRENTX
+on meshes one/two, then non-deflated Solve2; MINLOC uses the previous Richardson
+row to select the surviving first-mesh data, without oracle counts or clipping rules.
 
-15 derived pairs plus original TLslices scholte/normal/flused with official shared
-fieldbat.flp pass 27 complete workflows: 33 frequency blocks, 415 modes, 4,707
+16 derived pairs plus original TLslices scholte/normal/flused with official shared
+fieldbat.flp pass 37 complete workflows: 49 frequency blocks, 473 modes, 5,715
 pressures, triplicate byte-identical .mod/.shd, API and actual CLI/HDF5 at unchanged
 tolerances. The original environments are byte-identical (no shear removal or NG
 change); normal's bottom keeps cs=2000. Maximum local pressure error is 6.67e-8.
 The new metadata distinguishes requested loss from the reference real/complex
 attenuation model. Original elsed/ice now pass the separate finite-cap checkpoint;
-new failed slow-interface probes and KRAKEN elastic top-half-space remain outside
-acceptance; the layered release exception
-is not extended to any of them.
+failed slow-interface and 75 Hz top/both broadband probes remain unaccepted.
+Real elastic-top/finite-solid combinations remain explicitly unvalidated;
+the layered release exception is not extended to these paths.
 
 ### Homogeneous finite elastic caps
 
@@ -554,9 +555,10 @@ reused. `/inputs/json` hashes the exact parsed snapshot, not reconstructed ENV
 resources. Unknown/duplicate fields and invalid combinations are rejected.
 
 Ordinary tests cover exact legacy-definition round trips, relocated CLI runs,
-nested validation, quotas and output rollback. Thirteen existing representative
+nested validation, quotas and output rollback. Sixteen representative
 workflows pass JSON API and actual CLI/HDF5 fixed-oracle comparison, including
-real finite TopN, ShearOnly and ordered Power,
+real finite TopN, ShearOnly and ordered Power, real elastic-half-space
+TopN, BothS and ordered TopBroadband,
 original BroadBand/MunkK, TabRefCoef BRC/IRC and Gulf AD/CM. Numerical tolerances,
 reference files, BELLHOP schemas and physics support limits are unchanged; this
 checkpoint adds no option Cartesian product. See [schema, units and

@@ -131,10 +131,10 @@ poisoned to prove they are ignored. Output preservation covers malformed input,
 engine/FLP conflicts, quotas, unowned scratch, input/symlink aliases and numerical
 failure after a completed first frequency.
 
-Fresh pinned CI reuses thirteen **existing** representative workflows: WaterLossPower,
+Fresh pinned CI reuses sixteen representative workflows: WaterLossPower,
 FieldPattern, FluidTrcC, LayeredFluidPower, FiniteElasticStack, real
-FiniteElasticTopN/ShearOnly/Power, original
-TabRefCoef BRC/IRC, original BroadBand/MunkK, and original Gulf AD/CM. Exported
+FiniteElasticTopN/ShearOnly/Power, real elastic-half-space TopN/BothS/TopBroadband,
+original TabRefCoef BRC/IRC, original BroadBand/MunkK, and original Gulf AD/CM. Exported
 JSON definitions must equal the complete legacy definitions; JSON API results
 and actual JSON CLI HDF5 then compare every mode/shape/pressure with the same
 fixed `.mod/.prt/.shd` references and unchanged tolerances. JSON/HDF5 files are

@@ -252,6 +252,7 @@ fn elastic_half_spaces_match_pinned_goldens() {
         "ElasticHalfBothP",
         "ElasticHalfBothS",
         "ElasticHalfLeaky",
+        "ElasticHalfTopBroadband",
         "ElasticHalfPower",
         "ElasticHalfShearOnly",
         "OriginalElasticScholte",
@@ -262,11 +263,7 @@ fn elastic_half_spaces_match_pinned_goldens() {
             ("kraken", kraken::ModeSolver::Kraken),
             ("krakenc", kraken::ModeSolver::Krakenc),
         ] {
-            if engine == "kraken"
-                && (name.starts_with("ElasticHalfTop")
-                    || name.starts_with("ElasticHalfBoth")
-                    || name == "ElasticHalfLeaky")
-            {
+            if engine == "kraken" && name == "ElasticHalfLeaky" {
                 continue;
             }
             compare_frequencies(
@@ -412,6 +409,26 @@ fn profile_fields_match_fresh_reference() {
 }
 
 #[test]
+fn elastic_warnings_do_not_split_json_profile_headers() {
+    let env = fixtures().join("ElasticHalfBothS.env");
+    let cases = kraken::legacy::load_field_cases(
+        &env,
+        env.with_extension("flp"),
+        kraken::ModeSolver::Kraken,
+    )
+    .unwrap();
+    let document = kraken::json::export_case_document(&cases).unwrap();
+    let restored =
+        kraken::json::load_case_document(&serde_json::to_vec(&document).unwrap()).unwrap();
+    assert_eq!(restored, cases);
+    compare_profile_cases(
+        &restored,
+        &env,
+        &fixtures().join("golden/ElasticHalfBothS-kraken"),
+    );
+}
+
+#[test]
 #[ignore = "requires exported JSON, legacy inputs and pinned Fortran modes/FIELD"]
 fn json_fields_match_fresh_reference() {
     let input = PathBuf::from(std::env::var_os("KRAKEN_JSON_INPUT").unwrap());
@@ -447,9 +464,9 @@ fn compare_profile_cases(cases: &[kraken::FieldCase], input: &Path, root: &Path)
     let printed = fs::read_to_string(root.with_extension("prt")).unwrap();
     let blocks: Vec<_> = printed
         .split(if solver == kraken::ModeSolver::Kraken {
-            "KRAKEN-"
+            "\n KRAKEN-"
         } else {
-            "KRAKENC-"
+            "\n KRAKENC-"
         })
         .skip(1)
         .collect();
@@ -477,7 +494,11 @@ fn compare_profile_cases(cases: &[kraken::FieldCase], input: &Path, root: &Path)
     if cases[0].profiles().len() == 1
         && solver == kraken::ModeSolver::Kraken
         && (!cases[0].profiles()[0].top_elastic_layers.is_empty()
-            || !cases[0].profiles()[0].bottom_elastic_layers.is_empty())
+            || !cases[0].profiles()[0].bottom_elastic_layers.is_empty()
+            || matches!(
+                cases[0].profiles()[0].surface_boundary,
+                kraken::Boundary::ElasticHalfSpace { .. }
+            ))
     {
         references[0]
             .0
@@ -1193,14 +1214,30 @@ fn compare_modes_at(
     if frequency_index + 1 == count(header, 84) {
         let records = first + 2 + mode_count + mode_count.div_ceil(modes_per_record);
         if case.mode_solver == kraken::ModeSolver::Kraken
-            && (!case.top_elastic_layers.is_empty() || !case.bottom_elastic_layers.is_empty())
+            && (!case.top_elastic_layers.is_empty()
+                || !case.bottom_elastic_layers.is_empty()
+                || matches!(
+                    case.surface_boundary,
+                    kraken::Boundary::ElasticHalfSpace { .. }
+                ))
         {
             // WriteMode rewrites M/k after refinement but does not truncate
-            // unused first-mesh shapes when Solve2 crosses cHigh on a later mesh.
+            // unused first-mesh shapes when Solve2 or MINLOC reduces M.
+            let limit =
+                if case.top_elastic_layers.is_empty() && case.bottom_elastic_layers.is_empty() {
+                    // Solve1 can count at most one sign change per acoustic interval,
+                    // two elastic boundaries and the final dispersion sign.
+                    (0..layer_count)
+                        .map(|i| count(file.record(1), 12 * i))
+                        .sum::<usize>()
+                        + 3
+                } else {
+                    3000 // Solve2's initial bound when finite solids bypass Solve1.
+                };
             assert!(file.len() >= records, "missing declared mode records");
             assert!(
-                file.len() <= first + 2 + 3000 + 3000_usize.div_ceil(modes_per_record),
-                "Solve2's 3000-mode record limit"
+                file.len() <= first + 2 + limit + limit.div_ceil(modes_per_record),
+                "first-mesh search record limit"
             );
         } else {
             assert_eq!(file.len(), records, "mode file record count");

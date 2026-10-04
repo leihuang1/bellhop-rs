@@ -60,7 +60,7 @@ fn graded_finite_elastic_inputs_keep_complete_material_profiles() {
             assert_eq!(restored, cases);
             for result in kraken::solve_frequencies(&cases) {
                 let result = result.unwrap();
-                assert!(!result.modes[0].modes.is_empty());
+                assert_ne!(result.modes[0].modes, []);
                 assert_eq!(result.field.pressure.len(), 63);
             }
         }

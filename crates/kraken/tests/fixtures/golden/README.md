@@ -1197,3 +1197,36 @@ The unchanged reference source hashes are:
 
 See [propagation semantics and limits](../../../../../docs/kraken-multi-profile-field.md).
 No newly discovered combination changes the initial acceptance target.
+
+## Depth-varying finite elastic material
+
+`GradedElastic*` are twelve explicitly derived ENV/FLP pairs, based on the
+accepted finite-elastic top/bottom/stack/power fixtures. Each solid retains four
+material samples at relative depths 0, 0.2, 0.7 and 1. The relative material
+multipliers are cp `1+0.04t²`, cs `1+0.02t`, density `1+0.1t²`, P loss `1+0.2t`,
+and S loss `1+0.15t²`; fluid SSP/geometry are retained. Bio adds two explicit
+biological-loss intervals. Top N/C and Bio use RMax=0; their 1000-km complex
+probes fail the pinned convergence check and are not accepted artifacts.
+`TopNRefined` separately retains RMax=1000 km for the accepted real spectrum.
+
+| Input | KRAKEN modes | KRAKENC modes | Pressures per engine |
+|---|---:|---:|---:|
+| TopN / TopC | 5 | 5 | 63 |
+| TopP | 5 | 4 | 63 |
+| TopS | 5 | 5 | 63 |
+| BottomN | 3 | 6 | 63 |
+| BottomC / BottomP / BottomS | 6 | 6 | 63 |
+| Stack | 6 | 6 | 63 |
+| Power, 75/50/62.5/50 Hz | 8/6/6/6 | 8/5/7/5 | 252 |
+| Bio | 5 | 3 | 63 |
+| TopNRefined | 3 | — | 63 |
+
+The unchanged pinned Fortran/toolchain/flags produce **23 workflows, 29 frequency
+blocks, 158 modes and 1,827 pressures**. Every declared mode, shape, group speed,
+loss and pressure passes API and actual CLI/HDF5 comparison. Maximum local
+pressure error is `2.08250058582033e-9`, with existing tolerances and budgets.
+All MOD/SHD outputs are byte-identical in three independent runs. PRT only trims
+trailing whitespace and retains CPU timings. `graded-elastic.sha256` locks 24
+input files and 69 artifacts (93 records); older manifests/artifacts are untouched.
+JSON API/CLI comparison uses the same oracle for BottomN, TopS, Power and Bio.
+See [sampling and loss semantics](../../../../../docs/kraken-finite-elastic-layers.md).

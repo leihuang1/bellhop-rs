@@ -1360,14 +1360,6 @@ fn read_environment(
                 }
             }
             FiniteMedium::Elastic(layer) => {
-                if matches!(volume_loss, VolumeLoss::Biological(_)) {
-                    return Err(reader_error(
-                        &reader,
-                        "KR0202",
-                        "homogeneous finite elastic layers do not support depth-local biological loss",
-                        &old_profile,
-                    ));
-                }
                 top = layer.bottom_depth_m;
                 let prefix = if water.is_none() {
                     let prefix = format!("top_elastic_layers[{}]", top_elastic_layers.len());
@@ -1610,7 +1602,7 @@ fn read_finite_layer(
                 return Err(reader.record_error(
                     &record,
                     &profile_field,
-                    "depths must increase within each fluid layer",
+                    "depths must increase within each finite layer",
                 ));
             }
             if (points.is_empty() && point[0] != top)
@@ -1619,12 +1611,11 @@ fn read_finite_layer(
                 || point[5] < 0.0
                 || (point[2] == 0.0 && point[5] != 0.0)
                 || points.first().is_some_and(|p| {
-                    point[3] != p[3]
-                        || (p[2] == 0.0 && point[2] != 0.0)
-                        || (p[2] > 0.0 && p[1..] != point[1..])
+                    (p[2] == 0.0 && (point[3] != p[3] || point[2] != 0.0))
+                        || (p[2] > 0.0 && point[2] == 0.0)
                 })
             {
-                return Err(reader.record_error(&record, &profile_field, "requires constant-density fluid (no shear loss), or homogeneous elastic cp/cs/density/loss; nonnegative absorption"));
+                return Err(reader.record_error(&record, &profile_field, "requires constant-density fluid (no shear loss), or positive elastic shear speed throughout the layer; nonnegative absorption"));
             }
             inherited = point;
             points.push(point);
@@ -1643,26 +1634,22 @@ fn read_finite_layer(
             return Err(reader_error(
                 reader,
                 "KR0202",
-                "a fluid profile needs top and interface points",
+                "a finite profile needs top and interface points",
                 &profile_field,
             ));
         }
     }
     if points.first().is_some_and(|p| p[2] > 0.0) {
-        let p = points[0];
+        let point_count = points.len();
         return Ok((
             FiniteMedium::Elastic(material::Elastic {
                 bottom_depth_m: bottom,
-                compressional_speed: p[1],
-                shear_speed: p[2],
-                density_g_cm3: p[3],
-                compressional_attenuation: p[4],
-                shear_attenuation: p[5],
+                points,
                 mesh_points,
                 power_law: power,
             }),
             inherited,
-            points.len(),
+            point_count,
         ));
     }
     Ok((

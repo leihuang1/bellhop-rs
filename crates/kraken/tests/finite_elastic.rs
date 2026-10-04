@@ -15,6 +15,154 @@ fn original(name: &str, solver: ModeSolver) -> Case {
 }
 
 #[test]
+fn graded_finite_elastic_inputs_keep_complete_material_profiles() {
+    for name in [
+        "GradedElasticTopN",
+        "GradedElasticTopC",
+        "GradedElasticTopP",
+        "GradedElasticTopS",
+        "GradedElasticBottomN",
+        "GradedElasticBottomC",
+        "GradedElasticBottomP",
+        "GradedElasticBottomS",
+        "GradedElasticStack",
+        "GradedElasticPower",
+        "GradedElasticBio",
+    ] {
+        for solver in [ModeSolver::Kraken, ModeSolver::Krakenc] {
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures")
+                .join(name);
+            let cases = legacy::load_field_cases(
+                root.with_extension("env"),
+                root.with_extension("flp"),
+                solver,
+            )
+            .unwrap();
+            for field in &cases {
+                for case in field.profiles() {
+                    for layer in case
+                        .top_elastic_layers
+                        .iter()
+                        .chain(&case.bottom_elastic_layers)
+                    {
+                        assert_eq!(layer.material_profile.len(), 4);
+                        assert!(
+                            layer.material_profile[3].density_g_cm3
+                                > layer.material_profile[0].density_g_cm3
+                        );
+                    }
+                }
+            }
+            let document = kraken::json::export_case_document(&cases).unwrap();
+            let restored =
+                kraken::json::load_case_document(&serde_json::to_vec(&document).unwrap()).unwrap();
+            assert_eq!(restored, cases);
+            for result in kraken::solve_frequencies(&cases) {
+                let result = result.unwrap();
+                assert!(!result.modes[0].modes.is_empty());
+                assert_eq!(result.field.pressure.len(), 63);
+            }
+        }
+    }
+}
+
+#[test]
+fn graded_elastic_validation_checks_nodes_and_interpolated_material() {
+    let base = original("GradedElasticTopS", ModeSolver::Krakenc).into_definition();
+    for change in [
+        "depth",
+        "duplicate",
+        "cp",
+        "cs",
+        "density",
+        "p_loss",
+        "s_loss",
+        "bulk",
+        "scalar",
+        "count",
+    ] {
+        let mut input = base.clone();
+        let layer = &mut input.top_elastic_layers[0];
+        let point = &mut layer.material_profile[2];
+        match change {
+            "depth" => point.depth_m = f64::NAN,
+            "duplicate" => point.depth_m = 0.0,
+            "cp" => point.compressional_sound_speed_mps = f64::INFINITY,
+            "cs" => point.shear_sound_speed_mps = 0.0,
+            "density" => point.density_g_cm3 = -1.0,
+            "p_loss" => point.compressional_attenuation_db_per_wavelength = -1.0,
+            "s_loss" => point.shear_attenuation_db_per_wavelength = f64::NAN,
+            "bulk" => point.compressional_sound_speed_mps = 100.0,
+            "scalar" => layer.density_g_cm3 = 3.0,
+            "count" => {
+                layer.material_profile.pop();
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            Case::from_definition(input)
+                .unwrap_err()
+                .diagnostics()
+                .iter()
+                .any(|d| d.field == "top_elastic_layers[0].material_profile"),
+            "{change}"
+        );
+    }
+    let mut input = base.clone();
+    input.top_elastic_layers[0].material_profile[2].density_g_cm3 = 1e8;
+    assert!(
+        Case::from_definition(input)
+            .unwrap_err()
+            .to_string()
+            .contains("density must stay")
+    );
+    let mut input = base.clone();
+    for (point, cs) in input.top_elastic_layers[0]
+        .material_profile
+        .iter_mut()
+        .zip([1400.0, 2590.0, 1800.0, 1400.0])
+    {
+        point.compressional_sound_speed_mps = 3000.0;
+        point.shear_sound_speed_mps = cs;
+    }
+    assert!(
+        Case::from_definition(input)
+            .unwrap_err()
+            .to_string()
+            .contains("positive bulk modulus")
+    );
+    let mut input = base;
+    input.top_elastic_layers[0].material_profile[2].compressional_attenuation_db_per_wavelength =
+        50.0;
+    assert!(
+        Case::from_definition(input)
+            .unwrap_err()
+            .to_string()
+            .contains("interpolated complex speed")
+    );
+}
+
+#[test]
+fn graded_elastic_storage_counts_both_node_losses() {
+    let mut input = original("GradedElasticTopC", ModeSolver::Kraken).into_definition();
+    let layer = &mut input.top_elastic_layers[0];
+    let first = layer.material_profile[0];
+    layer.material_profile = (0..=50_000)
+        .map(|i| kraken::ElasticMaterialPoint {
+            depth_m: f64::from(i) * 20.0 / 50_000.0,
+            ..first
+        })
+        .collect();
+    assert!(
+        Case::from_definition(input)
+            .unwrap_err()
+            .to_string()
+            .contains("total fluid profile storage")
+    );
+}
+
+#[test]
 fn finite_elastic_layers_keep_the_absolute_fluid_interval() {
     let ice = original("OriginalElasticIce", ModeSolver::Krakenc);
     assert_eq!(
@@ -168,7 +316,7 @@ fn finite_elastic_materials_and_unvalidated_combinations_are_rejected() {
             .contains("compound state is undefined")
     );
     let env = include_str!("fixtures/OriginalElasticIce.env")
-        .replace("30.0 3000.0 1400.0 1.0", "30.0 3100.0 1400.0 1.0");
+        .replace("30.0 3000.0 1400.0 1.0", "30.0 1500.0 1400.0 1.0");
     assert!(
         legacy::load_frequency_cases_from_sources(
             &env,
@@ -179,7 +327,7 @@ fn finite_elastic_materials_and_unvalidated_combinations_are_rejected() {
         )
         .unwrap_err()
         .to_string()
-        .contains("homogeneous elastic")
+        .contains("positive bulk modulus")
     );
     let mut input = base;
     input.top_elastic_layers[0].mesh_points = 1_000_000;

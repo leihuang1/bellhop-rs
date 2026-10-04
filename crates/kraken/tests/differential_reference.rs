@@ -237,6 +237,39 @@ fn finite_elastic_layers_match_pinned_goldens() {
 }
 
 #[test]
+fn graded_elastic_layers_match_pinned_goldens() {
+    for name in [
+        "GradedElasticTopN",
+        "GradedElasticTopC",
+        "GradedElasticTopP",
+        "GradedElasticTopS",
+        "GradedElasticBottomN",
+        "GradedElasticBottomC",
+        "GradedElasticBottomP",
+        "GradedElasticBottomS",
+        "GradedElasticStack",
+        "GradedElasticPower",
+        "GradedElasticBio",
+    ] {
+        for (engine, solver) in [
+            ("kraken", kraken::ModeSolver::Kraken),
+            ("krakenc", kraken::ModeSolver::Krakenc),
+        ] {
+            compare_frequencies(
+                &fixtures().join(name).with_extension("env"),
+                &fixtures().join("golden").join(format!("{name}-{engine}")),
+                solver,
+            );
+        }
+    }
+    compare_frequencies(
+        &fixtures().join("GradedElasticTopNRefined.env"),
+        &fixtures().join("golden/GradedElasticTopNRefined-kraken"),
+        kraken::ModeSolver::Kraken,
+    );
+}
+
+#[test]
 fn elastic_half_spaces_match_pinned_goldens() {
     for name in [
         "ElasticHalfBottomN",
@@ -910,6 +943,7 @@ fn compare_elastic_hdf5_materials(group: &hdf5::Group, case: &Case) {
     }
 }
 
+#[allow(clippy::too_many_lines)] // Compare the complete finite-elastic product together.
 fn compare_finite_elastic_hdf5(group: &hdf5::Group, case: &Case) {
     let count = case.top_elastic_layers.len() + case.bottom_elastic_layers.len();
     if count == 0 {
@@ -979,6 +1013,57 @@ fn compare_finite_elastic_hdf5(group: &hdf5::Group, case: &Case) {
                     0.0,
                     "HDF5 finite elastic material",
                 );
+            }
+            let points = &material.material_profile;
+            assert_eq!(
+                layer
+                    .attr("material_profile_point_count")
+                    .unwrap()
+                    .read_scalar::<u64>()
+                    .unwrap(),
+                points.len() as u64
+            );
+            if points.is_empty() {
+                assert!(!layer.link_exists("material_profile"));
+            } else {
+                let profile = layer.group("material_profile").unwrap();
+                for (name, expected) in [
+                    (
+                        "depth_m",
+                        points.iter().map(|p| p.depth_m).collect::<Vec<_>>(),
+                    ),
+                    (
+                        "compressional_sound_speed_mps",
+                        points
+                            .iter()
+                            .map(|p| p.compressional_sound_speed_mps)
+                            .collect(),
+                    ),
+                    (
+                        "shear_sound_speed_mps",
+                        points.iter().map(|p| p.shear_sound_speed_mps).collect(),
+                    ),
+                    (
+                        "density_g_cm3",
+                        points.iter().map(|p| p.density_g_cm3).collect(),
+                    ),
+                    (
+                        "compressional_attenuation_db_per_wavelength",
+                        points
+                            .iter()
+                            .map(|p| p.compressional_attenuation_db_per_wavelength)
+                            .collect(),
+                    ),
+                    (
+                        "shear_attenuation_db_per_wavelength",
+                        points
+                            .iter()
+                            .map(|p| p.shear_attenuation_db_per_wavelength)
+                            .collect(),
+                    ),
+                ] {
+                    assert_eq!(hdf5_data::<f64>(&profile, name, &[points.len()]), expected);
+                }
             }
             top = material.bottom_depth_m;
         }

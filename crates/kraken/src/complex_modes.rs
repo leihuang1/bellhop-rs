@@ -108,7 +108,12 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             .map_or(h, crate::elastic::SolidMesh::spacing);
         let elastic = crate::elastic::has_half_space(case) || crate::elastic::has_layers(case);
         if elastic {
-            min_speed = crate::elastic::minimum_speed(case, min_speed);
+            min_speed = crate::elastic::minimum_speed(
+                case,
+                min_speed,
+                &bottom.top_solids,
+                &bottom.lower_solids,
+            );
         }
         let water_k2 = (omega / min_speed).powi(2);
         if !water_k2.is_finite() || b.iter().any(|x| !x.re.is_finite() || !x.im.is_finite()) {

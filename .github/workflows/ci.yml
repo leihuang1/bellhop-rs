@@ -195,7 +195,7 @@ jobs:
             elastic_failures_preserve_output_and_remove_scratch -- --exact --nocapture
       - name: Finite elastic modes, FIELD and actual CLI HDF5 differential
         run: |
-          (cd crates/kraken/tests/fixtures && sha256sum -c golden/finite-elastic.sha256)
+          (cd crates/kraken/tests/fixtures && sha256sum -c golden/finite-elastic.sha256 && sha256sum -c golden/graded-elastic.sha256)
           mkdir -p target/reference/finite-elastic-original-inputs
           docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/finite-elastic-original-inputs:/out" \
             --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 \
@@ -207,10 +207,11 @@ jobs:
           done
           cargo build --release -p kraken-cli
           for engine in kraken krakenc; do
-            for case in FiniteElasticBothC FiniteElasticBothN FiniteElasticBothP FiniteElasticBothS FiniteElasticBottomC FiniteElasticBottomN FiniteElasticBottomP FiniteElasticBottomS FiniteElasticPower FiniteElasticRigid FiniteElasticShearOnly FiniteElasticStack FiniteElasticTopC FiniteElasticTopN FiniteElasticTopP FiniteElasticTopS FiniteElasticVacuum FiniteSingleIceC FiniteSingleIceP FiniteSingleIceS FiniteSingleSedimentC FiniteSingleSedimentP FiniteSingleSedimentS OriginalElasticIce OriginalElasticSediment; do
+            for case in FiniteElasticBothC FiniteElasticBothN FiniteElasticBothP FiniteElasticBothS FiniteElasticBottomC FiniteElasticBottomN FiniteElasticBottomP FiniteElasticBottomS FiniteElasticPower FiniteElasticRigid FiniteElasticShearOnly FiniteElasticStack FiniteElasticTopC FiniteElasticTopN FiniteElasticTopP FiniteElasticTopS FiniteElasticVacuum FiniteSingleIceC FiniteSingleIceP FiniteSingleIceS FiniteSingleSedimentC FiniteSingleSedimentP FiniteSingleSedimentS OriginalElasticIce OriginalElasticSediment GradedElasticTopN GradedElasticTopC GradedElasticTopP GradedElasticTopS GradedElasticBottomN GradedElasticBottomC GradedElasticBottomP GradedElasticBottomS GradedElasticStack GradedElasticPower GradedElasticBio; do
               tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             done
           done
+          tools/reference/compare-kraken-hdf5.sh kraken crates/kraken/tests/fixtures/GradedElasticTopNRefined.env
           cargo test --release -p kraken-cli --test run \
             finite_elastic_failures_preserve_output_and_remove_scratch -- --exact --nocapture
       - name: KRAKEN CLI HDF5 numerical differential
@@ -321,6 +322,10 @@ jobs:
             'ElasticHalfTopN kraken crates/kraken/tests/fixtures/ElasticHalfTopN.env target/reference/ElasticHalfTopN-kraken/ElasticHalfTopN' \
             'ElasticHalfBothS kraken crates/kraken/tests/fixtures/ElasticHalfBothS.env target/reference/ElasticHalfBothS-kraken/ElasticHalfBothS' \
             'ElasticHalfTopBroadband kraken crates/kraken/tests/fixtures/ElasticHalfTopBroadband.env target/reference/ElasticHalfTopBroadband-kraken/ElasticHalfTopBroadband' \
+            'GradedElasticBottomN kraken crates/kraken/tests/fixtures/GradedElasticBottomN.env target/reference/GradedElasticBottomN-kraken/GradedElasticBottomN' \
+            'GradedElasticTopS krakenc crates/kraken/tests/fixtures/GradedElasticTopS.env target/reference/GradedElasticTopS-krakenc/GradedElasticTopS' \
+            'GradedElasticPower krakenc crates/kraken/tests/fixtures/GradedElasticPower.env target/reference/GradedElasticPower-krakenc/GradedElasticPower' \
+            'GradedElasticBio krakenc crates/kraken/tests/fixtures/GradedElasticBio.env target/reference/GradedElasticBio-krakenc/GradedElasticBio' \
             'TabRefBrc krakenc target/reference/TabRefCoef/run1/neggradC_brc.env target/reference/TabRefCoef/run1/neggradC_brc' \
             'TabRefIrc krakenc target/reference/TabRefCoef/run1/neggradC_irc.env target/reference/TabRefCoef/run1/neggradC_irc' \
             'BroadBandMunk kraken target/reference/cases/BroadBand/MunkK.env target/reference/BroadBand-MunkK-kraken/MunkK' \

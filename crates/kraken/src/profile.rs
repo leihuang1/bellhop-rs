@@ -25,6 +25,21 @@ impl<'a> Profile<'a> {
         case: &'a CaseDefinition,
         layer: crate::layers::Layer<'a>,
     ) -> Result<Self, DiagnosticReport> {
+        Self::build(case, layer, false)
+    }
+
+    pub(crate) fn new_elastic_layer(
+        case: &'a CaseDefinition,
+        layer: crate::layers::Layer<'a>,
+    ) -> Result<Self, DiagnosticReport> {
+        Self::build(case, layer, true)
+    }
+
+    fn build(
+        case: &'a CaseDefinition,
+        layer: crate::layers::Layer<'a>,
+        elastic: bool,
+    ) -> Result<Self, DiagnosticReport> {
         let points = layer.points;
         let mut minimum_speed = if case.interpolation == Interpolation::AnalyticMunk {
             1500.0
@@ -64,7 +79,15 @@ impl<'a> Profile<'a> {
             points
                 .iter()
                 .zip(layer.loss)
-                .map(|(p, &a)| a * p.sound_speed_mps / (8.685_889_6 * 2.0 * PI))
+                .map(|(p, &a)| {
+                    if elastic {
+                        // CRCI converts wavelength loss to neper/m, then multiplies by c²/omega.
+                        let neper = a * case.frequency_hz / (8.685_889_6 * p.sound_speed_mps);
+                        neper * p.sound_speed_mps.powi(2) / (2.0 * PI * case.frequency_hz)
+                    } else {
+                        a * p.sound_speed_mps / (8.685_889_6 * 2.0 * PI)
+                    }
+                })
                 .collect()
         } else {
             Vec::new()
@@ -106,6 +129,29 @@ impl<'a> Profile<'a> {
         self.minimum_speed
     }
 
+    pub(crate) fn minimum_scaled_difference(&self, other: &Self, scale: f64) -> f64 {
+        if self.cubic.is_empty() {
+            self.layer
+                .points
+                .iter()
+                .zip(other.layer.points)
+                .map(|(a, b)| a.sound_speed_mps - scale * b.sound_speed_mps)
+                .fold(f64::INFINITY, f64::min)
+        } else {
+            self.cubic
+                .iter()
+                .zip(&other.cubic)
+                .zip(self.layer.points.windows(2))
+                .map(|((a, b), p)| {
+                    segment_minimum(
+                        std::array::from_fn(|i| a[i] - scale * b[i]),
+                        p[1].depth_m - p[0].depth_m,
+                    )
+                })
+                .fold(f64::INFINITY, f64::min)
+        }
+    }
+
     #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
     pub(super) fn mesh_speed(&self, index: usize, intervals: usize) -> f64 {
         let analytic = self.case.interpolation == Interpolation::AnalyticMunk;
@@ -132,25 +178,41 @@ impl<'a> Profile<'a> {
             (self.layer.top
                 + index as f64 * ((self.layer.bottom - self.layer.top) / intervals as f64))
                 .min(self.layer.bottom),
+            false,
         )
     }
 
-    fn complex_speed(&self, depth: f64) -> Complex64 {
+    #[allow(clippy::cast_precision_loss)]
+    pub(crate) fn mesh_elastic_speed(&self, index: usize, intervals: usize) -> Complex64 {
+        let depth = if index == intervals {
+            self.layer.bottom
+        } else {
+            self.layer.top
+                + index as f64 * ((self.layer.bottom - self.layer.top) / intervals as f64)
+        };
+        self.complex_speed(depth, true)
+    }
+
+    fn complex_speed(&self, depth: f64, elastic: bool) -> Complex64 {
         let points = self.layer.points;
         let upper = points
             .partition_point(|p| p.depth_m < depth)
             .clamp(1, points.len() - 1);
         let a = Complex64::new(
             points[upper - 1].sound_speed_mps,
-            self.imaginary_speeds[upper - 1],
+            self.imaginary_speeds.get(upper - 1).copied().unwrap_or(0.0),
         );
-        let b = Complex64::new(points[upper].sound_speed_mps, self.imaginary_speeds[upper]);
+        let b = Complex64::new(
+            points[upper].sound_speed_mps,
+            self.imaginary_speeds.get(upper).copied().unwrap_or(0.0),
+        );
         let t = depth - points[upper - 1].depth_m;
         let weight = t / (points[upper].depth_m - points[upper - 1].depth_m);
         match self.case.interpolation {
             Interpolation::N2Linear => {
-                if self.case.mode_solver == crate::ModeSolver::Kraken
-                    && crate::elastic::has_layers(self.case)
+                if elastic
+                    || (self.case.mode_solver == crate::ModeSolver::Kraken
+                        && crate::elastic::has_layers(self.case))
                 {
                     let one = Complex64::new(1.0, 0.0);
                     let top = one / a.powi(2);
@@ -164,7 +226,11 @@ impl<'a> Profile<'a> {
             }
             Interpolation::CLinear => (1.0 - weight) * a + weight * b,
             Interpolation::Pchip | Interpolation::Spline => {
-                let [c0, c1, c2, c3] = self.imaginary_cubic[upper - 1];
+                let [c0, c1, c2, c3] = self
+                    .imaginary_cubic
+                    .get(upper - 1)
+                    .copied()
+                    .unwrap_or([0.0; 4]);
                 Complex64::new(self.speed(depth), c0 + t * (c1 + t * (c2 + t * c3)))
             }
             Interpolation::AnalyticMunk => unreachable!(),
@@ -221,7 +287,19 @@ pub(crate) fn principal_root(z: Complex64) -> Complex64 {
     if z.im == 0.0 || !z.re.is_finite() || !z.im.is_finite() {
         return z.sqrt();
     }
-    let part = (0.5 * z.norm() + 0.5 * z.re.abs()).sqrt();
+    let mut norm = z.norm();
+    let squared = norm * norm;
+    if squared.is_normal() {
+        // Correct platform hypot rounding using an FMA residual; N² shooting is
+        // sensitive to a one-ulp square-root difference at the same complex input.
+        let imaginary_squared = z.im * z.im;
+        let residual = z.re.mul_add(z.re, -squared)
+            + imaginary_squared
+            + z.im.mul_add(z.im, -imaginary_squared)
+            - norm.mul_add(norm, -squared);
+        norm = residual.mul_add(0.5 / norm, norm);
+    }
+    let part = (0.5 * norm + 0.5 * z.re.abs()).sqrt();
     if z.re >= 0.0 {
         Complex64::new(part, 0.5 * z.im / part)
     } else {
@@ -229,7 +307,7 @@ pub(crate) fn principal_root(z: Complex64) -> Complex64 {
     }
 }
 
-fn cubic_coefficients(
+pub(crate) fn cubic_coefficients(
     kind: Interpolation,
     h: &[f64],
     values: &[f64],
@@ -273,7 +351,7 @@ fn cubic_coefficients(
 }
 
 // Cubic extrema can lie between mesh nodes; use them for validation and trapping.
-fn segment_minimum([c0, c1, c2, c3]: [f64; 4], step: f64) -> f64 {
+pub(crate) fn segment_minimum([c0, c1, c2, c3]: [f64; 4], step: f64) -> f64 {
     let evaluate = |t: f64| c0 + t * (c1 + t * (c2 + t * c3));
     let end = evaluate(step);
     if !end.is_finite() {
@@ -435,7 +513,17 @@ fn spline_slopes(h: &[f64], delta: &[f64]) -> Vec<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Profile, spline_slopes};
+    use super::{Profile, principal_root, spline_slopes};
+
+    #[test]
+    fn elastic_square_root_keeps_pinned_n2_rounding() {
+        let root = principal_root(num_complex::Complex64::new(
+            1.103_288_297_121_612_5e-7,
+            -1.274_145_729_606_203_5e-9,
+        ));
+        assert_eq!(root.re.to_bits(), 3.321_633_758_344_346e-4_f64.to_bits());
+        assert_eq!(root.im.to_bits(), (-1.917_950_355_612_498e-6_f64).to_bits());
+    }
     use crate::{Case, Interpolation, legacy::load_case};
     use std::path::Path;
 

@@ -64,7 +64,7 @@ The KRAKEN `load_case`/`solve` path currently accepts a narrow legacy
   (not-a-knot cubic spline) interpolation; each layer has constant density,
   its own SSP/loss nodes and mesh, with material jumps at interfaces.
   `A` (the fixed 5000 m analytic Munk profile from upstream `misc/munk.f90`)
-  remains single-layer and lossless. Density gradients within fluids are rejected; homogeneous finite solid caps use the separate checkpoint below;
+  remains single-layer and lossless. Density gradients within fluids are rejected; finite solid caps use the separate checkpoint below;
 - smooth vacuum (`V`), rigid (`R`) or acoustic fluid half-space (`A`) at either
   end. A boundaries carry material/volume attenuation; V/R have no half-space
   record or material properties. Real KRAKEN requires cHigh no larger than
@@ -72,8 +72,8 @@ The KRAKEN `load_case`/`solve` path currently accepts a narrow legacy
   N/C/P/S water additionally accepts elastic A top/bottom through both engines,
   as detailed below. KRAKEN caps elastic cHigh at cs and retains the reference's
   limited loss model (top compressional perturbation, omitted elastic shear/bottom absorption). N/C/P/S water supports
-  nonnegative absorption; analytic A remains lossless. Homogeneous finite solids outside the contiguous
-  fluid interval are supported separately; graded/interleaved solids and rough
+  nonnegative absorption; analytic A remains lossless. Finite solids with homogeneous or depth-varying material outside the contiguous
+  fluid interval are supported separately; interleaved solids and rough
   boundaries remain unsupported;
 - a line (`X`), point (`R`) or scaled-cylindrical (`S`) source; omnidirectional
   (`O`) or same-stem tabulated (`*`, `.sbp`) pattern; coherent (`C`) or
@@ -305,7 +305,7 @@ frequencies, up to five refinement meshes and coherent line-/point-source FIELD
 extend to fluid stacks. Analytic Munk A, F/P bottoms and top TRC **remain
 single-layer**; no new table/analytic combination is enabled. Density variation
 inside a fluid layer, roughness and multiple FIELD profiles remain unsupported.
-Elastic half-spaces and homogeneous finite solid caps are added by separate
+Elastic half-spaces and finite solid caps are added by separate
 checkpoints below, not by treating solids as additional fluid layers. At most 500 finite layers, 100,000 total SSP nodes and 100,000
 total loss values are retained. Mesh intervals, shape values, copied frequency
 inputs and numerical work use the previous ceilings **for the entire stack**.

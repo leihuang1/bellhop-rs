@@ -273,6 +273,17 @@ fn cli_round_trips_finite_elastic_layers() {
         "FiniteElasticTopP",
         "FiniteElasticTopS",
         "FiniteElasticVacuum",
+        "GradedElasticTopN",
+        "GradedElasticTopC",
+        "GradedElasticTopP",
+        "GradedElasticTopS",
+        "GradedElasticBottomN",
+        "GradedElasticBottomC",
+        "GradedElasticBottomP",
+        "GradedElasticBottomS",
+        "GradedElasticStack",
+        "GradedElasticPower",
+        "GradedElasticBio",
         "FiniteSingleIceC",
         "FiniteSingleIceP",
         "FiniteSingleIceS",
@@ -303,18 +314,18 @@ fn finite_elastic_failures_preserve_output_and_remove_scratch() {
     let output = root.join("old.h5");
     let old = b"old finite elastic output";
     fs::write(&output, old).unwrap();
-    let env = root.join("graded.env");
+    let env = root.join("bad-material.env");
     fs::write(
         &env,
         fs::read_to_string(fixture("FiniteElasticBothN.env"))
             .unwrap()
-            .replace("20.0 3000.0 1400.0", "20.0 3100.0 1400.0"),
+            .replace("20.0 3000.0 1400.0", "20.0 1500.0 1400.0"),
     )
     .unwrap();
     fs::copy(fixture("FiniteElasticBothN.flp"), env.with_extension("flp")).unwrap();
     let process = run(&env, &output, "kraken", &["--overwrite"]);
     assert_failure(&process, 2, &output, old);
-    assert!(String::from_utf8_lossy(&process.stderr).contains("homogeneous"));
+    assert!(String::from_utf8_lossy(&process.stderr).contains("positive bulk modulus"));
     let env = root.join("bad.env");
     fs::write(
         &env,

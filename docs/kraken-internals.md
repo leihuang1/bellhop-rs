@@ -30,6 +30,13 @@ adds no physics or new acceptance requirements.
 
 `solver::solve_modes` chooses `modes.rs` (KRAKEN) or `complex_modes.rs`
 (KRAKENC). Both use `Profile`, finite-layer meshes and elastic impedances.
+`ElasticLayer.material_profile` retains depth-varying cp/cs/density/P/S losses.
+Legacy materials convert each node independently at each solve frequency;
+`SolidMesh` samples the selected N/C/P/S profile and builds per-node compound
+coefficients. Automatic solid meshes use the last input shear speed, while
+spectral limits use the sampled minimum. Interpolated density, losses and bulk
+modulus are validated before shooting. Real/complex coefficient grouping and
+first-mesh normalization remain separate.
 Their root searches, precision, work limits and deflation arithmetic remain
 separate Implementations.
 

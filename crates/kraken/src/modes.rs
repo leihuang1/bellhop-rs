@@ -386,10 +386,12 @@ impl<'a> Mesh<'a> {
         work: &mut usize,
     ) -> Result<Vec<f64>, DiagnosticReport> {
         let c_high = crate::elastic::maximum_speed(self.case);
-        let c_low = self
-            .case
-            .c_low_mps
-            .max(crate::elastic::minimum_speed(self.case, self.min_speed));
+        let c_low = self.case.c_low_mps.max(crate::elastic::minimum_speed(
+            self.case,
+            self.min_speed,
+            &self.top_solids,
+            &self.bottom_solids,
+        ));
         if c_low >= c_high {
             return Err(error(
                 "KR0301",
@@ -658,6 +660,7 @@ impl<'a> Mesh<'a> {
     }
 
     #[allow(clippy::float_cmp)]
+    #[allow(clippy::too_many_lines)] // Keep pinned Solve1 isolation and boundary counting together.
     fn roots(&self, work: &mut usize) -> Result<Vec<f64>, DiagnosticReport> {
         // Preserve Solve1's lower search guard, including its cutoff exclusion.
         let elastic = crate::elastic::has_half_space(self.case);
@@ -667,7 +670,12 @@ impl<'a> Mesh<'a> {
             self.case.c_high_mps
         };
         let minimum = if elastic {
-            crate::elastic::minimum_speed(self.case, self.min_speed)
+            crate::elastic::minimum_speed(
+                self.case,
+                self.min_speed,
+                &self.top_solids,
+                &self.bottom_solids,
+            )
         } else {
             self.min_speed
         };

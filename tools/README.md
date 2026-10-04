@@ -348,6 +348,13 @@ solid HDF5 material attributes; finite loss uses the existing lossy tolerance,
 not a relaxed comparison. Both engines support contiguous fluid stacks;
 comparisons use `solve_frequencies` to preserve real Solve2's search bound. See [finite-cap limits and real-stiffness semantics](../docs/kraken-finite-elastic-layers.md).
 
+Depth-varying finite material adds 12 derived input pairs / 23 workflows / 29
+frequency blocks / 158 modes / 1,827 pressures. `golden/graded-elastic.sha256`
+locks 93 input/artifact records. The same comparator checks complete declared
+results and all six solid-profile HDF5 datasets; JSON comparisons use the same
+unmodified Fortran oracle. Triplicate MOD/SHD byte controls, tolerances and
+work budgets are unchanged.
+
 `python3 tools/reference/probe-layered-refinement.py` is a **diagnostic-only**
 experiment for the open three-layer refinement gap. It runs the unmodified
 oracle, a zero-perturbation control and ±256-ULP seed probes in a disposable

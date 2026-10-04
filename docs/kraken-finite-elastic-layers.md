@@ -1,26 +1,30 @@
-# Homogeneous finite elastic-layer checkpoint
+# Finite elastic layers
 
 Finite solids are now propagated with the pinned five-component compound matrix,
 not replaced by acoustic layers or half-spaces. This bounded block covers smooth,
-homogeneous solid caps above/below a contiguous N/C/P/S fluid stack:
+homogeneous or depth-varying solid caps above/below a contiguous N/C/P/S fluid stack:
 
 - **KRAKENC:** multiple fluid layers and multiple finite solid caps, with complex
   P/S attenuation. Outer solid boundary must be V, R or elastic A.
-- **KRAKEN:** multiple contiguous fluid layers and homogeneous solid caps,
+- **KRAKEN:** multiple contiguous fluid layers and finite solid caps,
   retaining pinned real stiffness and elastic-loss omission. Elastic top
   half-spaces combined with finite solids remain unvalidated; fluid-only tops
   pass the separate half-space block.
-- Finite cp/cs/density/loss are constant within each solid; jumps between solids
-  are allowed, with full compound state carried across each interface. Roughness,
-  graded solids, solids interleaved with fluids, pure-solid cases, analytic Munk,
-  F/P/TRC combinations and depth-local biological loss in solids remain excluded.
+- Finite cp/cs/density/P/S loss may vary with depth within each solid; jumps between
+  solids are allowed, with full compound state carried across each interface. Roughness,
+  solids interleaved with fluids, pure-solid cases, analytic Munk,
+  F/P/TRC combinations remain excluded.
 - Modal/source/receiver samples remain **fluid pressure**, at absolute depths
   inside the fluid interval. No displacement/strain sampling in solids is exposed.
 - An acoustic outer A behind finite solids is rejected: the pinned BC routine
   does not initialize its five-component compound state in that branch.
 
 `ElasticLayer` carries absolute bottom depth, cp, cs, density, canonical
-solve-frequency P/S dB/wavelength losses and nominal NG. `top_elastic_layers`
+solve-frequency P/S dB/wavelength losses and nominal NG. Its optional
+`material_profile` stores complete `ElasticMaterialPoint` samples: absolute depth,
+cp, cs, density and both losses. Empty profiles retain the homogeneous representation;
+nonempty profiles include both endpoints and agree with scalar material at the first
+sample. `top_elastic_layers`
 starts at 0; `bottom_elastic_layers` starts at `fluid_bottom_depth_m()`. The
 existing water fields still define the first fluid, now possibly below a cap.
 `fluid_top_depth_m()` and `fluid_bottom_depth_m()` bound acoustic samples;
@@ -37,7 +41,8 @@ KRAKENC reuses its complex secant, first-mesh shapes/group speeds and Richardson
 roots. The first two raw mesh scans and later Neville seeds stay distinct from
 extrapolated eigenvalues. Real solids retain SSP-node rounding even for uniform
 materials, the pinned scalar operation grouping and full outer-boundary state.
-N/C resample constant density with linear weights; P/S retain constant density.
+N/C interpolate solid density linearly; P/S use the pinned PCHIP/spline density
+coefficients. The constant-material rounding of existing inputs is retained.
 
 `Solve2` carries its searched-mode bound `M` across meshes and frequencies. A
 cHigh exit reduces the next search bound; surviving first-mesh shapes/loss and
@@ -62,7 +67,9 @@ Limits are unchanged and shared with fluid media: at most 500 total finite media
 1M total mesh intervals per frequency/level, 100K total conceptual profile/loss
 entries, 20K roots, 5M sampled shapes, 1M FIELD samples, 5M copied-input entries,
 1000 frequencies. Parsing counts all raw SSP records before compressing uniform
-solids; copied solid material costs seven entries per frequency. Root work counts
+solids; copied solid material costs seven scalar entries plus six values per
+retained profile sample per frequency. Both P/S node-loss arrays count toward the
+existing aggregate loss-storage bound. Root work counts
 five compound-component steps per solid node against the existing 2.5B KRAKEN /
 300M KRAKENC limits. These are logical work/storage bounds, not wall-time or native
 HDF5 descriptor guarantees. Atomic publication/quota/input-protection contracts
@@ -93,6 +100,32 @@ and generated artifacts; Rust HDF5 is never a golden.
 - FiniteElasticStack adds two different solid media on each side of two fluids;
   no density averaging or interpolation crosses solid/material interfaces.
 
+## Depth-varying material evidence
+
+Twelve new derived input pairs add **23 workflows, 29 frequency blocks, 158 modes
+and 1,827 pressures**, with maximum pressure error **2.08250058582033e-9**. The
+93-record `golden/graded-elastic.sha256` contains 24 input files and 69 Fortran
+artifacts. Three independent runs have byte-identical MOD/SHD output; PRT records
+retain CPU timings and only trim trailing whitespace. Existing inputs, goldens,
+tolerances and work budgets are unchanged.
+
+Each solid has four depth samples, varying cp, cs, density and both losses.
+`GradedElasticTop{N,C,P,S}` and `GradedElasticBottom{N,C,P,S}` exercise both engines;
+`GradedElasticStack` covers separately sampled adjacent solids.
+`GradedElasticPower` preserves 75/50/62.5/50 Hz and converts raw power-law losses
+at every node for every frequency. `GradedElasticBio` includes depth-local
+biological loss in finite material. API and actual legacy CLI/HDF5 compare every
+declared mode, shape, group speed, loss and pressure. Four representative inputs
+also pass self-contained JSON API and actual JSON CLI/HDF5 against the same oracle.
+
+Top N/C and Bio use RMax=0 because their constructed 1000-km KRAKENC probes fail
+the reference's mesh-convergence check; these probes are not accepted evidence.
+The separately named real `GradedElasticTopNRefined` keeps RMax=1000 km and checks
+the complete three-mode refined spectrum. The other top/bottom/stack/power paths
+retain the inherited refinement range. No count clipping or relaxed convergence
+guard is used. N² sampling retains the pinned principal complex square root;
+an FMA residual corrects platform `hypot` rounding at identical complex inputs.
+
 ## Real multi-fluid regression and remaining limits
 
 The formerly rejected real paths now compare complete declared spectra and FIELD:
@@ -107,7 +140,7 @@ no altered seed, tolerance, numerical reference or solver budget is accepted.
 The TopN, ShearOnly and ordered Power cases also pass self-contained JSON API
 and actual JSON CLI/HDF5 comparison against the same references.
 
-Graded/interleaved solids, real elastic-top/finite-solid combinations and the other excluded
+Interleaved solids, real elastic-top/finite-solid combinations and the other excluded
 combinations above remain outside this checkpoint. The existing KRAKENC
 three-layer refinement gap is unchanged; no new parity waiver is added.
 Separate [multi-profile FIELD](kraken-multi-profile-field.md) and

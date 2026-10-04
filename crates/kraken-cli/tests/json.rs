@@ -78,12 +78,17 @@ fn assert_datasets(left: &Group, right: &Group) {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // One interface check covers relocation, provenance and full dataset equality.
 fn json_cli_exports_and_runs_relocated_documents_without_auxiliary_files() {
     let root = directory("round-trip");
     for (name, solver) in [
         ("Pekeris", "kraken"),
         ("WaterLossPower", "krakenc"),
         ("FiniteSingleIceC", "kraken"),
+        ("GradedElasticBottomN", "kraken"),
+        ("GradedElasticTopS", "krakenc"),
+        ("GradedElasticPower", "krakenc"),
+        ("GradedElasticBio", "krakenc"),
         ("ElasticHalfTopP", "krakenc"),
         ("ElasticHalfTopN", "kraken"),
         ("ElasticHalfBothS", "kraken"),

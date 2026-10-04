@@ -198,6 +198,7 @@ pub fn solve_field(case: &FieldCase) -> Result<ProfileSimulationResult, Diagnost
 }
 
 /// Solve ordered frequency blocks, stopping after the first failed block.
+/// Blocks must share one mode solver; a mismatch yields `KR0201` without solving it.
 /// Real finite-elastic KRAKEN retains Solve2's search bound across meshes and
 /// frequencies; separate calls to `solve_field` start separate reference runs.
 pub fn solve_frequencies(
@@ -206,7 +207,16 @@ pub fn solve_frequencies(
     cases
         .iter()
         .scan(Some(crate::MAX_MODE_LIMIT), |limit, case| {
-            let result = solve_field_with_limit(case, limit.as_mut()?);
+            let root_limit = limit.as_mut()?;
+            let result = if case.profiles[0].mode_solver == cases[0].profiles[0].mode_solver {
+                solve_field_with_limit(case, root_limit)
+            } else {
+                Err(error(
+                    "KR0201",
+                    "frequency blocks must share the same mode solver",
+                    "mode_solver",
+                ))
+            };
             if result.is_err() {
                 *limit = None;
             }

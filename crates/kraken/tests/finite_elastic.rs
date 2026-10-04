@@ -299,6 +299,59 @@ fn frequency_runs_reset_search_state_and_stop_after_failure() {
 }
 
 #[test]
+fn frequency_runs_reject_mixed_solvers_before_solving_the_mismatched_block() {
+    use kraken::{FieldCase, FieldPropagation, solve_field, solve_frequencies};
+
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let complex = legacy::load_complex_case(
+        fixtures.join("PekerisComplexCLow.env"),
+        fixtures.join("Pekeris.flp"),
+    )
+    .unwrap();
+    let real = original("FiniteElasticBothN", ModeSolver::Kraken);
+    assert!(solve_frequencies(&[]).next().is_none());
+    for ranges in [vec![0.0], vec![0.0, 1000.0]] {
+        let propagation = if ranges.len() == 1 {
+            FieldPropagation::RangeIndependent
+        } else {
+            FieldPropagation::Adiabatic
+        };
+        let fields = [complex.clone(), real.clone()].map(|case| {
+            FieldCase::new(vec![case; ranges.len()], ranges.clone(), propagation).unwrap()
+        });
+        for order in [[0, 1], [1, 0]] {
+            let first = &fields[order[0]];
+            let expected = solve_field(first).unwrap();
+            assert_eq!(
+                expected.modes[0].modes.len(),
+                if order[0] == 0 { 3 } else { 6 }
+            );
+            let homogeneous = [first.clone(), first.clone()];
+            for result in solve_frequencies(&homogeneous) {
+                assert_eq!(result.unwrap(), expected);
+            }
+            let sequence = [first.clone(), fields[order[1]].clone(), first.clone()];
+            let mut results = solve_frequencies(&sequence);
+            assert_eq!(results.next().unwrap().unwrap(), expected);
+            let Some(Err(report)) = results.next() else {
+                panic!(
+                    "mixed-solver frequency block must be rejected, not publish a truncated spectrum"
+                );
+            };
+            let diagnostic = &report.diagnostics()[0];
+            assert_eq!(diagnostic.code, "KR0201");
+            assert_eq!(diagnostic.field, "mode_solver");
+            assert_eq!(
+                diagnostic.message,
+                "frequency blocks must share the same mode solver"
+            );
+            assert!(results.next().is_none());
+            assert!(results.next().is_none());
+        }
+    }
+}
+
+#[test]
 fn real_finite_stiffness_is_not_the_lossless_half_space_approximation() {
     let case = original("OriginalElasticIce", ModeSolver::Kraken);
     let with_loss = solve(&case).unwrap();

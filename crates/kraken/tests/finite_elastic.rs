@@ -218,12 +218,84 @@ fn finite_loss_and_mesh_scaling_preserve_frequency_order() {
     assert_eq!(cases[1], cases[3]);
     let mut input = cases[0].clone().into_definition();
     input.mode_solver = ModeSolver::Kraken;
-    assert!(
-        Case::from_definition(input)
-            .unwrap_err()
-            .to_string()
-            .contains("multi-fluid elastic secant parity")
+    Case::from_definition(input).unwrap();
+}
+
+#[test]
+fn real_multifluid_finite_elastic_cases_keep_complete_pinned_spectra() {
+    for (name, counts) in [
+        ("FiniteElasticTopN", vec![4]),
+        ("FiniteElasticShearOnly", vec![3]),
+        ("FiniteElasticPower", vec![8, 6, 6, 6]),
+    ] {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name);
+        let cases = legacy::load_field_cases(
+            root.with_extension("env"),
+            root.with_extension("flp"),
+            ModeSolver::Kraken,
+        )
+        .unwrap();
+        assert_eq!(cases.len(), counts.len());
+        for ((case, result), count) in cases
+            .iter()
+            .zip(kraken::solve_frequencies(&cases))
+            .zip(counts)
+        {
+            let result = result.unwrap();
+            assert_eq!(
+                result.modes[0].modes.len(),
+                count,
+                "{name}: {} Hz",
+                case.profiles()[0].frequency_hz
+            );
+            assert_eq!(result.field.pressure.len(), 63);
+        }
+    }
+}
+
+#[test]
+fn frequency_runs_reset_search_state_and_stop_after_failure() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/FiniteElasticPower");
+    let cases = legacy::load_field_cases(
+        root.with_extension("env"),
+        root.with_extension("flp"),
+        ModeSolver::Kraken,
+    )
+    .unwrap();
+    let first = kraken::solve_frequencies(&cases)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(first[1], first[3]);
+    assert_eq!(first[2].modes[0].modes.len(), 6);
+    // The same canonical 62.5 Hz case starts a separate pinned run with seven,
+    // rather than inheriting the preceding 50 Hz Solve2 bound of six.
+    assert_eq!(solve(&cases[2].profiles()[0]).unwrap().modes.modes.len(), 7);
+    assert_eq!(
+        kraken::solve_frequencies(&cases)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap(),
+        first
     );
+
+    let mut input = cases[1].profiles()[0].clone().into_definition();
+    input.mesh_points = 10;
+    let bad = kraken::FieldCase::new(
+        vec![Case::from_definition(input).unwrap()],
+        vec![0.0],
+        kraken::FieldPropagation::RangeIndependent,
+    )
+    .unwrap();
+    let sequence = [cases[0].clone(), bad, cases[3].clone()];
+    let mut results = kraken::solve_frequencies(&sequence);
+    assert!(results.next().unwrap().is_ok());
+    assert_eq!(
+        results.next().unwrap().unwrap_err().diagnostics()[0].code,
+        "KR0302"
+    );
+    assert!(results.next().is_none());
+    assert!(results.next().is_none());
 }
 
 #[test]

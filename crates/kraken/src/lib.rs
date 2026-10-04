@@ -13,7 +13,9 @@ mod complex_modes;
 mod elastic;
 mod field;
 mod layers;
-pub use field::{FieldCase, FieldPropagation, ProfileSimulationResult, solve_field};
+pub use field::{
+    FieldCase, FieldPropagation, ProfileSimulationResult, solve_field, solve_frequencies,
+};
 pub mod input;
 pub mod json;
 pub mod legacy;
@@ -746,7 +748,7 @@ pub struct SimulationResult {
 /// Returns a diagnostic if the phase-speed range contains no supported modes or
 /// the field exceeds the bounded modal-work limit.
 pub fn solve(case: &Case) -> Result<SimulationResult, DiagnosticReport> {
-    solver::solve(case)
+    solver::solve(case, MAX_MODE_LIMIT)
 }
 
 /// Compute complex normal modes without synthesizing a FIELD.

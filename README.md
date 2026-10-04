@@ -80,9 +80,10 @@ TLslices `scholte/normal/flused` (415 modes, 4,707 pressures). KRAKEN elastic to
 is explicitly rejected; KRAKEN retains the reference's elastic-loss omission,
 so use KRAKENC for elastic attenuation.
 [Homogeneous finite elastic caps](docs/kraken-finite-elastic-layers.md) now pass
-33 full API/CLI-HDF5 workflows, including original `elsed/ice` (827 modes,
-9,276 pressures). KRAKENC supports layered fluids; KRAKEN finite elasticity
-requires one fluid layer and retains its reference real-stiffness/loss limitation.
+50 full API/CLI-HDF5 workflows, including original `elsed/ice` (933 modes,
+10,536 pressures). Both engines support contiguous fluid stacks; KRAKEN retains
+its reference real-stiffness/loss limitation. `solve_frequencies` preserves
+ordered finite-elastic search state across a run.
 Graded/interleaved solids and KRAKEN elastic top-half-space remain later work.
 Analytic Munk and F/P/TRC boundaries remain single-layer.
 `legacy::load_frequency_cases` supports discrete multi-frequency KRAKEN/KRAKENC

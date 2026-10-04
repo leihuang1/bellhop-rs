@@ -283,9 +283,6 @@ fn cli_round_trips_finite_elastic_layers() {
         "OriginalElasticSediment",
     ] {
         for solver in ["kraken", "krakenc"] {
-            if solver == "kraken" && name.starts_with("FiniteElastic") {
-                continue;
-            }
             let env = fixture(&format!("{name}.env"));
             let output = root.join(format!("{name}-{solver}.h5"));
             let process = run(&env, &output, solver, &[]);
@@ -306,14 +303,18 @@ fn finite_elastic_failures_preserve_output_and_remove_scratch() {
     let output = root.join("old.h5");
     let old = b"old finite elastic output";
     fs::write(&output, old).unwrap();
-    let process = run(
-        &fixture("FiniteElasticBothN.env"),
-        &output,
-        "kraken",
-        &["--overwrite"],
-    );
+    let env = root.join("graded.env");
+    fs::write(
+        &env,
+        fs::read_to_string(fixture("FiniteElasticBothN.env"))
+            .unwrap()
+            .replace("20.0 3000.0 1400.0", "20.0 3100.0 1400.0"),
+    )
+    .unwrap();
+    fs::copy(fixture("FiniteElasticBothN.flp"), env.with_extension("flp")).unwrap();
+    let process = run(&env, &output, "kraken", &["--overwrite"]);
     assert_failure(&process, 2, &output, old);
-    assert!(String::from_utf8_lossy(&process.stderr).contains("multi-fluid elastic secant parity"));
+    assert!(String::from_utf8_lossy(&process.stderr).contains("homogeneous"));
     let env = root.join("bad.env");
     fs::write(
         &env,
@@ -691,8 +692,17 @@ fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
     }
     let mut mode_count = 0_u64;
     let mut pressure_count = 0_u64;
-    for (index, case) in cases.iter().enumerate() {
-        let expected = kraken::solve(case).unwrap();
+    let fields = kraken::legacy::load_field_cases(env, flp, engine).unwrap();
+    for ((index, case), result) in cases
+        .iter()
+        .enumerate()
+        .zip(kraken::solve_frequencies(&fields))
+    {
+        let result = result.unwrap();
+        let expected = kraken::SimulationResult {
+            modes: result.modes.into_iter().next().unwrap(),
+            field: result.field,
+        };
         let group = file.group(&format!("frequencies/{index}")).unwrap();
         assert_eq!(
             group

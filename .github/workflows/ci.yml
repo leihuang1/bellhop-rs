@@ -208,7 +208,6 @@ jobs:
           cargo build --release -p kraken-cli
           for engine in kraken krakenc; do
             for case in FiniteElasticBothC FiniteElasticBothN FiniteElasticBothP FiniteElasticBothS FiniteElasticBottomC FiniteElasticBottomN FiniteElasticBottomP FiniteElasticBottomS FiniteElasticPower FiniteElasticRigid FiniteElasticShearOnly FiniteElasticStack FiniteElasticTopC FiniteElasticTopN FiniteElasticTopP FiniteElasticTopS FiniteElasticVacuum FiniteSingleIceC FiniteSingleIceP FiniteSingleIceS FiniteSingleSedimentC FiniteSingleSedimentP FiniteSingleSedimentS OriginalElasticIce OriginalElasticSediment; do
-              if [ "$engine" = kraken ] && [[ "$case" == FiniteElastic* ]]; then continue; fi
               tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             done
           done
@@ -316,6 +315,9 @@ jobs:
             'FluidTrcC krakenc crates/kraken/tests/fixtures/FluidTrcC.env target/reference/FluidTrcC-krakenc/FluidTrcC' \
             'LayeredFluidPower krakenc crates/kraken/tests/fixtures/LayeredFluidPower.env target/reference/LayeredFluidPower-krakenc/LayeredFluidPower' \
             'FiniteElasticStack krakenc crates/kraken/tests/fixtures/FiniteElasticStack.env target/reference/FiniteElasticStack-krakenc/FiniteElasticStack' \
+            'FiniteElasticTopN kraken crates/kraken/tests/fixtures/FiniteElasticTopN.env target/reference/FiniteElasticTopN-kraken/FiniteElasticTopN' \
+            'FiniteElasticShearOnly kraken crates/kraken/tests/fixtures/FiniteElasticShearOnly.env target/reference/FiniteElasticShearOnly-kraken/FiniteElasticShearOnly' \
+            'FiniteElasticPower kraken crates/kraken/tests/fixtures/FiniteElasticPower.env target/reference/FiniteElasticPower-kraken/FiniteElasticPower' \
             'TabRefBrc krakenc target/reference/TabRefCoef/run1/neggradC_brc.env target/reference/TabRefCoef/run1/neggradC_brc' \
             'TabRefIrc krakenc target/reference/TabRefCoef/run1/neggradC_irc.env target/reference/TabRefCoef/run1/neggradC_irc' \
             'BroadBandMunk kraken target/reference/cases/BroadBand/MunkK.env target/reference/BroadBand-MunkK-kraken/MunkK' \

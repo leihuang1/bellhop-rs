@@ -46,6 +46,14 @@ impl Refinement<f64> {
         case: &Case,
         mode: impl FnMut(f64) -> Result<NormalMode, DiagnosticReport>,
     ) -> Result<Option<ModeSet>, DiagnosticReport> {
+        if seed_h.is_some() && roots.len() < self.modes.len() {
+            // Real Solve2 carries M forward; a cHigh exit can reduce the next
+            // mesh's search bound. Retain the surviving first-mesh shapes/loss.
+            self.modes.truncate(roots.len());
+            for row in &mut self.table {
+                row.truncate(roots.len());
+            }
+        }
         if let Some(h) = seed_h {
             self.seeds
                 .push((h, roots.iter().map(|&x| Complex64::new(x, 0.0)).collect()));

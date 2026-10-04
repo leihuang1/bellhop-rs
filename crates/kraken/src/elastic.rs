@@ -58,9 +58,6 @@ pub(crate) fn validate(case: &CaseDefinition, diagnostics: &mut DiagnosticReport
         }
     }
     if has_layers(case) {
-        if case.mode_solver == ModeSolver::Kraken && !case.additional_fluid_layers.is_empty() {
-            diagnostics.push(error("additional_fluid_layers", "KRAKEN finite elasticity requires one contiguous fluid layer; multi-fluid elastic secant parity is not validated (use KRAKENC)"));
-        }
         if case.interpolation == Interpolation::AnalyticMunk
             || case.surface_boundary.is_tabulated()
             || case.bottom_boundary.is_tabulated()
@@ -213,32 +210,47 @@ pub(crate) fn half_space(
         unreachable!()
     };
     // BCImpedanceMod ignores half-space elastic attenuation even with ComplexFlag.
-    let cp = complex_speed(cp, if real { 0.0 } else { loss });
-    let cs = complex_speed(*cs, if real { 0.0 } else { *shear_loss });
+    if real {
+        let y = real_half_space(x.re, omega, cp, *cs, density);
+        return (Complex64::from(omega * omega * y[3]), Complex64::from(y[1]));
+    }
+    let cp = complex_speed(cp, loss);
+    let cs = complex_speed(*cs, *shear_loss);
     let shear = x - omega * omega / cs.powi(2);
     let pressure = x - omega * omega / cp.powi(2);
-    let gs = if real {
-        Complex64::new(shear.sqrt().re, 0.0)
-    } else {
-        crate::complex_modes::pekeris_root(shear)
-    };
-    let gp = if real {
-        Complex64::new(pressure.sqrt().re, 0.0)
-    } else {
-        crate::complex_modes::pekeris_root(pressure)
-    };
+    let gs = crate::complex_modes::pekeris_root(shear);
+    let gp = crate::complex_modes::pekeris_root(pressure);
     let mu = density * cs.powi(2);
     let f = omega * omega * gp * (x - shear);
     let g = ((shear + x).powi(2) - 4.0 * gs * gp * x) * mu;
     (f, g)
 }
 
+// BCImpedanceMod's real branch, including pinned GNU grouping: x - (x - q)
+// simplifies to q, rather than introducing another subtraction near a pole.
+fn real_half_space(x: f64, omega: f64, cp: f64, cs: f64, density: f64) -> [f64; 5] {
+    let shear_k2 = omega * omega / (cs * cs);
+    let s = x - shear_k2;
+    let p = x - omega * omega / (cp * cp);
+    let gs = if s < 0.0 { 0.0 } else { s.sqrt() };
+    let gp = if p < 0.0 { 0.0 } else { p.sqrt() };
+    let product = gs * gp;
+    let mu = density * (cs * cs);
+    [
+        (product - x) / mu,
+        mu * ((x + s).powi(2) - (4.0 * x) * product),
+        (shear_k2 - 2.0 * x) + 2.0 * product,
+        gp * shear_k2,
+        gs * -shear_k2,
+    ]
+}
+
 /// Constant-material compound-matrix mesh, outside the acoustic pressure unknowns.
 pub(crate) struct SolidMesh {
     intervals: usize,
     h: f64,
-    b: [Complex64; 4],
-    rho: f64,
+    coefficients: Vec<([Complex64; 4], f64)>,
+    real: bool,
 }
 
 #[allow(
@@ -306,8 +318,35 @@ pub(crate) fn mesh_points(
     Ok(total)
 }
 
+fn sampled_speed(
+    case: &crate::Case,
+    layer: &crate::ElasticLayer,
+    top: f64,
+    n: usize,
+    speed: f64,
+    attenuation: f64,
+) -> Result<Vec<Complex64>, crate::DiagnosticReport> {
+    let points = [top, layer.bottom_depth_m].map(|depth_m| crate::SoundSpeedPoint {
+        depth_m,
+        sound_speed_mps: speed,
+    });
+    let loss = [attenuation; 2];
+    let profile = crate::profile::Profile::new_layer(
+        case,
+        crate::layers::Layer {
+            top,
+            bottom: layer.bottom_depth_m,
+            density: layer.density_g_cm3,
+            points: &points,
+            loss: &loss,
+            mesh_points: n,
+        },
+    )?;
+    Ok((0..=n).map(|i| profile.mesh_complex_speed(i, n)).collect())
+}
+
 impl SolidMesh {
-    #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::cast_precision_loss, clippy::too_many_lines)] // Keep pinned coefficient grouping together.
     pub(crate) fn build(
         case: &crate::Case,
         multiplier: usize,
@@ -339,21 +378,73 @@ impl SolidMesh {
                 layer.shear_attenuation_db_per_wavelength,
             )
             .powi(2);
-            // Initialize uses Re(c²) for finite KRAKEN solids, unlike Re(c)² in its half-space.
-            // The stiffness changes with loss, but no elastic absorption perturbation is added.
-            let cp = if real { Complex64::new(cp.re, 0.0) } else { cp };
-            let cs = if real { Complex64::new(cs.re, 0.0) } else { cs };
             let two_h = 2.0 * h;
             let rho = layer.density_g_cm3;
-            let b = [
-                two_h / (rho * cs),
-                two_h / (rho * cp),
-                4.0 * two_h * rho * cs * (cp - cs) / cp,
-                two_h * (cp - 2.0 * cs) / cp,
-            ];
-            if b.iter().any(|v| !v.re.is_finite() || !v.im.is_finite())
-                || !(two_h * omega * omega * rho).is_finite()
-            {
+            let coefficients = if real {
+                // Homogeneous N/C material still has node-specific SSP rounding.
+                // Initialize uses Re(c²), not the half-space's Re(c)².
+                let cp = sampled_speed(
+                    case,
+                    layer,
+                    top,
+                    n,
+                    layer.compressional_sound_speed_mps,
+                    layer.compressional_attenuation_db_per_wavelength,
+                )?;
+                let cs = sampled_speed(
+                    case,
+                    layer,
+                    top,
+                    n,
+                    layer.shear_sound_speed_mps,
+                    layer.shear_attenuation_db_per_wavelength,
+                )?;
+                (0..=n)
+                    .map(|i| {
+                        let weight = if i == n {
+                            1.0
+                        } else {
+                            (top + i as f64 * h - top) / (layer.bottom_depth_m - top)
+                        };
+                        let density = if matches!(
+                            case.interpolation,
+                            crate::Interpolation::N2Linear | crate::Interpolation::CLinear
+                        ) {
+                            (1.0 - weight) * rho + weight * rho
+                        } else {
+                            rho
+                        };
+                        let pressure_squared = cp[i].powi(2).re;
+                        let cs_real2 = cs[i].re * cs[i].re;
+                        let cs_imag2 = cs[i].im * cs[i].im;
+                        let shear_squared = cs_real2 - cs_imag2;
+                        // Preserve Initialize's pinned reassociation of Re(cP²-cS²).
+                        let difference = pressure_squared - cs_real2 + cs_imag2;
+                        let b = [
+                            two_h / (density * shear_squared),
+                            two_h / (density * pressure_squared),
+                            (shear_squared * difference) * (4.0 * density) * two_h
+                                / pressure_squared,
+                            two_h * (pressure_squared - 2.0 * shear_squared) / pressure_squared,
+                        ]
+                        .map(Complex64::from);
+                        (b, (omega * omega * density) * two_h)
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                vec![(
+                    [
+                        two_h / (rho * cs),
+                        two_h / (rho * cp),
+                        4.0 * two_h * rho * cs * (cp - cs) / cp,
+                        two_h * (cp - 2.0 * cs) / cp,
+                    ],
+                    two_h * omega * omega * rho,
+                )]
+            };
+            if coefficients.iter().any(|(b, rho)| {
+                !rho.is_finite() || b.iter().any(|v| !v.re.is_finite() || !v.im.is_finite())
+            }) {
                 return Err(crate::solver::error(
                     "KR0302",
                     "non-finite elastic mesh coefficients",
@@ -363,8 +454,8 @@ impl SolidMesh {
             meshes.push(Self {
                 intervals: n,
                 h,
-                b,
-                rho: two_h * omega * omega * rho,
+                coefficients,
+                real,
             });
             top = layer.bottom_depth_m;
         }
@@ -379,15 +470,43 @@ impl SolidMesh {
         self.h
     }
 
-    fn step(&self, x: Complex64, y: [Complex64; 5]) -> [Complex64; 5] {
-        let [b1, b2, b3, b4] = self.b;
-        let xb3 = x * b3 - self.rho;
+    fn step(&self, x: Complex64, y: [Complex64; 5], node: usize, euler: bool) -> [Complex64; 5] {
+        let (b, rho) = self.coefficients[node.min(self.coefficients.len() - 1)];
+        if self.real {
+            // GNU's real ElasticUP/DN group Euler and midpoint steps differently.
+            // Keep KRAKENC's separate complex arithmetic unchanged.
+            let [b1, b2, b3, b4] = b.map(|b| b.re);
+            let y = y.map(|y| y.re);
+            let two_x = 2.0 * x.re;
+            let four_h_x = self.h * (4.0 * x.re);
+            let xb3 = x.re * b3 - rho;
+            let fourth = if euler {
+                xb3 * y[0] + (b2 * y[1] - b4 * (two_x * y[2]))
+            } else {
+                b2 * y[1] + (xb3 * y[0] - two_x * (b4 * y[2]))
+            };
+            let fifth = if euler {
+                (rho * y[0] - four_h_x * y[2]) - b1 * y[1]
+            } else {
+                (rho * y[0] - b1 * y[1]) - four_h_x * y[2]
+            };
+            return [
+                b1 * y[3] - b2 * y[4],
+                -(rho * y[3] + xb3 * y[4]),
+                2.0 * self.h * y[3] + b4 * y[4],
+                fourth,
+                fifth,
+            ]
+            .map(Complex64::from);
+        }
+        let [b1, b2, b3, b4] = b;
+        let xb3 = x * b3 - rho;
         [
             b1 * y[3] - b2 * y[4],
-            -self.rho * y[3] - xb3 * y[4],
+            -rho * y[3] - xb3 * y[4],
             2.0 * self.h * y[3] + b4 * y[4],
             xb3 * y[0] + b2 * y[1] - 2.0 * x * b4 * y[2],
-            self.rho * y[0] - b1 * y[1] - 4.0 * self.h * x * y[2],
+            rho * y[0] - b1 * y[1] - 4.0 * self.h * x * y[2],
         ]
     }
 
@@ -399,13 +518,18 @@ impl SolidMesh {
         power: &mut i32,
     ) -> [Complex64; 5] {
         let sign = if top { 1.0 } else { -1.0 };
-        let delta = self.step(x, y);
+        let delta = self.step(x, y, if top { 0 } else { self.intervals }, true);
         let mut z = std::array::from_fn(|i| y[i] + sign * 0.5 * delta[i]);
         let mut previous = y;
         for step in 0..self.intervals {
             previous = y;
             y = z;
-            let delta = self.step(x, y);
+            let node = if top {
+                step + 1
+            } else {
+                self.intervals - step - 1
+            };
+            let delta = self.step(x, y, node, false);
             z = std::array::from_fn(|i| previous[i] + sign * delta[i]);
             if step + 1 != self.intervals {
                 let scale = if z[1].re.abs() < 1e-50 {
@@ -423,7 +547,13 @@ impl SolidMesh {
                 }
             }
         }
-        std::array::from_fn(|i| (previous[i] + 2.0 * y[i] + z[i]) / 4.0)
+        std::array::from_fn(|i| {
+            if self.real {
+                ((previous[i] + z[i]) + 2.0 * y[i]) * 0.25
+            } else {
+                (previous[i] + 2.0 * y[i] + z[i]) / 4.0
+            }
+        })
     }
 }
 
@@ -447,28 +577,24 @@ pub(crate) fn cap_impedance(
             shear_sound_speed_mps: cs,
             shear_attenuation_db_per_wavelength: shear_loss,
         } => {
-            let cp = complex_speed(cp, if real { 0.0 } else { loss });
-            let cs = complex_speed(*cs, if real { 0.0 } else { *shear_loss });
-            let s = x - omega * omega / cs.powi(2);
-            let p = x - omega * omega / cp.powi(2);
-            let gs = if real {
-                Complex64::new(s.sqrt().re, 0.0)
+            if real {
+                real_half_space(x.re, omega, cp, *cs, density).map(Complex64::from)
             } else {
-                crate::complex_modes::pekeris_root(s)
-            };
-            let gp = if real {
-                Complex64::new(p.sqrt().re, 0.0)
-            } else {
-                crate::complex_modes::pekeris_root(p)
-            };
-            let mu = density * cs.powi(2);
-            [
-                (gs * gp - x) / mu,
-                ((s + x).powi(2) - 4.0 * gs * gp * x) * mu,
-                2.0 * gs * gp - s - x,
-                gp * (x - s),
-                gs * (s - x),
-            ]
+                let cp = complex_speed(cp, loss);
+                let cs = complex_speed(*cs, *shear_loss);
+                let s = x - omega * omega / cs.powi(2);
+                let p = x - omega * omega / cp.powi(2);
+                let gs = crate::complex_modes::pekeris_root(s);
+                let gp = crate::complex_modes::pekeris_root(p);
+                let mu = density * cs.powi(2);
+                [
+                    (gs * gp - x) / mu,
+                    ((s + x).powi(2) - 4.0 * gs * gp * x) * mu,
+                    2.0 * gs * gp - s - x,
+                    gp * (x - s),
+                    gs * (s - x),
+                ]
+            }
         }
         _ => unreachable!("cap outer boundary was validated"),
     };

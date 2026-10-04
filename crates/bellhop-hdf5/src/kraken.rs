@@ -184,8 +184,12 @@ fn run_cases(
                 frequency_count: cases.len(),
                 ..RunSummary::default()
             };
-            for (index, case) in cases.iter().enumerate() {
-                let result = kraken::solve_field(case).map_err(|report| RunError::Simulation {
+            for (index, (case, result)) in cases
+                .iter()
+                .zip(kraken::solve_frequencies(cases))
+                .enumerate()
+            {
+                let result = result.map_err(|report| RunError::Simulation {
                     frequency_index: index,
                     frequency_hz: case.profiles()[0].frequency_hz,
                     report,

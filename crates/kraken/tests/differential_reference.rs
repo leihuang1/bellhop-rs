@@ -227,9 +227,6 @@ fn finite_elastic_layers_match_pinned_goldens() {
             ("kraken", kraken::ModeSolver::Kraken),
             ("krakenc", kraken::ModeSolver::Krakenc),
         ] {
-            if engine == "kraken" && name.starts_with("FiniteElastic") {
-                continue;
-            }
             compare_frequencies(
                 &fixtures().join(name).with_extension("env"),
                 &fixtures().join("golden").join(format!("{name}-{engine}")),
@@ -475,15 +472,34 @@ fn compare_profile_cases(cases: &[kraken::FieldCase], input: &Path, root: &Path)
         ));
         offset = after_profile;
     }
-    assert_eq!(offset, file.len());
+    // A shrinking real-elastic spectrum can leave old first-mesh shape records
+    // after the last declared frequency; they are not additional modes.
+    if cases[0].profiles().len() == 1
+        && solver == kraken::ModeSolver::Kraken
+        && (!cases[0].profiles()[0].top_elastic_layers.is_empty()
+            || !cases[0].profiles()[0].bottom_elastic_layers.is_empty())
+    {
+        references[0]
+            .0
+            .bytes
+            .extend_from_slice(&file.bytes[offset * file.record_bytes..]);
+    } else {
+        assert_eq!(offset, file.len());
+    }
     let shd = Records::read(&root.with_extension("shd"));
     assert_eq!(
         count(shd.record(2), 0),
         cases.len(),
         "FIELD frequency count"
     );
+    let mut api = kraken::solve_frequencies(cases);
+    let hdf5 = std::env::var_os("KRAKEN_HDF5_RESULT").is_some();
     for (frequency, case) in cases.iter().enumerate() {
-        let result = profile_result_for_comparison(case, frequency, cases.len());
+        let result = if hdf5 {
+            profile_result_for_comparison(case, frequency, cases.len())
+        } else {
+            api.next().unwrap().unwrap()
+        };
         for (index, (profile, mode)) in case.profiles().iter().zip(&result.modes).enumerate() {
             let errors = compare_modes_at(
                 profile,
@@ -659,7 +675,7 @@ fn compare(env: &Path, reference: &Path) {
 }
 
 fn compare_frequencies(env: &Path, reference: &Path, solver: kraken::ModeSolver) {
-    let cases = load_frequency_cases(env, env.with_extension("flp"), solver).unwrap();
+    let cases = kraken::legacy::load_field_cases(env, env.with_extension("flp"), solver).unwrap();
     let modes = Records::read(&reference.with_extension("mod"));
     let field = Records::read(&reference.with_extension("shd"));
     let printed = fs::read_to_string(reference.with_extension("prt")).unwrap();
@@ -673,8 +689,20 @@ fn compare_frequencies(env: &Path, reference: &Path, solver: kraken::ModeSolver)
         cases.len(),
         "FIELD frequency count"
     );
-    for (index, case) in cases.iter().enumerate() {
-        let result = result_for_comparison(case, index, cases.len());
+    let mut api = kraken::solve_frequencies(&cases);
+    let hdf5 = std::env::var_os("KRAKEN_HDF5_RESULT").is_some();
+    for (index, sequence) in cases.iter().enumerate() {
+        assert_eq!(sequence.profiles().len(), 1);
+        let case = &sequence.profiles()[0];
+        let result = if hdf5 {
+            result_for_comparison(case, index, cases.len())
+        } else {
+            let result = api.next().unwrap().unwrap();
+            SimulationResult {
+                modes: result.modes.into_iter().next().unwrap(),
+                field: result.field,
+            }
+        };
         let errors = compare_modes_at(case, &result.modes, &modes, &printed, index);
         let pressure_error = compare_field_at(case, &result.field, &field, index);
         eprintln!(
@@ -1163,11 +1191,20 @@ fn compare_modes_at(
         }
     }
     if frequency_index + 1 == count(header, 84) {
-        assert_eq!(
-            file.len(),
-            first + 2 + mode_count + mode_count.div_ceil(modes_per_record),
-            "mode file record count"
-        );
+        let records = first + 2 + mode_count + mode_count.div_ceil(modes_per_record);
+        if case.mode_solver == kraken::ModeSolver::Kraken
+            && (!case.top_elastic_layers.is_empty() || !case.bottom_elastic_layers.is_empty())
+        {
+            // WriteMode rewrites M/k after refinement but does not truncate
+            // unused first-mesh shapes when Solve2 crosses cHigh on a later mesh.
+            assert!(file.len() >= records, "missing declared mode records");
+            assert!(
+                file.len() <= first + 2 + 3000 + 3000_usize.div_ceil(modes_per_record),
+                "Solve2's 3000-mode record limit"
+            );
+        } else {
+            assert_eq!(file.len(), records, "mode file record count");
+        }
     }
 
     // .prt preserves extrapolated k to ten decimal places; .mod stores complex32.

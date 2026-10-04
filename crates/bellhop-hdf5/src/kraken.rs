@@ -326,7 +326,7 @@ fn write_frequency(
     path: &Path,
 ) -> Result<(), String> {
     write_string_attribute(group, "title", &case.profiles()[0].title)?;
-    write_profile_metadata(group, &case.profiles()[0])?;
+    write_profile_metadata(group, &case.profiles()[0], budget)?;
     write_modes(group, &result.modes[0], budget)?;
     write_field(group, &result.field, budget)?;
     write_scalar_attribute(group, "profile_count", &(case.profiles().len() as u64))?;
@@ -355,7 +355,7 @@ fn write_frequency(
                 .map_err(hdf5_error)?;
             write_string_attribute(&child, "title", &profile.title)?;
             write_scalar_attribute(&child, "range_m", &case.ranges_m()[index])?;
-            write_profile_metadata(&child, profile)?;
+            write_profile_metadata(&child, profile, budget)?;
             if index == 0 {
                 group
                     .link_hard("modes", "profiles/0/modes")
@@ -369,7 +369,7 @@ fn write_frequency(
     Ok(())
 }
 
-fn write_profile_metadata(group: &Group, case: &Case) -> Result<(), String> {
+fn write_profile_metadata(group: &Group, case: &Case, budget: &mut Budget) -> Result<(), String> {
     write_scalar_attribute(group, "frequency_hz", &case.frequency_hz)?;
     write_string_attribute(
         group,
@@ -396,7 +396,7 @@ fn write_profile_metadata(group: &Group, case: &Case) -> Result<(), String> {
         },
     )?;
     write_elastic_half_spaces(group, case)?;
-    write_elastic_layers(group, case)?;
+    write_elastic_layers(group, case, budget)?;
     write_scalar_attribute(
         group,
         "mesh_reference_frequency_hz",
@@ -468,7 +468,8 @@ fn write_profile_metadata(group: &Group, case: &Case) -> Result<(), String> {
     Ok(())
 }
 
-fn write_elastic_layers(group: &Group, case: &Case) -> Result<(), String> {
+#[allow(clippy::too_many_lines)] // Keep finite-elastic metadata and its sampled profile together.
+fn write_elastic_layers(group: &Group, case: &Case, budget: &mut Budget) -> Result<(), String> {
     write_scalar_attribute(
         group,
         "finite_elastic_layer_count",
@@ -524,6 +525,58 @@ fn write_elastic_layers(group: &Group, case: &Case) -> Result<(), String> {
                 "requested_mesh_points",
                 &(material.mesh_points as u64),
             )?;
+            let points = &material.material_profile;
+            write_scalar_attribute(
+                &layer,
+                "material_profile_point_count",
+                &(points.len() as u64),
+            )?;
+            if !points.is_empty() {
+                let profile = layer.create_group("material_profile").map_err(hdf5_error)?;
+                for (name, unit, values) in [
+                    (
+                        "depth_m",
+                        "m",
+                        points.iter().map(|p| p.depth_m).collect::<Vec<_>>(),
+                    ),
+                    (
+                        "compressional_sound_speed_mps",
+                        "m/s",
+                        points
+                            .iter()
+                            .map(|p| p.compressional_sound_speed_mps)
+                            .collect(),
+                    ),
+                    (
+                        "shear_sound_speed_mps",
+                        "m/s",
+                        points.iter().map(|p| p.shear_sound_speed_mps).collect(),
+                    ),
+                    (
+                        "density_g_cm3",
+                        "g/cm^3",
+                        points.iter().map(|p| p.density_g_cm3).collect(),
+                    ),
+                    (
+                        "compressional_attenuation_db_per_wavelength",
+                        "dB/wavelength",
+                        points
+                            .iter()
+                            .map(|p| p.compressional_attenuation_db_per_wavelength)
+                            .collect(),
+                    ),
+                    (
+                        "shear_attenuation_db_per_wavelength",
+                        "dB/wavelength",
+                        points
+                            .iter()
+                            .map(|p| p.shear_attenuation_db_per_wavelength)
+                            .collect(),
+                    ),
+                ] {
+                    dataset(&profile, name, &values, &[points.len()], unit, budget)?;
+                }
+            }
             top = material.bottom_depth_m;
         }
     }

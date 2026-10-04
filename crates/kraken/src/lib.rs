@@ -240,7 +240,21 @@ pub struct FluidLayer {
     pub mesh_points: usize,
 }
 
-/// A homogeneous finite elastic layer outside the contiguous fluid stack.
+/// One finite-elastic material sample at an absolute depth.
+/// Losses are canonical dB/wavelength at the enclosing solve frequency.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ElasticMaterialPoint {
+    pub depth_m: f64,
+    pub compressional_sound_speed_mps: f64,
+    pub shear_sound_speed_mps: f64,
+    pub density_g_cm3: f64,
+    pub compressional_attenuation_db_per_wavelength: f64,
+    pub shear_attenuation_db_per_wavelength: f64,
+}
+
+/// A finite elastic layer. Empty `material_profile` selects homogeneous material.
+/// With a profile, scalar material fields must equal its first sample.
 /// Depths are absolute metres; losses are solve-frequency dB/wavelength.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -253,9 +267,12 @@ pub struct ElasticLayer {
     pub shear_attenuation_db_per_wavelength: f64,
     /// Nominal mesh intervals, 0 for the reference automatic shear mesh.
     pub mesh_points: usize,
+    /// Ordered top-to-bottom material samples, interpolated using the case SSP option.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub material_profile: Vec<ElasticMaterialPoint>,
 }
 
-/// Unvalidated contiguous fluid stack with smooth boundaries and optional homogeneous solid caps. The water fields
+/// Unvalidated contiguous fluid stack with smooth boundaries and optional solid caps. The water fields
 /// define its first layer; `additional_fluid_layers` contains only subsequent layers.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -283,9 +300,9 @@ pub struct CaseDefinition {
     /// Values are evaluated at `frequency_hz` before complex SSP interpolation.
     pub water_attenuation_db_per_wavelength: Vec<f64>,
     pub additional_fluid_layers: Vec<FluidLayer>,
-    /// Ordered homogeneous elastic caps above the first fluid (top starts at 0).
+    /// Ordered elastic caps above the first fluid (top starts at 0).
     pub top_elastic_layers: Vec<ElasticLayer>,
-    /// Ordered homogeneous elastic layers below the last fluid.
+    /// Ordered elastic layers below the last fluid.
     pub bottom_elastic_layers: Vec<ElasticLayer>,
     pub bottom_boundary: BottomBoundary,
     /// Zero for a non-A bottom (no half-space material).

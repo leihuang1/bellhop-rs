@@ -65,7 +65,12 @@ material losses for the new frequency. `mesh_reference_frequency_hz` retains
 nominal mesh-frequency scaling independently, including automatic meshes.
 
 The existing first-fluid water fields, ordered `additional_fluid_layers`, and
-ordered top/bottom homogeneous `*_elastic_layers` retain their Rust meanings.
+ordered top/bottom `*_elastic_layers` retain their Rust meanings. Each elastic
+layer may include a `material_profile` of complete depth/cp/cs/density/P-loss/S-loss
+samples using the `ElasticMaterialPoint` field names. Both endpoints are required,
+depths strictly increase, and the first sample must match the scalar material.
+Omitted or empty profiles retain homogeneous material. Node losses are already
+canonical for the block frequency; JSON does not reapply legacy loss conversion.
 Absolute depths and canonical shear/compressional losses are not converted into
 fictitious fluid properties. The same elastic, table, analytic-profile and
 coupling-grid restrictions apply as for direct Rust cases.

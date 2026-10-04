@@ -1,12 +1,12 @@
 // Adapted from Acoustics Toolbox v2023.5 Kraken/BCImpedanceMod.f90 and
 // BCImpedancecMod.f90, Copyright (C) 2009 Michael B. Porter.
 // GPL-3.0-or-later; see LICENSE.
-//! Elastic half-space impedance and finite homogeneous solid-cap transfer.
+//! Elastic half-space impedance and depth-sampled finite solid-cap transfer.
 use crate::{Boundary, CaseDefinition, DiagnosticReport, Interpolation, ModeSolver, error};
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::float_cmp, clippy::too_many_lines)] // Depth bounds and scalar/profile agreement are exact.
 pub(crate) fn validate(case: &CaseDefinition, diagnostics: &mut DiagnosticReport) {
     if case.mode_solver == ModeSolver::Kraken
         && has_layers(case)
@@ -127,6 +127,45 @@ pub(crate) fn validate(case: &CaseDefinition, diagnostics: &mut DiagnosticReport
                         "mesh points must be 0 or in 10..=1000000",
                     ));
                 }
+                if !layer.material_profile.is_empty() {
+                    let points = &layer.material_profile;
+                    let first = points[0];
+                    let invalid = !(2..=crate::MAX_VECTOR_LENGTH).contains(&points.len())
+                        || first.depth_m != top
+                        || points.last().unwrap().depth_m != layer.bottom_depth_m
+                        || first.compressional_sound_speed_mps != cp
+                        || first.shear_sound_speed_mps != cs
+                        || first.density_g_cm3 != layer.density_g_cm3
+                        || first.compressional_attenuation_db_per_wavelength
+                            != layer.compressional_attenuation_db_per_wavelength
+                        || first.shear_attenuation_db_per_wavelength
+                            != layer.shear_attenuation_db_per_wavelength
+                        || points.windows(2).any(|p| p[0].depth_m >= p[1].depth_m)
+                        || points.iter().any(|p| {
+                            !p.depth_m.is_finite()
+                                || !p.compressional_sound_speed_mps.is_finite()
+                                || !p.shear_sound_speed_mps.is_finite()
+                                || p.shear_sound_speed_mps <= 0.0
+                                || p.compressional_sound_speed_mps
+                                    <= (4.0_f64 / 3.0).sqrt() * p.shear_sound_speed_mps
+                                || !p.density_g_cm3.is_finite()
+                                || p.density_g_cm3 <= 0.0
+                                || [
+                                    p.compressional_attenuation_db_per_wavelength,
+                                    p.shear_attenuation_db_per_wavelength,
+                                ]
+                                .iter()
+                                .any(|a| !(0.0..=8.685_889_6 * 2.0 * PI).contains(a))
+                        });
+                    if invalid {
+                        diagnostics.push(error(format!("{field}.material_profile"), "require finite increasing top-to-bottom elastic samples, first sample matching scalar material, positive bulk modulus/density and nonnegative bounded losses"));
+                    } else if let Err(report) = sampled_material(case, layer, top, 16) {
+                        diagnostics.push(error(
+                            format!("{field}.material_profile"),
+                            &report.diagnostics()[0].message,
+                        ));
+                    }
+                }
                 top = layer.bottom_depth_m;
             }
         }
@@ -149,7 +188,12 @@ pub(crate) fn has_half_space(case: &CaseDefinition) -> bool {
         .any(|boundary| matches!(boundary, Boundary::ElasticHalfSpace { .. }))
 }
 
-pub(crate) fn minimum_speed(case: &CaseDefinition, water: f64) -> f64 {
+pub(crate) fn minimum_speed(
+    case: &CaseDefinition,
+    water: f64,
+    top: &[SolidMesh],
+    bottom: &[SolidMesh],
+) -> f64 {
     let mut minimum = water;
     for (boundary, cp) in [
         (&case.surface_boundary, case.surface_sound_speed_mps),
@@ -166,12 +210,8 @@ pub(crate) fn minimum_speed(case: &CaseDefinition, water: f64) -> f64 {
             _ => {}
         }
     }
-    for layer in case
-        .top_elastic_layers
-        .iter()
-        .chain(&case.bottom_elastic_layers)
-    {
-        minimum = minimum.min(layer.shear_sound_speed_mps);
+    for mesh in top.iter().chain(bottom) {
+        minimum = minimum.min(mesh.minimum_speed);
     }
     // Initialize reduces cMin for Scholte waves; 0.85 is a default-kind literal.
     f64::from(0.85_f32) * minimum
@@ -246,11 +286,12 @@ fn real_half_space(x: f64, omega: f64, cp: f64, cs: f64, density: f64) -> [f64; 
     ]
 }
 
-/// Constant-material compound-matrix mesh, outside the acoustic pressure unknowns.
+/// Depth-sampled compound-matrix mesh, outside the acoustic pressure unknowns.
 pub(crate) struct SolidMesh {
     intervals: usize,
     h: f64,
     coefficients: Vec<([Complex64; 4], f64)>,
+    minimum_speed: f64,
     real: bool,
 }
 
@@ -268,7 +309,11 @@ fn intervals(
     let reference = case
         .mesh_reference_frequency_hz
         .unwrap_or(case.frequency_hz);
-    let needed = ((layer.bottom_depth_m - top) / (layer.shear_sound_speed_mps / reference / 20.0))
+    let last_speed = layer
+        .material_profile
+        .last()
+        .map_or(layer.shear_sound_speed_mps, |p| p.shear_sound_speed_mps);
+    let needed = ((layer.bottom_depth_m - top) / (last_speed / reference / 20.0))
         .floor()
         .max(10.0);
     let base = if layer.mesh_points == 0 {
@@ -319,31 +364,142 @@ pub(crate) fn mesh_points(
     Ok(total)
 }
 
-fn sampled_speed(
-    case: &crate::Case,
+#[allow(clippy::cast_precision_loss, clippy::too_many_lines)]
+fn sampled_material(
+    case: &CaseDefinition,
     layer: &crate::ElasticLayer,
     top: f64,
     n: usize,
-    speed: f64,
-    attenuation: f64,
-) -> Result<Vec<Complex64>, crate::DiagnosticReport> {
-    let points = [top, layer.bottom_depth_m].map(|depth_m| crate::SoundSpeedPoint {
+) -> Result<Vec<(Complex64, Complex64, f64)>, DiagnosticReport> {
+    let uniform = layer.material_profile.is_empty();
+    let homogeneous = [top, layer.bottom_depth_m].map(|depth_m| crate::ElasticMaterialPoint {
         depth_m,
-        sound_speed_mps: speed,
+        compressional_sound_speed_mps: layer.compressional_sound_speed_mps,
+        shear_sound_speed_mps: layer.shear_sound_speed_mps,
+        density_g_cm3: layer.density_g_cm3,
+        compressional_attenuation_db_per_wavelength: layer
+            .compressional_attenuation_db_per_wavelength,
+        shear_attenuation_db_per_wavelength: layer.shear_attenuation_db_per_wavelength,
     });
-    let loss = [attenuation; 2];
-    let profile = crate::profile::Profile::new_layer(
+    let points = if uniform {
+        &homogeneous[..]
+    } else {
+        &layer.material_profile
+    };
+    let pressure: Vec<_> = points
+        .iter()
+        .map(|p| crate::SoundSpeedPoint {
+            depth_m: p.depth_m,
+            sound_speed_mps: p.compressional_sound_speed_mps,
+        })
+        .collect();
+    let shear: Vec<_> = points
+        .iter()
+        .map(|p| crate::SoundSpeedPoint {
+            depth_m: p.depth_m,
+            sound_speed_mps: p.shear_sound_speed_mps,
+        })
+        .collect();
+    let pressure_loss: Vec<_> = points
+        .iter()
+        .map(|p| p.compressional_attenuation_db_per_wavelength)
+        .collect();
+    let shear_loss: Vec<_> = points
+        .iter()
+        .map(|p| p.shear_attenuation_db_per_wavelength)
+        .collect();
+    let build_profile = if uniform {
+        crate::profile::Profile::new_layer
+    } else {
+        crate::profile::Profile::new_elastic_layer
+    };
+    let cp = build_profile(
         case,
         crate::layers::Layer {
             top,
             bottom: layer.bottom_depth_m,
             density: layer.density_g_cm3,
-            points: &points,
-            loss: &loss,
+            points: &pressure,
+            loss: &pressure_loss,
             mesh_points: n,
         },
     )?;
-    Ok((0..=n).map(|i| profile.mesh_complex_speed(i, n)).collect())
+    let cs = build_profile(
+        case,
+        crate::layers::Layer {
+            top,
+            bottom: layer.bottom_depth_m,
+            density: layer.density_g_cm3,
+            points: &shear,
+            loss: &shear_loss,
+            mesh_points: n,
+        },
+    )?;
+    let bulk_margin = cp.minimum_scaled_difference(&cs, (4.0_f64 / 3.0).sqrt());
+    if !bulk_margin.is_finite() || bulk_margin <= 0.0 {
+        return Err(crate::solver::error(
+            "KR0302",
+            "interpolated elastic material requires positive bulk modulus",
+            "material_profile",
+        ));
+    }
+    let h: Vec<_> = points
+        .windows(2)
+        .map(|p| p[1].depth_m - p[0].depth_m)
+        .collect();
+    let density: Vec<_> = points.iter().map(|p| p.density_g_cm3).collect();
+    let cubic = if matches!(
+        case.interpolation,
+        Interpolation::Pchip | Interpolation::Spline
+    ) {
+        crate::profile::cubic_coefficients(case.interpolation, &h, &density)?
+    } else {
+        Vec::new()
+    };
+    if cubic.iter().zip(&h).any(|(&c, &h)| {
+        let minimum = crate::profile::segment_minimum(c, h);
+        !minimum.is_finite() || minimum <= 0.0
+    }) {
+        return Err(crate::solver::error(
+            "KR0302",
+            "interpolated elastic density must stay finite and positive",
+            "material_profile",
+        ));
+    }
+    let spacing = (layer.bottom_depth_m - top) / n as f64;
+    Ok((0..=n)
+        .map(|i| {
+            let depth = if i == n {
+                layer.bottom_depth_m
+            } else {
+                top + i as f64 * spacing
+            };
+            let upper = points
+                .partition_point(|p| p.depth_m < depth)
+                .clamp(1, points.len() - 1);
+            let t = depth - points[upper - 1].depth_m;
+            let rho = if cubic.is_empty() {
+                let weight = t / h[upper - 1];
+                (1.0 - weight) * density[upper - 1] + weight * density[upper]
+            } else {
+                let [c0, c1, c2, c3] = cubic[upper - 1];
+                c0 + t * (c1 + t * (c2 + t * c3))
+            };
+            if uniform {
+                (
+                    cp.mesh_complex_speed(i, n),
+                    cs.mesh_complex_speed(i, n),
+                    rho,
+                )
+            } else {
+                (
+                    cp.mesh_elastic_speed(i, n),
+                    cs.mesh_elastic_speed(i, n),
+                    rho,
+                )
+            }
+        })
+        .collect())
 }
 
 impl SolidMesh {
@@ -381,43 +537,27 @@ impl SolidMesh {
             .powi(2);
             let two_h = 2.0 * h;
             let rho = layer.density_g_cm3;
+            let samples = if real || !layer.material_profile.is_empty() {
+                sampled_material(case, layer, top, n)?
+            } else {
+                Vec::new()
+            };
+            let minimum_speed = if layer.material_profile.is_empty() {
+                layer.shear_sound_speed_mps
+            } else {
+                samples
+                    .iter()
+                    .map(|(_, cs, _)| cs.re)
+                    .fold(f64::INFINITY, f64::min)
+            };
             let coefficients = if real {
-                // Homogeneous N/C material still has node-specific SSP rounding.
                 // Initialize uses Re(c²), not the half-space's Re(c)².
-                let cp = sampled_speed(
-                    case,
-                    layer,
-                    top,
-                    n,
-                    layer.compressional_sound_speed_mps,
-                    layer.compressional_attenuation_db_per_wavelength,
-                )?;
-                let cs = sampled_speed(
-                    case,
-                    layer,
-                    top,
-                    n,
-                    layer.shear_sound_speed_mps,
-                    layer.shear_attenuation_db_per_wavelength,
-                )?;
-                (0..=n)
-                    .map(|i| {
-                        let weight = if i == n {
-                            1.0
-                        } else {
-                            (top + i as f64 * h - top) / (layer.bottom_depth_m - top)
-                        };
-                        let density = if matches!(
-                            case.interpolation,
-                            crate::Interpolation::N2Linear | crate::Interpolation::CLinear
-                        ) {
-                            (1.0 - weight) * rho + weight * rho
-                        } else {
-                            rho
-                        };
-                        let pressure_squared = cp[i].powi(2).re;
-                        let cs_real2 = cs[i].re * cs[i].re;
-                        let cs_imag2 = cs[i].im * cs[i].im;
+                samples
+                    .iter()
+                    .map(|&(cp, cs, density)| {
+                        let pressure_squared = cp.powi(2).re;
+                        let cs_real2 = cs.re * cs.re;
+                        let cs_imag2 = cs.im * cs.im;
                         let shear_squared = cs_real2 - cs_imag2;
                         // Preserve Initialize's pinned reassociation of Re(cP²-cS²).
                         let difference = pressure_squared - cs_real2 + cs_imag2;
@@ -432,6 +572,23 @@ impl SolidMesh {
                         (b, (omega * omega * density) * two_h)
                     })
                     .collect::<Vec<_>>()
+            } else if !layer.material_profile.is_empty() {
+                samples
+                    .iter()
+                    .map(|&(cp, cs, rho)| {
+                        let cp = cp.powi(2);
+                        let cs = cs.powi(2);
+                        (
+                            [
+                                two_h / (rho * cs),
+                                two_h / (rho * cp),
+                                4.0 * two_h * rho * cs * (cp - cs) / cp,
+                                two_h * (cp - 2.0 * cs) / cp,
+                            ],
+                            two_h * omega * omega * rho,
+                        )
+                    })
+                    .collect()
             } else {
                 vec![(
                     [
@@ -456,6 +613,7 @@ impl SolidMesh {
                 intervals: n,
                 h,
                 coefficients,
+                minimum_speed,
                 real,
             });
             top = layer.bottom_depth_m;

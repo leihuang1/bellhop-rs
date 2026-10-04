@@ -26,7 +26,7 @@ builds it using the existing static HDF5 dependency.
 - Both backends accept 1..500 contiguous constant-density fluid layers with
   independent meshes, N/C/P/S interpolation and material/volume attenuation.
   Density/speed/loss may jump at interfaces; density gradients and finite-layer
-  shear inside fluid media remain unsupported. Finite homogeneous solid caps are
+  shear inside fluid media remain unsupported. Finite solid caps are
   separate materials; analytic Munk and F/P/TRC combinations remain single-layer.
   Mesh/profile/shape/work budgets are totals for the stack, not per layer.
 - Both backends accept smooth V/R/A boundaries; real KRAKEN stays trapped
@@ -44,9 +44,9 @@ builds it using the existing static HDF5 dependency.
   perturbation and omitted elastic shear/bottom absorption; use KRAKENC for full
   elastic loss. Requested P/S loss and the real/complex model are recorded
   separately in additive HDF5 metadata.
-- [Finite homogeneous solid caps](kraken-finite-elastic-layers.md) are supported
+- [Finite solid caps](kraken-finite-elastic-layers.md) are supported
   above/below contiguous N/C/P/S fluid stacks through both engines. Original
-  elsed/ice pass both engines; graded/interleaved solids remain excluded.
+  elsed/ice and depth-varying material profiles pass both engines.
   Sequential real finite-solid frequencies retain Solve2's search bound; they
   are not independent solver runs.
   KRAKEN finite stiffness uses Re(c²) but omits elastic absorption perturbation.
@@ -201,7 +201,7 @@ These additive v1 attributes do not change datasets, schema identity or BELLHOP
 v3. Older v1 files and nonelastic boundaries may omit them. They are material
 provenance, not certification of arbitrary-input numerical parity.
 
-Finite homogeneous solids additionally record `finite_elastic_layer_count`
+Finite solids additionally record `finite_elastic_layer_count`
 (uint64) and `/frequencies/i/elastic_media/{top|bottom}/{index}`. Indices are
 ordered from shallow to deep within each side. Each group has `material=elastic`,
 `attenuation_model=reference_real_stiffness|complex`, float64 `top_depth_m`,
@@ -213,6 +213,16 @@ model retains Re(c²) stiffness without elastic absorption. These additive v1
 attributes/groups may be absent in older files. `media` remains **fluid only**;
 its first top depth can now be nonzero below a solid cap. Existing datasets,
 schema identity and BELLHOP v3 are unchanged.
+
+Each elastic layer also records uint64 `material_profile_point_count`. Zero means
+homogeneous material and no profile group. Otherwise `material_profile/` contains
+six float64 one-dimensional datasets of that length: `depth_m` (m),
+`compressional_sound_speed_mps` and `shear_sound_speed_mps` (m/s), `density_g_cm3`
+(g/cm^3), and `compressional_attenuation_db_per_wavelength` and
+`shear_attenuation_db_per_wavelength` (dB/wavelength). Scalar material attributes
+remain the first sample. Datasets retain the input samples, not a solver mesh;
+they carry `unit` attributes and consume the existing output-payload budget.
+These are additive KRAKEN schema-v1 metadata; older files may omit them.
 
 Each frequency also has `/frequencies/i/media/0`, `/1`, ... in depth order.
 Each layer group carries float64 `top_depth_m`, `bottom_depth_m`, `density_g_cm3`

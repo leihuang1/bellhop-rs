@@ -178,6 +178,14 @@ provenance. Both engines support contiguous layered fluids. Real finite-solid
 SSP-node rounding and Solve2's ordered search bound now close the former TopN,
 ShearOnly and Power failures; the existing parity exception is not extended. See [finite-cap scope](kraken-finite-elastic-layers.md).
 
+Depth-varying finite elasticity adds 12 derived pairs / 23 workflows / 29 frequency
+blocks / 158 modes / 1,827 pressures, with all declared results compared through
+API and actual legacy/JSON CLI-HDF5. The 93-record `golden/graded-elastic.sha256`
+locks all new input/artifact bytes; triplicate MOD/SHD output is identical.
+Maximum pressure error is 2.08250058582033e-9 with unchanged tolerances. Complete
+cp/cs/density/P/S-loss profiles and per-frequency power-law/biological conversion
+are retained. See [material sampling and evidence](kraken-finite-elastic-layers.md#depth-varying-material-evidence).
+
 The single-profile FIELD checkpoint adds three explicitly derived representative
 pairs, without expanding them into an option Cartesian product: `FieldScaled`
 through KRAKEN (3 modes/9 pressures), and `FieldPattern` / `FieldIncoherent`

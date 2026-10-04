@@ -171,7 +171,12 @@ pub(crate) fn input_values(case: &Case) -> usize {
             .iter()
             .map(|l| 1 + l.sound_speed_profile.len() + l.attenuation_db_per_wavelength.len())
             .sum::<usize>()
-        + 7 * (case.top_elastic_layers.len() + case.bottom_elastic_layers.len())
+        + case
+            .top_elastic_layers
+            .iter()
+            .chain(&case.bottom_elastic_layers)
+            .map(|layer| 7 + 6 * layer.material_profile.len())
+            .sum::<usize>()
         + [&case.surface_boundary, &case.bottom_boundary]
             .iter()
             .map(|b| match b {

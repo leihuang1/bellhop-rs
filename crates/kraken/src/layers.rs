@@ -104,7 +104,12 @@ pub(crate) fn validate(
             "at most 500 total finite media",
         ));
     }
-    let elastic_points = 2 * (case.top_elastic_layers.len() + case.bottom_elastic_layers.len());
+    let elastic_points: usize = case
+        .top_elastic_layers
+        .iter()
+        .chain(&case.bottom_elastic_layers)
+        .map(|layer| layer.material_profile.len().max(2))
+        .sum();
     let profile_values: usize =
         iter(case).map(|layer| layer.points.len()).sum::<usize>() + elastic_points;
     let loss_values: usize =

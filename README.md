@@ -79,12 +79,14 @@ through both engines: 37 full API/CLI-HDF5 workflows, including original TLslice
 `scholte/normal/flused` (473 modes, 5,715 pressures). Real tops retain pinned
 shared isolation/Brent/Solve2 and normalization: top compressional loss acts,
 while elastic shear/bottom absorption is omitted. Use KRAKENC for full elastic loss.
-[Homogeneous finite elastic caps](docs/kraken-finite-elastic-layers.md) now pass
+[Finite elastic caps](docs/kraken-finite-elastic-layers.md) now pass
 50 full API/CLI-HDF5 workflows, including original `elsed/ice` (933 modes,
 10,536 pressures). Both engines support contiguous fluid stacks; KRAKEN retains
 its reference real-stiffness/loss limitation. `solve_frequencies` preserves
 ordered finite-elastic search state across a run.
-Graded/interleaved solids and real elastic-top/finite-solid combinations remain later work.
+Depth-varying finite cp/cs/density/P/S loss also passes 23 complete workflows,
+158 modes and 1,827 pressures, including ordered frequency conversion,
+self-contained JSON and additive HDF5 material-profile metadata.
 Analytic Munk and F/P/TRC boundaries remain single-layer.
 `legacy::load_frequency_cases` supports discrete multi-frequency KRAKEN/KRAKENC
 runs; original `BroadBand/MunkK` passes through KRAKEN at 50 and 500 Hz (102/1,023 modes,

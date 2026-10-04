@@ -58,7 +58,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         .water_attenuation_db_per_wavelength
         .iter()
         .any(|&a| a != 0.0);
-    let mut refinement = crate::refinement::Refinement::<Complex64>::new();
+    let mut refinement = crate::refinement::Refinement::<Complex64>::default();
     let mut work = 0;
     for multiplier in crate::refinement::MULTIPLIERS {
         let layers = crate::layers::mesh_layers(case, multiplier)?;

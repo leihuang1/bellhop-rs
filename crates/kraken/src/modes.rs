@@ -19,12 +19,6 @@ const MAX_SHAPES: usize = 5_000_000;
 const MAX_WORK: usize = 2_500_000_000;
 const ROOT_STEPS: usize = 64;
 
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    clippy::too_many_lines
-)]
 pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let omega = 2.0 * PI * case.frequency_hz;
     let (bottom_k2, bottom_complex_k2) = if case.bottom_boundary.is_half_space() {
@@ -55,7 +49,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
             "mesh_points",
         ));
     }
-    let mut refinement = crate::refinement::Refinement::<f64>::new();
+    let mut refinement = crate::refinement::Refinement::<f64>::default();
     let mut work = 0_usize;
     for multiplier in crate::refinement::MULTIPLIERS {
         let layers = crate::layers::mesh_layers(case, multiplier)?;

@@ -8,6 +8,7 @@ use std::ops::{Div, Sub};
 
 pub(crate) const MULTIPLIERS: [usize; 5] = [1, 2, 4, 8, 16];
 
+#[derive(Default)]
 pub(crate) struct Refinement<T> {
     table: Vec<Vec<T>>,
     seeds: Vec<(f64, Vec<Complex64>)>,
@@ -15,14 +16,6 @@ pub(crate) struct Refinement<T> {
 }
 
 impl<T> Refinement<T> {
-    pub fn new() -> Self {
-        Self {
-            table: Vec::new(),
-            seeds: Vec::new(),
-            modes: Vec::new(),
-        }
-    }
-
     pub fn seed(&self, index: usize, h: f64) -> Option<Complex64> {
         // Solve2 keeps the original scan on mesh two. Mesh three is the first
         // with two raw-root histories, including cLow-excluded deflation roots.
@@ -189,7 +182,7 @@ impl<T: Copy + Sub<Output = T> + Div<f64, Output = T>> Refinement<T> {
 #[cfg(test)]
 #[test]
 fn neville_seeds_start_on_the_third_mesh_and_use_raw_roots() {
-    let mut refinement = Refinement::<Complex64>::new();
+    let mut refinement = Refinement::<Complex64>::default();
     refinement
         .seeds
         .push((1.0, vec![Complex64::new(10.0, -2.0)]));

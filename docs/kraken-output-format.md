@@ -44,9 +44,10 @@ builds it using the existing static HDF5 dependency.
   material attenuation**; use KRAKENC for elastic attenuation. Requested P/S loss
   and the real/complex model are recorded separately in additive HDF5 metadata.
 - [Finite homogeneous solid caps](kraken-finite-elastic-layers.md) are supported
-  above/below contiguous N/C/P/S fluids: KRAKENC fluid stacks, KRAKEN one fluid.
-  Multi-fluid finite-elastic KRAKEN inputs explicitly fail (exit 2). Original
+  above/below contiguous N/C/P/S fluid stacks through both engines. Original
   elsed/ice pass both engines; graded/interleaved solids remain excluded.
+  Sequential real finite-solid frequencies retain Solve2's search bound; they
+  are not independent solver runs.
   KRAKEN finite stiffness uses Re(c²) but omits elastic absorption perturbation.
   Modal/FIELD samples stay inside the absolute fluid interval, not in solids.
 - KRAKENC `F`/`P` bottoms additionally consume same-stem `.brc`/`.irc`; this

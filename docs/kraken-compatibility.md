@@ -35,7 +35,7 @@ KRAKENC top/bottom and KRAKEN bottom boundaries over N/C/P/S fluid stacks.
 Original TLslices scholte/normal/flused now pass both engines, FIELD and CLI/HDF5.
 KRAKEN elastic top-half-space is explicitly rejected. Homogeneous finite solid
 caps now pass the separate [finite-layer checkpoint](kraken-finite-elastic-layers.md):
-KRAKENC layered fluids, KRAKEN one fluid, including original elsed/ice.
+both backends with contiguous layered fluids, including original elsed/ice.
 KRAKEN retains the pinned elastic-loss omission; use KRAKENC for that attenuation.
 
 For code navigation and ownership, see the [implementation map](kraken-internals.md).
@@ -386,18 +386,18 @@ is not extended to any of them.
 
 [Finite-layer scope/evidence](kraken-finite-elastic-layers.md): five-component
 compound-matrix transfer through independently meshed constant cp/cs/rho/loss
-solids above/below contiguous fluids. KRAKENC supports multiple fluids; KRAKEN
-finite-solid search currently requires one fluid and rejects multi-fluid
-combinations at input validation (new root-count parity failures are not waived).
-Original elsed and ice plus 23 constructed/derived pairs pass 33 full API and
-actual CLI/HDF5 workflows: 36 frequency blocks, 827 modes, 9,276 pressures,
+solids above/below contiguous fluids through both backends. Real SSP-node
+rounding, scalar operation grouping and Solve2's mesh/frequency search bound
+are retained; no oracle-count cropping or parity waiver is used.
+Original elsed and ice plus 23 constructed/derived pairs pass 50 full API and
+actual CLI/HDF5 workflows: 56 frequency blocks, 933 modes, 10,536 pressures,
 triplicate identical pinned MOD/SHD, unchanged tolerances. Pressure sampling stays
 inside the absolute fluid interval; no solid displacement output or fictitious
 fluid substitution. Total media/mesh/storage/root-work budgets are shared.
 KRAKEN finite coefficients use Re(c²) but omit elastic absorption perturbation;
 use KRAKENC for complex elastic attenuation. Graded/interleaved solids, analytic
 Munk, tables, roughness, pure solids and acoustic outer A behind a solid remain
-explicitly unsupported. Source bytes and 149 SHA records lock new provenance.
+explicitly unsupported. Source bytes and 200 SHA records lock provenance.
 
 ### Smooth boundaries and top reflection tables
 
@@ -554,8 +554,9 @@ reused. `/inputs/json` hashes the exact parsed snapshot, not reconstructed ENV
 resources. Unknown/duplicate fields and invalid combinations are rejected.
 
 Ordinary tests cover exact legacy-definition round trips, relocated CLI runs,
-nested validation, quotas and output rollback. Ten existing representative
+nested validation, quotas and output rollback. Thirteen existing representative
 workflows pass JSON API and actual CLI/HDF5 fixed-oracle comparison, including
+real finite TopN, ShearOnly and ordered Power,
 original BroadBand/MunkK, TabRefCoef BRC/IRC and Gulf AD/CM. Numerical tolerances,
 reference files, BELLHOP schemas and physics support limits are unchanged; this
 checkpoint adds no option Cartesian product. See [schema, units and
@@ -564,11 +565,14 @@ limits](kraken-json-input.md).
 ### Multiple frequencies
 
 `legacy::load_frequency_cases(env, flp, ModeSolver)` returns a `Vec<Case>` in
-input frequency order. Each case uses the existing `solve` (or KRAKENC
-`solve_complex_modes`) and produces a separately labelled frequency-domain
-result. `load_case` and `load_complex_case` reject multiple frequencies rather
-than silently taking the first. The CLI/HDF5 adapter processes these cases
-sequentially with cumulative output quotas; it adds no batched numerical solver,
+input frequency order. For complete FIELD runs, `legacy::load_field_cases`
+and `solve_frequencies` process ordered frequency blocks lazily, preserving
+real finite-elastic Solve2 search bounds and stopping at the first failure.
+Independent `solve`/`solve_field` calls start separate reference runs, which can
+have different finite-solid spectra from the same case inside a sequence.
+`load_case` and `load_complex_case` reject multiple frequencies rather than
+silently taking the first. The CLI/HDF5 adapter uses the ordered iterator with
+cumulative output quotas; it adds no parallel/batched numerical solver,
 FFT or time-domain response. JSON uses the separate canonical adapter below;
 HTTP is not provided.
 

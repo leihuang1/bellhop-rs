@@ -1097,12 +1097,12 @@ does not waive any elastic failure. See the [half-space checkpoint](../../../../
 
 ## Homogeneous finite elastic layers
 
-25 pairs (23 derived/constructed, two originals), 33 workflows / 36 blocks /
-827 modes / 9,276 pressures. Every mode, shape and pressure passes API and actual
-CLI/HDF5 comparison at unchanged tolerances; local max |dp|=4.2146848510894035e-8.
+25 pairs (23 derived/constructed, two originals), 50 workflows / 56 blocks /
+933 modes / 10,536 pressures. Every mode, shape and pressure passes API and actual
+CLI/HDF5 comparison at unchanged tolerances; local max |dp|=5.960464477539063e-8.
 MOD/SHD are byte-identical across three independent unmodified pinned runs.
 PRT timings remain intact; only trailing whitespace is removed. Rust HDF5 is
-never a reference artifact. Verify all 149 input/artifact records from fixtures:
+never a reference artifact. Verify all 200 input/artifact records from fixtures:
 `shasum -a 256 -c golden/finite-elastic.sha256`.
 
 **Original:** OriginalElasticSediment.env = TLslices elsed.env (46 modes per
@@ -1128,8 +1128,12 @@ and retains only solid shear loss. Power preserves 75/50/62.5/50 Hz and
 per-medium m power laws/fractional NG scaling. Vacuum/Rigid replace only the
 outer bottom A and its record. Stack splits both caps into two independently
 meshed/materially distinct solids, not a fluid average. These 17 constructed
-pairs pass KRAKENC only; multi-fluid finite-elastic KRAKEN inputs explicitly
-reject at validation because new secant count failures are not accepted/waived.
+pairs pass both engines. Real TopN/ShearOnly have 4/3 modes; ordered Power has
+8/6/6/6. Real Solve2 carries its search bound across meshes/frequencies rather
+than cropping to a reference count. When later meshes reduce M, pinned WriteMode
+can leave first-mesh records beyond the declared spectrum; the comparator checks
+all declared modes/shapes/pressures and bounds those stale trailing records.
+No other record-length/count check or numerical tolerance is relaxed.
 See [finite-cap scope and stiffness semantics](../../../../../docs/kraken-finite-elastic-layers.md).
 
 Existing half-space, layered and single-fluid goldens/tolerances are unchanged.

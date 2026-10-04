@@ -1,7 +1,7 @@
 # KRAKEN implementation map
 
 The public test surface remains `Case::from_definition`, the legacy/JSON
-loaders, `solve`, `solve_complex_modes` and `solve_field`. Numerical acceptance
+loaders, `solve`, `solve_complex_modes`, `solve_field` and `solve_frequencies`. Numerical acceptance
 is still the [fixed compatibility target](kraken-compatibility.md); this map
 adds no physics or new acceptance requirements.
 
@@ -39,10 +39,19 @@ separate Implementations.
 - raw root history is separate from the Richardson table, and includes
   cLow-excluded roots used for KRAKENC deflation;
 - mesh two still uses the original scan; Neville seeds start on mesh three;
-- first-mesh shapes/group speeds are retained, mode-count changes are rejected;
+- first-mesh shapes/group speeds are retained; ordinary fluid and KRAKENC
+  mode-count changes are rejected, while real finite solids retain surviving
+  first-mesh data when Solve2 reduces its search bound;
 - KRAKEN extrapolates real k² and retains first-mesh loss; KRAKENC extrapolates
   complex k². Standard arithmetic bounds share bookkeeping, not a new numerical
   trait or plugin Interface.
+
+`solve_frequencies` keeps real Solve2's run-local bound across ordered blocks,
+without retaining all results; the first error ends the iterator. Like JSON,
+all blocks must share one backend; a mismatched block returns `KR0201` before
+numerical work, including for multi-profile blocks. Independent
+`solve`/`solve_field` calls reset the bound. HDF5 legacy/JSON execution and API
+differential checks share this Interface; no global solver state is used.
 
 FIELD synthesis and multi-profile propagation still own their intentionally
 different precision/operation grouping. The

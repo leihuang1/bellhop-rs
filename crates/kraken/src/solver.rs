@@ -9,15 +9,15 @@ use std::path::Path;
 // precompute modal phases only if measured throughput requires it.
 pub(crate) const MAX_FIELD_WORK: usize = 550_000_000;
 
-pub(super) fn solve(case: &Case) -> Result<SimulationResult, DiagnosticReport> {
-    let modes = solve_modes(case)?;
+pub(super) fn solve(case: &Case, root_limit: usize) -> Result<SimulationResult, DiagnosticReport> {
+    let modes = solve_modes(case, root_limit)?;
     let field = synthesize_field(case, &modes)?;
     Ok(SimulationResult { modes, field })
 }
 
-pub(crate) fn solve_modes(case: &Case) -> Result<ModeSet, DiagnosticReport> {
+pub(crate) fn solve_modes(case: &Case, root_limit: usize) -> Result<ModeSet, DiagnosticReport> {
     match case.mode_solver {
-        crate::ModeSolver::Kraken => crate::modes::solve(case),
+        crate::ModeSolver::Kraken => crate::modes::solve(case, root_limit),
         crate::ModeSolver::Krakenc => crate::complex_modes::solve(case),
     }
 }

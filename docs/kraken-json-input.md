@@ -32,6 +32,10 @@ are explicit; descending and repeated Hz values are retained. All blocks must
 use the same `mode_solver` (`kraken` or `krakenc`). Geometry, profile count,
 propagation and title may vary between frequency blocks. No sorting, frequency
 scaling of materials, inheritance, file references or templates are implicit.
+Execution uses `solve_frequencies`: real finite-solid KRAKEN retains Solve2's
+search bound across ordered blocks. Independent `solve`/`solve_field` calls start
+new runs; the same canonical case can consequently have a different searched
+spectrum. This does not change or cumulatively rescale its material losses.
 
 All object fields are strict, including nested media, boundaries and complex
 numbers. Unknown/duplicate fields, unknown enum values and missing required
@@ -127,8 +131,9 @@ poisoned to prove they are ignored. Output preservation covers malformed input,
 engine/FLP conflicts, quotas, unowned scratch, input/symlink aliases and numerical
 failure after a completed first frequency.
 
-Fresh pinned CI reuses ten **existing** representative workflows: WaterLossPower,
-FieldPattern, FluidTrcC, LayeredFluidPower, FiniteElasticStack, original
+Fresh pinned CI reuses thirteen **existing** representative workflows: WaterLossPower,
+FieldPattern, FluidTrcC, LayeredFluidPower, FiniteElasticStack, real
+FiniteElasticTopN/ShearOnly/Power, original
 TabRefCoef BRC/IRC, original BroadBand/MunkK, and original Gulf AD/CM. Exported
 JSON definitions must equal the complete legacy definitions; JSON API results
 and actual JSON CLI HDF5 then compare every mode/shape/pressure with the same

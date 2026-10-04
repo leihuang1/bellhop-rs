@@ -1,0 +1,75 @@
+ _________________________________________________
+
+ KRAKEN- Constructed finite elastic Both C
+ Nominal Frequency =   50.00    Hz
+ NMedia    =   4
+
+
+     C-Linear approximation to SSP
+     Attenuation units: dB/wavelength
+     VACUUM
+
+       ( # mesh points =    67  RMS roughness =   0.00     m )
+
+ Sound speed profile:
+      z         alphaR      betaR     rho        alphaI     betaI
+     (m)         (m/s)      (m/s)   (g/cm^3)      (m/s)     (m/s)
+
+      0.00      3000.00   1400.00     1.00       0.3000    1.0000
+     20.00      3000.00   1400.00     1.00       0.3000    1.0000
+
+       ( # mesh points =   101  RMS roughness =   0.00     m )
+
+     20.00      1500.00      0.00     1.00       0.0200    0.0000
+     31.00      1520.00      0.00     1.00       0.0150    0.0000
+     70.00      1510.00      0.00     1.00       0.0100    0.0000
+
+       ( # mesh points =    83  RMS roughness =   0.00     m )
+
+     70.00      1450.00      0.00     1.60       0.0350    0.0000
+     89.00      1480.00      0.00     1.60       0.0300    0.0000
+    140.00      1460.00      0.00     1.60       0.0250    0.0000
+
+       ( # mesh points =   113  RMS roughness =   0.00     m )
+
+    140.00      2200.00    900.00     1.80       0.1500    0.3000
+    170.00      2200.00    900.00     1.80       0.1500    0.3000
+
+                              ( RMS roughness =   0.00     m )
+     ACOUSTO-ELASTIC half-space
+    170.00      4000.00   2000.00     2.00       0.2500    0.4000
+
+ cLow =   1400.0     m/s      cHigh =   1800.0     m/s
+ RMax =   1000.0     km
+
+ __________________________________________________________________________
+
+    Number of Source   z-coordinates, Sz =            3
+    Source   z-coordinates, Sz (m)
+                 31.0000       70.0000       105.000
+
+
+ __________________________________________________________________________
+
+    Number of Receiver z-coordinates, Rz =            7
+    Receiver z-coordinates, Rz (m)
+                 20.0000       69.9900       70.0000       70.0100
+   105.000       139.990       140.000
+
+
+ Mesh multiplier   CPU seconds
+        1            0.356E-02s
+        2            0.163E-02s
+        4            0.570E-03s
+
+    I       k             alpha     Phase Speed     Group Speed
+          (1/m)           (1/m)        (m/s)           (m/s)
+    1  0.2241975114     -0.17E-04   1401.261162       5817.02
+    2  0.2103679459     -0.11E-03   1493.379916       1478.24
+    3  0.2043946927     -0.80E-04   1537.022616       1498.81
+    4  0.1961701610     -0.82E-04   1601.463055       1575.68
+    5  0.1879510895     -0.41E-04   1671.494782       3143.64
+    6  0.1817526481     -0.62E-04   1728.498971       1950.00
+ _________________________________________________
+
+ End of environmental file

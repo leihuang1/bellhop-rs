@@ -192,10 +192,46 @@ pub struct ProfileSimulationResult {
 /// Compute every profile's modes and synthesize one range-dependent field.
 /// # Errors
 /// Returns modal, cumulative storage/work or non-finite pressure diagnostics.
-#[allow(clippy::missing_panics_doc, clippy::too_many_lines)] // FieldCase construction guarantees a nonempty sequence
 pub fn solve_field(case: &FieldCase) -> Result<ProfileSimulationResult, DiagnosticReport> {
+    let mut root_limit = crate::MAX_MODE_LIMIT;
+    solve_field_with_limit(case, &mut root_limit)
+}
+
+/// Solve ordered frequency blocks, stopping after the first failed block.
+/// Blocks must share one mode solver; a mismatch yields `KR0201` without solving it.
+/// Real finite-elastic KRAKEN retains Solve2's search bound across meshes and
+/// frequencies; separate calls to `solve_field` start separate reference runs.
+pub fn solve_frequencies(
+    cases: &[FieldCase],
+) -> impl Iterator<Item = Result<ProfileSimulationResult, DiagnosticReport>> + '_ {
+    cases
+        .iter()
+        .scan(Some(crate::MAX_MODE_LIMIT), |limit, case| {
+            let root_limit = limit.as_mut()?;
+            let result = if case.profiles[0].mode_solver == cases[0].profiles[0].mode_solver {
+                solve_field_with_limit(case, root_limit)
+            } else {
+                Err(error(
+                    "KR0201",
+                    "frequency blocks must share the same mode solver",
+                    "mode_solver",
+                ))
+            };
+            if result.is_err() {
+                *limit = None;
+            }
+            Some(result)
+        })
+}
+
+#[allow(clippy::too_many_lines)] // FieldCase construction guarantees a nonempty sequence
+fn solve_field_with_limit(
+    case: &FieldCase,
+    root_limit: &mut usize,
+) -> Result<ProfileSimulationResult, DiagnosticReport> {
     if case.propagation == FieldPropagation::RangeIndependent {
-        let result = crate::solve(&case.profiles[0])?;
+        let result = crate::solver::solve(&case.profiles[0], *root_limit)?;
+        *root_limit = result.modes.modes.len();
         return Ok(ProfileSimulationResult {
             modes: vec![result.modes],
             field: result.field,
@@ -204,12 +240,13 @@ pub fn solve_field(case: &FieldCase) -> Result<ProfileSimulationResult, Diagnost
     let mut modes = Vec::with_capacity(case.profiles.len());
     let mut shapes = 0;
     for (index, profile) in case.profiles.iter().enumerate() {
-        let set = crate::solver::solve_modes(profile).map_err(|mut report| {
+        let set = crate::solver::solve_modes(profile, *root_limit).map_err(|mut report| {
             for d in &mut report.diagnostics {
                 d.field = format!("profiles[{index}].{}", d.field);
             }
             report
         })?;
+        *root_limit = set.modes.len();
         shapes += set.modes.len() * set.sampled_depths_m.len();
         if shapes > MAX_SEQUENCE_VALUES {
             return Err(error(

@@ -19,7 +19,7 @@ const MAX_SHAPES: usize = 5_000_000;
 const MAX_WORK: usize = 2_500_000_000;
 const ROOT_STEPS: usize = 64;
 
-pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
+pub(super) fn solve(case: &Case, mut root_limit: usize) -> Result<ModeSet, DiagnosticReport> {
     let omega = 2.0 * PI * case.frequency_hz;
     let (bottom_k2, bottom_complex_k2) = if case.bottom_boundary.is_half_space() {
         // AttenMod::CRCI converts dB/wavelength to a positive imaginary sound speed.
@@ -30,7 +30,7 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         );
         (
             (omega / case.bottom_sound_speed_mps).powi(2),
-            (Complex64::new(omega, 0.0) / bottom_c).powi(2),
+            Complex64::new(omega * omega, 0.0) / bottom_c.powi(2),
         )
     } else {
         (0.0, Complex64::new(0.0, 0.0))
@@ -57,7 +57,9 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
         mesh.top_solids = crate::elastic::SolidMesh::build(case, multiplier, true, true)?;
         mesh.bottom_solids = crate::elastic::SolidMesh::build(case, multiplier, false, true)?;
         let roots = if crate::elastic::has_layers(case) {
-            mesh.solid_roots(&refinement, &mut work)?
+            let roots = mesh.solid_roots(&refinement, root_limit, &mut work)?;
+            root_limit = roots.len();
+            roots
         } else {
             mesh.roots(&mut work)?
         };
@@ -116,7 +118,7 @@ impl<'a> Mesh<'a> {
                 let speed = profile.mesh_complex_speed(i, layer.intervals);
                 invalid_speed |= !speed.re.is_finite() || speed.re <= 0.0 || !speed.im.is_finite();
                 min_speed = min_speed.min(speed.re);
-                if water_loss {
+                if water_loss || crate::elastic::has_layers(case) {
                     let k2 = Complex64::new(omega * omega, 0.0) / speed.powi(2);
                     b1c.push(k2.im);
                     b1.push(-2.0 + layer.h * layer.h * k2.re);
@@ -148,7 +150,7 @@ impl<'a> Mesh<'a> {
             );
             (
                 (omega / case.surface_sound_speed_mps).powi(2),
-                (Complex64::new(omega, 0.0) / c).powi(2),
+                Complex64::new(omega * omega, 0.0) / c.powi(2),
             )
         } else {
             (0.0, Complex64::new(0.0, 0.0))
@@ -181,7 +183,7 @@ impl<'a> Mesh<'a> {
     }
 
     fn bottom_gamma(&self, x: f64) -> Complex64 {
-        (Complex64::new(x, 0.0) - self.bottom_complex_k2).sqrt()
+        crate::profile::principal_root(Complex64::new(x, 0.0) - self.bottom_complex_k2)
     }
 
     fn bottom_admittance(&self, x: f64) -> f64 {
@@ -234,7 +236,7 @@ impl<'a> Mesh<'a> {
     }
 
     fn surface_gamma(&self, x: f64) -> Complex64 {
-        (Complex64::new(x, 0.0) - self.surface_complex_k2).sqrt()
+        crate::profile::principal_root(Complex64::new(x, 0.0) - self.surface_complex_k2)
     }
 
     fn surface_diagonal(&self, x: f64) -> f64 {
@@ -327,7 +329,7 @@ impl<'a> Mesh<'a> {
             let mut p0 = 0.0;
             let mut p1 = -2.0 * g;
             let mut p2 = (self.b1[layer.coefficient_start + layer.intervals] - shift) * g
-                - 2.0 * layer.h * f * layer.density;
+                - (2.0 * f) * (layer.h * layer.density);
             for &b in self.b1[layer.coefficient_start..layer.coefficient_start + layer.intervals]
                 .iter()
                 .rev()
@@ -366,6 +368,7 @@ impl<'a> Mesh<'a> {
     fn solid_roots(
         &self,
         refinement: &crate::refinement::Refinement<f64>,
+        root_limit: usize,
         work: &mut usize,
     ) -> Result<Vec<f64>, DiagnosticReport> {
         let c_high = crate::elastic::maximum_speed(self.case);
@@ -380,7 +383,7 @@ impl<'a> Mesh<'a> {
                 "phase_speed_limits",
             ));
         }
-        let low = (self.omega / c_high).powi(2);
+        let low = self.omega * self.omega / c_high.powi(2);
         let points: usize = self
             .top_solids
             .iter()
@@ -388,8 +391,8 @@ impl<'a> Mesh<'a> {
             .map(crate::elastic::SolidMesh::points)
             .sum();
         let mut roots = Vec::new();
-        let mut x = (self.omega / c_low).powi(2);
-        for _ in 0..MAX_MODE_LIMIT {
+        let mut x = self.omega * self.omega / c_low.powi(2);
+        for _ in 0..root_limit {
             x *= f64::from(1.000_01_f32);
             x = refinement
                 .seed(
@@ -453,21 +456,7 @@ impl<'a> Mesh<'a> {
                 ));
             }
             if x < low {
-                if roots.is_empty() {
-                    return Err(error(
-                        "KR0301",
-                        "no elastic modes inside spectral limits",
-                        "phase_speed_limits",
-                    ));
-                }
-                if roots.len() * self.case.mode_sample_depths_m.len() > MAX_SHAPES {
-                    return Err(error(
-                        "KR0302",
-                        "mode shape sample limit exceeded",
-                        "mode_sample_depths_m",
-                    ));
-                }
-                return Ok(roots);
+                break;
             }
             if roots.iter().any(|&r: &f64| {
                 (r - x).abs() < x.abs().max(r.abs()) * (self.b1.len() + points) as f64 * 1e-14
@@ -480,11 +469,28 @@ impl<'a> Mesh<'a> {
             }
             roots.push(x);
         }
-        Err(error(
-            "KR0302",
-            "elastic real root limit exceeded",
-            "phase_speed_limits",
-        ))
+        if roots.is_empty() {
+            return Err(error(
+                "KR0301",
+                "no elastic modes inside spectral limits",
+                "phase_speed_limits",
+            ));
+        }
+        if roots.len() == MAX_MODE_LIMIT {
+            return Err(error(
+                "KR0302",
+                "elastic real root limit exceeded",
+                "phase_speed_limits",
+            ));
+        }
+        if roots.len() * self.case.mode_sample_depths_m.len() > MAX_SHAPES {
+            return Err(error(
+                "KR0302",
+                "mode shape sample limit exceeded",
+                "mode_sample_depths_m",
+            ));
+        }
+        Ok(roots)
     }
 
     // Inertia of the symmetric tridiagonal acoustic operator A(x): number of roots above x.
@@ -586,7 +592,7 @@ impl<'a> Mesh<'a> {
             let mut p0 = 0.0;
             let mut p1 = -2.0 * g;
             let mut p2 = (self.b1[layer.coefficient_start + layer.intervals] - shift) * g
-                - 2.0 * layer.h * f * layer.density;
+                - (2.0 * f) * (layer.h * layer.density);
             for &coefficient in self.b1
                 [layer.coefficient_start..layer.coefficient_start + layer.intervals]
                 .iter()
@@ -959,7 +965,7 @@ fn inverse_iteration(d: &[f64], e: &[f64]) -> Result<Vec<f64>, DiagnosticReport>
 
 #[cfg(test)]
 mod tests {
-    use super::solve;
+    use super::{MAX_MODE_LIMIT, solve};
     use crate::{Case, Interpolation, legacy::load_case, pekeris, profile::Profile};
     use std::path::Path;
 
@@ -980,7 +986,7 @@ mod tests {
         assert!((Profile::new(&linear).unwrap().speed(50.0) - 1550.0).abs() < 1e-12);
         input.frequency_hz = 1000.0;
         input.mesh_points = 1_000_000;
-        let report = solve(&Case::from_definition(input).unwrap()).unwrap_err();
+        let report = solve(&Case::from_definition(input).unwrap(), MAX_MODE_LIMIT).unwrap_err();
         assert!(report.diagnostics()[0].message.contains("work limit"));
     }
 
@@ -993,7 +999,7 @@ mod tests {
             .into_definition();
         input.mesh_points = 0;
         input.max_range_m = 200_000.0;
-        let modes = solve(&Case::from_definition(input).unwrap()).unwrap();
+        let modes = solve(&Case::from_definition(input).unwrap(), MAX_MODE_LIMIT).unwrap();
         assert_eq!(modes.modes.len(), 102);
         // Unmodified upstream MunkAnalytic.env: ninth .mod wavenumber, after extrapolation.
         assert_eq!(
@@ -1010,7 +1016,7 @@ mod tests {
                 .join(name);
             let case = load_case(root.with_extension("env"), root.with_extension("flp")).unwrap();
             let expected = pekeris::solve(&case);
-            let actual = solve(&case).unwrap();
+            let actual = solve(&case, MAX_MODE_LIMIT).unwrap();
             assert_eq!(actual.modes.len(), expected.modes.len());
             for (actual, expected) in actual.modes.iter().zip(&expected.modes) {
                 assert!(

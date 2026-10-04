@@ -149,7 +149,18 @@ impl<'a> Profile<'a> {
         let weight = t / (points[upper].depth_m - points[upper - 1].depth_m);
         match self.case.interpolation {
             Interpolation::N2Linear => {
-                Complex64::new(1.0, 0.0) / ((1.0 - weight) / a.powi(2) + weight / b.powi(2)).sqrt()
+                if self.case.mode_solver == crate::ModeSolver::Kraken
+                    && crate::elastic::has_layers(self.case)
+                {
+                    let one = Complex64::new(1.0, 0.0);
+                    let top = one / a.powi(2);
+                    let bottom = one / b.powi(2);
+                    let z = (1.0 - weight) * top + weight * bottom;
+                    one / principal_root(z)
+                } else {
+                    Complex64::new(1.0, 0.0)
+                        / ((1.0 - weight) / a.powi(2) + weight / b.powi(2)).sqrt()
+                }
             }
             Interpolation::CLinear => (1.0 - weight) * a + weight * b,
             Interpolation::Pchip | Interpolation::Spline => {
@@ -177,7 +188,9 @@ impl<'a> Profile<'a> {
         match self.case.interpolation {
             Interpolation::N2Linear
                 if self.case.bottom_boundary.is_tabulated()
-                    || self.case.surface_boundary.is_tabulated() =>
+                    || self.case.surface_boundary.is_tabulated()
+                    || (self.case.mode_solver == crate::ModeSolver::Kraken
+                        && crate::elastic::has_layers(self.case)) =>
             {
                 // Preserve n2Linear's complex divisions for table-root seeding.
                 let one = num_complex::Complex64::new(1.0, 0.0);
@@ -199,6 +212,20 @@ impl<'a> Profile<'a> {
             }
             Interpolation::AnalyticMunk => unreachable!(),
         }
+    }
+}
+
+// The pinned Fortran runtime uses an algebraic principal square root, not the
+// polar sin/cos formula in num-complex. Preserve it on real elastic shooting paths.
+pub(crate) fn principal_root(z: Complex64) -> Complex64 {
+    if z.im == 0.0 || !z.re.is_finite() || !z.im.is_finite() {
+        return z.sqrt();
+    }
+    let part = (0.5 * z.norm() + 0.5 * z.re.abs()).sqrt();
+    if z.re >= 0.0 {
+        Complex64::new(part, 0.5 * z.im / part)
+    } else {
+        Complex64::new(0.5 * z.im.abs() / part, part.copysign(z.im))
     }
 }
 

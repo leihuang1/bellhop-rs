@@ -21,8 +21,8 @@ and P/IRC also pass the original TabRefCoef geo/brc/irc workflows, including
 FIELD endpoint extension and CLI/HDF5 auxiliary-input provenance.
 Discrete multi-frequency KRAKEN/KRAKENC fluid-bottom cases
 are also supported; unmodified `tests/BroadBand/MunkK.env/.flp` passes at 50
-and 500 Hz through **KRAKEN**. KRAKENC 500 Hz still exceeds its 300M root-work
-limit and is not accepted. The `kraken` CLI now runs supported legacy pairs and writes
+and 500 Hz through **both engines**, including legacy/JSON CLI-HDF5, within
+unchanged work ceilings. The `kraken` CLI now runs supported legacy pairs and writes
 [KRAKEN HDF5 schema v1](kraken-output-format.md), with sequential frequency
 output and atomic publication. [Strict self-contained JSON](kraken-json-input.md)
 now imports/exports the same canonical cases and uses that CLI/HDF5 path; HTTP
@@ -225,11 +225,23 @@ Neither original three-line `.flp` parses in pinned FIELD, so this is original
 SCOOTER implementation. Hashes and provenance are
 [with the goldens](../crates/kraken/tests/fixtures/golden/README.md).
 
-Unmodified BroadBand/MunkK at 50 Hz also passes a local KRAKENC differential;
-500 Hz hits the unchanged 300M root-work ceiling. CI explicitly checks CLI
-exit 3 after the first frequency, preserves an existing output and cleans
-scratch; no partial/truncated result is accepted. Full 50/500 Hz upstream
-BroadBand/MunkK remains accepted through KRAKEN, not KRAKENC.
+The **unmodified** BroadBand/MunkK pair now passes full 50/500 Hz KRAKENC
+API and actual legacy/JSON CLI-HDF5 comparisons: 102/1,023 modes and 501,501
+pressures per frequency, max |dp|=1.5360e-8 at unchanged tolerances. All modal
+wavenumbers, attenuation, shapes and phase/group speeds are checked. Three
+unmodified pinned runs have identical MOD/SHD; their large binaries stay out
+of Git. KRAKEN acceptance is unchanged.
+
+The old narrow-spectrum constant-water initial guess required 300M root work
+before completing the 45th 500 Hz root. A two-root spacing predictor now takes
+152,546,495 work for the complete search, including the first out-of-interval
+root, without changing the 300M ceiling, secant tolerance, deflation or mesh.
+It applies only to single lossless-fluid narrow spectra with vacuum top,
+fluid A bottom and cHigh ≤ bottom cp. Water-loss, broader leaky, wide, layered,
+table and elastic search paths retain their previous seeds. This does not certify arbitrary secant spectra.
+A reduced-depth modal regression reproduces the old budget failure offline;
+fresh CI also checks a separately derived 7500 Hz late failure after both
+original frequencies succeed, preserving the old output and cleaning scratch.
 
 ### Single-fluid material attenuation
 
@@ -601,9 +613,9 @@ NG=101 and RMax=1000 km: KRAKEN has 5/3/4 modes, KRAKENC has 7/4/6, with
 nine line-source pressures per frequency. They pass committed and fresh
 `.mod/.prt/.shd` comparisons. The **unmodified upstream**
 `tests/BroadBand/MunkK.env/.flp` uses automatic `S` water sampling and `W`
-bottom loss at 50/500 Hz: 102/1,023 modes, 501,501 pressures per frequency,
-1,003,002 pressures total. Three pinned runs produced identical `.mod/.shd`
-binaries; fresh CI compares both complete frequency blocks. Original artifacts
+bottom loss at 50/500 Hz through both engines: 102/1,023 modes and 501,501
+pressures per frequency, 1,003,002 pressures per engine. Three pinned runs per
+engine produced identical `.mod/.shd`; fresh CI compares all frequency blocks. Original artifacts
 are not committed and do not replace the different single-frequency
 `tests/Munk/MunkK` pair.
 
@@ -635,7 +647,9 @@ are not committed and do not replace the different single-frequency
   pressure grids at 1,000,000 samples and 550,000,000 modal contributions.
   The larger KRAKEN/FIELD work bounds cover original BroadBand/MunkK at
   500 Hz (2,273,677,857 conservative root operations, 513,035,523 FIELD
-  contributions); numerical tolerances are unchanged. The loader bounds
+  contributions); KRAKENC's spacing predictor uses 152,546,495 root operations
+  for that same 500 Hz input, below its unchanged 300M ceiling. Numerical
+  tolerances are unchanged. The loader bounds
   cumulative input copies. The CLI additionally bounds cumulative output
   payload/file size (default 256 MiB), solving and writing one frequency at
   a time. Numerical work limits apply to each `solve`, not cumulatively

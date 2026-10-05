@@ -163,7 +163,16 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
                     |&previous| previous * 1.000_01,
                 )
             } else {
-                Complex64::new(water_k2 - vertical * vertical, 0.0)
+                // ponytail: predict narrow lossless-fluid spectra bounded by
+                // bottom cp; use a safeguarded search for broader leaky spectra.
+                match roots.as_slice() {
+                    [.., before, previous]
+                        if !water_loss && case.c_high_mps <= case.bottom_sound_speed_mps =>
+                    {
+                        previous + (previous - before)
+                    }
+                    _ => Complex64::new(water_k2 - vertical * vertical, 0.0),
+                }
             };
             // Solve2 seeds refined meshes with unmodified EVMat roots, then
             // Neville interpolation in h²; restarting from above can skip roots.

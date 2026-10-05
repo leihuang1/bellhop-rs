@@ -32,6 +32,7 @@
 | `Bellhop/ArrMod.f90::AddArr` | `bellhop::solver::influence::add_arrival` | Golden verified |
 | `Kraken/BCImpedance{c}Mod.f90::{ElasticUP,ElasticDN}` | `kraken::elastic::{SolidMesh,cap_impedance}` | Homogeneous/depth-varying finite caps and contiguous fluid stacks verified through both engines, FIELD and CLI-HDF5 |
 | `Kraken/kraken{c}.f90::Solve` spectral reduction/Richardson history | `kraken::refinement::Refinement::advance` | Surviving first-mesh data retained; original TLslices double passes both engines, FIELD and legacy/JSON CLI-HDF5 |
+| `misc/RootFinderSecantMod.f90::ZSecantCX` | `kraken::complex_modes::{solve,secant}` | Unchanged secant/deflation; lossless-fluid spacing prediction bounded by bottom cp enables full original BroadBand/MunkK at unchanged 300M ceiling |
 | `Kraken/kraken.f90::Solve2` finite-solid real search | `kraken::modes::Mesh::solid_roots` | Deflated secants/raw-root Neville and ordered M search bound verified for single/multi-fluid finite elasticity |
 | `Kraken/BCImpedance{c}Mod.f90` elastic A half-space formula | `kraken::elastic::half_space` | KRAKEN/KRAKENC top+bottom, full modes/FIELD/CLI-HDF5 differential verified |
 | `Kraken/kraken.f90::{FUNCT,AcousticLayers,Solve1,Bisection}` elastic mode count/isolation | `kraken::modes::Mesh::elastic_count` | Verified real top/bottom; shared intervals, ZBRENTX and subsequent non-deflated Solve2 |

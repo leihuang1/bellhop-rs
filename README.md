@@ -91,9 +91,11 @@ Depth-varying finite cp/cs/density/P/S loss also passes 23 complete workflows,
 self-contained JSON and additive HDF5 material-profile metadata.
 Analytic Munk and F/P/TRC boundaries remain single-layer.
 `legacy::load_frequency_cases` supports discrete multi-frequency KRAKEN/KRAKENC
-runs; original `BroadBand/MunkK` passes through KRAKEN at 50 and 500 Hz (102/1,023 modes,
-1,003,002 total complex pressures). KRAKENC 500 Hz still hits its unchanged
-300M root-work ceiling; no partial result is published. This is not a time-domain response. Its
+runs; original `BroadBand/MunkK` passes through both engines at 50 and 500 Hz
+(102/1,023 modes and 1,003,002 complex pressures per engine), including
+legacy/JSON CLI-HDF5. KRAKENC uses about 153M root work at 500 Hz, below its
+unchanged 300M ceiling; late failures still publish no partial result.
+This is not a time-domain response. Its
 full 2D acceptance target and explicit exclusions are in
 [the KRAKEN compatibility matrix](docs/kraken-compatibility.md).
 

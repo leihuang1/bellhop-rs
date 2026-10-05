@@ -76,17 +76,22 @@ Discrete multi-frequency regressions use two **derived** Pekeris `.env/.flp`
 pairs (KRAKEN and KRAKENC): unsorted 75/50/62.5 Hz, fractional mesh scaling,
 three refinement levels, `W` bottom loss, and nine pressures per frequency.
 Committed `.mod/.prt/.shd` and fresh CI compare every frequency block. Fresh
-CI also compares the **unmodified** `tests/BroadBand/MunkK.env/.flp` through KRAKEN:
-102 modes at 50 Hz, 1,023 at 500 Hz, and 501,501 pressures at each frequency
-(1,003,002 total). Three pinned runs yield identical `.mod/.shd`. The reference
+CI also compares the **unmodified** `tests/BroadBand/MunkK.env/.flp` through
+both engines: 102 modes at 50 Hz, 1,023 at 500 Hz, and 501,501 pressures at each
+frequency (1,003,002 per engine). Three pinned runs yield identical `.mod/.shd`.
+API and actual legacy/JSON CLI-HDF5 comparisons check the complete products.
+The reference
 reader checks frequency order, per-frequency mode counts and offsets, shapes,
 printed/binary wavenumbers, group speeds and every pressure; a later-frequency
 corruption regression ensures no frequency is skipped. These are frequency-
-domain results, not a wideband time-domain acceptance. KRAKENC S water at
-500 Hz exceeds its unchanged 300M root-work limit for this original broadband
-pair. A fresh-CI CLI regression checks exit 3, no partial publication, preservation
-of an existing output and scratch cleanup after 50 Hz succeeds. A local 50 Hz
-KRAKENC comparison passes, but the full pair is not accepted through KRAKENC.
+domain results, not a wideband time-domain acceptance. KRAKENC's narrow,
+single lossless-fluid spacing predictor (cHigh ≤ bottom cp) brings 500 Hz to
+152,546,495 work, below the unchanged 300M ceiling; max |dp|=1.5360e-8.
+WRITE-only reference tracing leaves MOD/SHD bytes unchanged. Other seed paths,
+secant tolerance, deflation, inputs and goldens are unchanged. A fresh-CI CLI
+regression separately derives a 7500 Hz third block to verify exit 3, no partial
+publication, preservation of old output and scratch cleanup after 50/500 Hz
+succeed. That rejection is protection evidence, not numerical acceptance.
 
 Smooth-boundary acceptance adds eleven **derived** pairs: all nine V/R/A top/
 bottom combinations with spline water loss, a lossy rigid-rigid plane mode with

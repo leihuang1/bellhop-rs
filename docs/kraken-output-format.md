@@ -6,8 +6,8 @@ matrix. It supports legacy `.env/.flp` or [self-contained JSON](kraken-json-inpu
 KRAKEN or KRAKENC, and discrete single/multiple-frequency modes plus supported
 single/multi-profile FIELD. HTTP, modes-only CLI runs, reflection-table
 generation, ray arrivals and time-domain synthesis are
-not provided. Original BroadBand/MunkK is accepted through KRAKEN; KRAKENC
-now supports its S profile but still rejects 500 Hz at the unchanged work ceiling.
+not provided. Original BroadBand/MunkK passes complete 50/500 Hz modes and
+FIELD through both engines and legacy/JSON CLI-HDF5 at unchanged work ceilings.
 
 ## CLI
 
@@ -35,9 +35,9 @@ builds it using the existing static HDF5 dependency.
   bounded refinement/frequency-order contract. Analytic A remains lossless and
   rejects volume addition. Loss conversion is per solve frequency; the HDF5
   schema and exact-input provenance contract are unchanged. Original BroadBand/MunkK
-  at 500 Hz still exceeds KRAKENC's 300M root-work ceiling: exit 3 preserves the
-  previous output, even after 50 Hz was written to scratch. KRAKEN acceptance
-  of the same pair is unchanged.
+  now passes both frequencies through KRAKENC's unchanged 300M root-work ceiling.
+  A derived 7500 Hz third block verifies that late failure still preserves old
+  output and removes scratch after 50/500 Hz succeed; no prefix is published.
 - N/C/P/S fluid stacks also support [elastic A half-spaces](kraken-elastic-halfspaces.md):
   top/bottom through both engines. Elastic/table/analytic combinations remain
   unsupported. KRAKEN retains the reference's cs cutoff, top-A compressional
@@ -300,8 +300,8 @@ BELLHOP v3 tests continue unchanged.
 Fresh pinned CI additionally passes CLI-produced `.h5` files back through the
 same strict `.mod/.prt/.shd` comparator (`KRAKEN_HDF5_RESULT`): both derived
 Pekeris broadband pairs, original single-frequency MunkK, all five original
-KRAKENC pairs, and original BroadBand/MunkK (both frequencies, 1,003,002
-pressures), plus four small table derivatives and all three original TabRefCoef
+KRAKENC pairs, and original BroadBand/MunkK (both engines/frequencies,
+1,003,002 pressures per engine), plus four small table derivatives and all three original TabRefCoef
 geo/brc/irc workflows with BOUNCE-generated resources, four cubic/analytic
 KRAKENC derivatives, broadband PCHIP Munk and original MunkS/MunkAnalytic
 environments with **derived** FIELD geometry, 27 water-material workflows and

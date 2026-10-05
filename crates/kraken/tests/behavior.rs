@@ -117,6 +117,23 @@ fn complex_case_accepts_extrapolation_and_lossless_cubic_profiles() {
 }
 
 #[test]
+fn complex_dense_spline_modes_fit_the_existing_root_work_budget() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/MunkBottomLoss");
+    let mut input = load_complex_case(root.with_extension("env"), root.with_extension("flp"))
+        .unwrap()
+        .into_definition();
+    input.interpolation = kraken::Interpolation::Spline;
+    input.frequency_hz = 500.0;
+    input.mesh_reference_frequency_hz = Some(50.0);
+    input.mode_sample_depths_m = vec![0.0, 25.0, 250.0, 5000.0];
+    // Same dense 500 Hz modal environment as original BroadBand/MunkK, but
+    // sample only four depths; the full upstream FIELD stays in fresh CI.
+    let modes = solve_complex_modes(&Case::from_definition(input).unwrap()).unwrap();
+    assert_eq!(modes.modes.len(), 1023);
+    assert_eq!(modes.sampled_depths_m, [0.0, 25.0, 250.0, 5000.0]);
+}
+
+#[test]
 fn complex_cubic_profiles_retain_numeric_validation() {
     let mut input = definition();
     input.mode_solver = kraken::ModeSolver::Krakenc;

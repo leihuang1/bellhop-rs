@@ -248,23 +248,29 @@ mkdir -p target/reference/cases/BroadBand
 docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/cases/BroadBand:/out" \
   --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 -c \
   'cp /opt/acoustics-toolbox/tests/BroadBand/MunkK.env /opt/acoustics-toolbox/tests/BroadBand/MunkK.flp /out/'
-tools/reference/run-kraken-case.sh kraken target/reference/cases/BroadBand/MunkK.env target/reference/BroadBand-MunkK-kraken
-KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
-KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK" \
-  cargo test --release -p kraken --test differential_reference \
-    multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+for engine in kraken krakenc; do
+  tools/reference/run-kraken-case.sh "$engine" target/reference/cases/BroadBand/MunkK.env "target/reference/BroadBand-MunkK-$engine"
+  KRAKEN_FREQUENCY_SOLVER="$engine" \
+  KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
+  KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-$engine/MunkK" \
+    cargo test --release -p kraken --test differential_reference \
+      multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
+done
 ```
 
 `MunkLeakyPchipBroadband` above is **derived**, with 75/50/62.5/50 Hz in input
 order, NG=803, meshes 1/2/4, 45/30/37/30 modes and 36 pressures per block.
-The full original BroadBand/MunkK comparison remains **KRAKEN**, not KRAKENC:
-KRAKENC 50 Hz passes locally but 500 Hz hits the unchanged 300M root-work ceiling.
-CI verifies explicit CLI failure and atomic-output protection after 50 Hz succeeds:
+The full original BroadBand/MunkK comparison now passes **both engines** at
+50/500 Hz (102/1,023 modes and 1,003,002 pressures per engine), including
+legacy/JSON CLI-HDF5. KRAKENC's narrow lossless-fluid predictor, bounded by
+bottom cp, uses 153M of the unchanged 300M ceiling at 500 Hz. Three unmodified MOD/SHD runs
+agree. CI separately derives a 7500 Hz late failure after both original blocks
+succeed to retain atomic-output protection:
 
 ```sh
 KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
   cargo test --release -p kraken-cli --test run \
-    original_complex_spline_broadband_retains_the_work_limit_and_output -- --ignored --exact --nocapture
+    original_complex_spline_broadband_is_complete_and_preserves_late_failure -- --ignored --exact --nocapture
 ```
 
 To validate the actual Rust [CLI/HDF5 product](../docs/kraken-output-format.md),

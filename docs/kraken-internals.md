@@ -38,7 +38,12 @@ spectral limits use the sampled minimum. Interpolated density, losses and bulk
 modulus are validated before shooting. Real/complex coefficient grouping and
 first-mesh normalization remain separate.
 Their root searches, precision, work limits and deflation arithmetic remain
-separate Implementations.
+separate Implementations. In single lossless-fluid narrow spectra with vacuum
+top/fluid A bottom and cHigh ≤ bottom cp, KRAKENC predicts the next initial
+guess from the last two root spacings. It reduces actual dispersion evaluations, not their accounting:
+original BroadBand/MunkK 500 Hz uses 153M of the unchanged 300M root-work
+ceiling. Water-loss/broader-leaky/wide/layered/table/elastic seeds and secant tolerances remain
+unchanged; raw Neville seeds still take precedence on mesh three onward.
 
 `refinement.rs` owns **Modal refinement** behind `seed` and `accept`:
 

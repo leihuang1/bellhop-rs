@@ -112,7 +112,7 @@ fn cli_round_trips_single_and_multifrequency_results() {
 
 #[test]
 #[ignore = "requires unmodified upstream BroadBand/MunkK input snapshots"]
-fn original_complex_spline_broadband_retains_the_work_limit_and_output() {
+fn original_complex_spline_broadband_is_complete_and_preserves_late_failure() {
     let env = PathBuf::from(std::env::var_os("KRAKEN_DIFFERENTIAL_ENV").unwrap());
     let cases =
         kraken::legacy::load_frequency_cases(&env, env.with_extension("flp"), ModeSolver::Krakenc)
@@ -120,15 +120,35 @@ fn original_complex_spline_broadband_retains_the_work_limit_and_output() {
     assert_eq!(cases.len(), 2);
     assert_eq!(cases[1].frequency_hz, 500.0);
     assert_eq!(cases[1].interpolation, kraken::Interpolation::Spline);
-    let root = directory("complex-spline-budget");
+    let root = directory("complex-spline-broadband");
     let output = root.join("previous.h5");
     fs::write(&output, b"previous output").unwrap();
-    // 50 Hz is written first; 500 Hz then exceeds the unchanged 300M root budget.
     let process = run(&env, &output, "krakenc", &["--overwrite"]);
+    assert!(
+        process.status.success(),
+        "{}",
+        String::from_utf8_lossy(&process.stderr)
+    );
+    assert_product(&output, &env, &env.with_extension("flp"), "krakenc");
+    assert!(!output.with_extension("h5.tmp").exists());
+    // Derived failure: both original frequencies succeed before 7500 Hz hits
+    // the unchanged 300M root budget. Never publish the successful prefix.
+    let late = root.join("late.env");
+    fs::write(
+        &late,
+        fs::read_to_string(&env)
+            .unwrap()
+            .replace("2              ! Nfreq", "3              ! Nfreq")
+            .replace(" 50 500 /", " 50 500 7500 /"),
+    )
+    .unwrap();
+    fs::copy(env.with_extension("flp"), late.with_extension("flp")).unwrap();
+    fs::write(&output, b"previous output").unwrap();
+    let process = run(&late, &output, "krakenc", &["--overwrite"]);
     assert_failure(&process, 3, &output, b"previous output");
     let message = String::from_utf8_lossy(&process.stderr);
     assert!(
-        message.contains("frequency[1] (500 Hz)")
+        message.contains("frequency[2] (7500 Hz)")
             && message.contains("complex root work limit exceeded")
     );
     fs::remove_dir_all(root).unwrap();

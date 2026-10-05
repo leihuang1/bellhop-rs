@@ -34,7 +34,7 @@ fn layered_fluid_legacy_input_is_accepted_by_both_backends() {
 }
 
 #[test]
-fn original_double_rejects_a_changed_mesh_mode_count() {
+fn original_double_keeps_the_complete_pinned_spectrum() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/OriginalLayeredDouble");
     for solver in [ModeSolver::Kraken, ModeSolver::Krakenc] {
         let case = legacy::load_frequency_cases(
@@ -44,21 +44,43 @@ fn original_double_rejects_a_changed_mesh_mode_count() {
         )
         .unwrap()
         .remove(0);
-        let report = solve(&case).unwrap_err();
+        let result = solve(&case).unwrap();
+        assert_eq!(result.modes.modes.len(), 42);
+        assert_eq!(result.modes.sampled_depths_m, [500.0, 2500.0]);
+        assert_eq!(result.field.pressure.len(), 501);
+        let mut first = case.clone().into_definition();
+        first.max_range_m = 0.0;
+        let first = solve(&Case::from_definition(first).unwrap()).unwrap();
+        assert_eq!(first.modes.modes.len(), 43);
+        for (mode, initial) in result.modes.modes.iter().zip(&first.modes.modes) {
+            assert_eq!(mode.eigenfunction, initial.eigenfunction);
+            assert_eq!(
+                mode.group_speed_mps.to_bits(),
+                initial.group_speed_mps.to_bits()
+            );
+            assert_ne!(
+                mode.horizontal_wavenumber_rad_per_m,
+                initial.horizontal_wavenumber_rad_per_m
+            );
+        }
+        // A new leading mode has no first-mesh shape: reductions must not
+        // accidentally make an increased count safe to publish.
+        let mut increased = case.into_definition();
+        increased.c_low_mps = first.modes.modes[0]
+            .phase_speed_mps
+            .midpoint(result.modes.modes[0].phase_speed_mps);
+        increased.c_high_mps = 1600.0;
+        let report = solve(&Case::from_definition(increased).unwrap()).unwrap_err();
         assert_eq!(report.diagnostics()[0].code, "KR0303");
-        assert!(
-            report.diagnostics()[0]
-                .message
-                .contains("mode count changed")
-        );
+        assert!(report.to_string().contains("mode count changed"));
     }
 }
 
 #[test]
 #[ignore = "known pinned secant parity gap; see docs/kraken-layered-refinement-gap.md"]
-fn wide_three_layer_refinement_rejects_the_pinned_count_change() {
-    // Pinned mesh 1 finds five roots, mesh 2 only four. Matching that search
-    // must reach the existing count-change guard, never silently clip a root.
+fn wide_three_layer_refinement_keeps_the_pinned_mode_count() {
+    // Pinned mesh 1 finds five roots, mesh 2 only four. The original-double
+    // count-reduction fix must not hide Rust's different five-root trajectory.
     let mut input = cases(
         include_str!("fixtures/LayeredFluidThreeWide.env"),
         ModeSolver::Krakenc,
@@ -67,13 +89,11 @@ fn wide_three_layer_refinement_rejects_the_pinned_count_change() {
     .remove(0)
     .into_definition();
     input.max_range_m = 1_000_000.0;
-    let result = solve(&Case::from_definition(input).unwrap());
-    assert!(result.is_err(), "known gap: Rust retains five modes");
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("mode count changed")
+    let result = solve(&Case::from_definition(input).unwrap()).unwrap();
+    assert_eq!(
+        result.modes.modes.len(),
+        4,
+        "known gap: Rust retains five modes"
     );
 }
 

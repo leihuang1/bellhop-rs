@@ -320,10 +320,14 @@ Layered-fluid fixtures use the same commands and comparator (for example,
 41 API/actual-CLI-HDF5 workflows: N/C/P/S interfaces, all V/R/A combinations,
 unequal/fractional meshes, per-layer power laws, biological loss, broadband
 leaky roots and cross-layer FIELD. `LayeredDoubleRefined` is a denser-mesh
-**derivative**, not acceptance of original TLslices `double`. The byte-identical
-`OriginalLayeredDouble.env` plus official shared `fieldbat.flp` is retained as a
-numerical-failure fixture: changing mode counts must not be clipped. A test also
-checks failure after three successful frequency blocks and old-output protection.
+**derivative**, separately labelled from original TLslices `double`. The
+byte-identical `OriginalLayeredDouble.env` plus official shared `fieldbat.flp`
+now passes both engines (42 modes and 501 pressures each), including actual
+legacy/JSON CLI-HDF5. `golden/original-double.sha256` records both inputs and six
+new artifacts; three unmodified MOD/SHD runs agree. Refinement retains surviving
+first-mesh data after a spectral exit, never an oracle count. Tests still check
+count-increase rejection, failure after three successful frequency blocks and
+old-output protection.
 Analytic Munk and F/P/TRC remain single-layer. The test-only `.mod` reader walks
 all finite fluid media and has a last-medium corruption regression.
 

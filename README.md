@@ -68,8 +68,10 @@ Single-frequency, RMax=0 KRAKENC F/BRC and P/IRC bottoms also accept original
 TabRefCoef geo/brc/irc inputs with generated reference tables, including all
 151,803 pressures; auxiliary-file snapshots are recorded in CLI/HDF5 provenance.
 Twenty-one derived layered-fluid pairs pass 41 API/CLI-HDF5 workflows (530 modes,
-4,902 pressures). The original TLslices `double` is still rejected for changing
-mesh mode counts; its denser-mesh derivative is accepted, not relabelled original.
+4,902 pressures). Byte-original TLslices `double` and official `fieldbat.flp`
+add two accepted workflows (84 modes, 1,002 pressures). Both engines retain the
+surviving first-mesh data when refinement reduces the spectrum from 43 to 42;
+the denser-mesh derivative remains separately labelled.
 A [known wide three-layer KRAKENC refinement gap](docs/kraken-layered-refinement-gap.md)
 remains outside acceptance as a non-blocking release exception: Rust can return
 five modes where the pinned reference returns four. CLI success is not a guarantee

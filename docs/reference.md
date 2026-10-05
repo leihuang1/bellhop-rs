@@ -146,10 +146,13 @@ metadata/budget/failure regressions run without Docker.
 
 `OriginalLayeredDouble.env` is byte-identical to upstream `tests/TLslices/double.env`;
 its `.flp` is the official shared `fieldbat.flp` selected by upstream `runtests.m`.
-Pinned KRAKEN changes from 43 to 42 modes on meshes 1/2; both Rust backends
-reject mode-count changes instead of clipping. `LayeredDoubleRefined` doubles
-NG to 200/400/400 and passes 42 modes/501 pressures per engine; it is derived,
-not acceptance of original `double`. `LayeredNormalization` removes shear only
+Both pinned engines and Rust find 43 then 42 roots on meshes 1/2. The two
+original workflows now pass every declared mode and all 501 pressures per engine,
+through API and actual legacy/JSON CLI-HDF5, with max |dp|=1.1824e-11.
+Refinement keeps surviving first-mesh data and rejects count increases; it does
+not use oracle counts. MOD/SHD are byte-identical in three unmodified runs;
+`golden/original-double.sha256` records two inputs and six new artifacts.
+`LayeredDoubleRefined` retains doubled NG=200/400/400 as a separate derivative. `LayeredNormalization` removes shear only
 from the original `normal.env` bottom and is also explicitly derived. Original
 `normal/flused` now pass the half-space checkpoint and `elsed/ice` the finite-cap
 checkpoint below; Gulf's sequence now uses multi-profile

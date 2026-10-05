@@ -84,6 +84,8 @@ fn json_cli_exports_and_runs_relocated_documents_without_auxiliary_files() {
     for (name, solver) in [
         ("Pekeris", "kraken"),
         ("WaterLossPower", "krakenc"),
+        ("OriginalLayeredDouble", "kraken"),
+        ("OriginalLayeredDouble", "krakenc"),
         ("FiniteSingleIceC", "kraken"),
         ("GradedElasticBottomN", "kraken"),
         ("GradedElasticTopS", "krakenc"),
@@ -101,7 +103,8 @@ fn json_cli_exports_and_runs_relocated_documents_without_auxiliary_files() {
         ("ProfilesCm", "kraken"),
     ] {
         let env = fixture(name);
-        let document = root.join(name).with_extension("json");
+        let stem = format!("{name}-{solver}");
+        let document = root.join(&stem).with_extension("json");
         let export = invoke("export", &env, &["--solver", solver]);
         assert!(
             export.status.success(),
@@ -123,8 +126,8 @@ fn json_cli_exports_and_runs_relocated_documents_without_auxiliary_files() {
             )
             .unwrap();
         }
-        let legacy_output = root.join(format!("{name}-legacy.h5"));
-        let json_output = root.join(format!("{name}-json.h5"));
+        let legacy_output = root.join(format!("{stem}-legacy.h5"));
+        let json_output = root.join(format!("{stem}-json.h5"));
         for (input, output, flags) in [
             (&env, &legacy_output, vec!["--solver", solver]),
             (&document, &json_output, vec![]),

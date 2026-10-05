@@ -161,14 +161,19 @@ jobs:
           done
       - name: Layered fluid modes, FIELD and actual CLI HDF5 differential
         run: |
+          (cd crates/kraken/tests/fixtures && sha256sum -c golden/original-double.sha256)
+          mkdir -p target/reference/layered-original-inputs
+          docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/layered-original-inputs:/out" \
+            --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 \
+            -c 'cp /opt/acoustics-toolbox/tests/TLslices/double.env /opt/acoustics-toolbox/tests/TLslices/fieldbat.flp /out/'
+          cmp target/reference/layered-original-inputs/double.env crates/kraken/tests/fixtures/OriginalLayeredDouble.env
+          cmp target/reference/layered-original-inputs/fieldbat.flp crates/kraken/tests/fixtures/OriginalLayeredDouble.flp
           cargo build --release -p kraken-cli
           for engine in kraken krakenc; do
-            for case in LayeredFluidN LayeredFluidC LayeredFluidP LayeredFluidS LayeredBoundaryVV LayeredBoundaryVR LayeredBoundaryRV LayeredBoundaryRR LayeredBoundaryRA LayeredBoundaryAV LayeredBoundaryAR LayeredBoundaryAA LayeredFluidThree LayeredFluidThreeWide LayeredFluidPlane LayeredFluidPower LayeredFluidBio LayeredFluidLeaky LayeredDoubleRefined LayeredNormalization LayeredFluidFractional; do
+            for case in LayeredFluidN LayeredFluidC LayeredFluidP LayeredFluidS LayeredBoundaryVV LayeredBoundaryVR LayeredBoundaryRV LayeredBoundaryRR LayeredBoundaryRA LayeredBoundaryAV LayeredBoundaryAR LayeredBoundaryAA LayeredFluidThree LayeredFluidThreeWide LayeredFluidPlane LayeredFluidPower LayeredFluidBio LayeredFluidLeaky LayeredDoubleRefined OriginalLayeredDouble LayeredNormalization LayeredFluidFractional; do
               if [ "$case" = LayeredFluidLeaky ] && [ "$engine" = kraken ]; then continue; fi
               tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             done
-            # Fortran smoke is not Rust acceptance: retain the original coarse input as a failure.
-            tools/reference/run-kraken-case.sh "$engine" crates/kraken/tests/fixtures/OriginalLayeredDouble.env
           done
           cargo test --release -p kraken-cli --test run \
             layered_failures_preserve_output_and_remove_scratch -- --exact --nocapture
@@ -315,6 +320,8 @@ jobs:
             'FieldPattern krakenc crates/kraken/tests/fixtures/FieldPattern.env target/reference/FieldPattern-krakenc/FieldPattern' \
             'FluidTrcC krakenc crates/kraken/tests/fixtures/FluidTrcC.env target/reference/FluidTrcC-krakenc/FluidTrcC' \
             'LayeredFluidPower krakenc crates/kraken/tests/fixtures/LayeredFluidPower.env target/reference/LayeredFluidPower-krakenc/LayeredFluidPower' \
+            'OriginalDoubleKraken kraken crates/kraken/tests/fixtures/OriginalLayeredDouble.env target/reference/OriginalLayeredDouble-kraken/OriginalLayeredDouble' \
+            'OriginalDoubleKrakenc krakenc crates/kraken/tests/fixtures/OriginalLayeredDouble.env target/reference/OriginalLayeredDouble-krakenc/OriginalLayeredDouble' \
             'FiniteElasticStack krakenc crates/kraken/tests/fixtures/FiniteElasticStack.env target/reference/FiniteElasticStack-krakenc/FiniteElasticStack' \
             'FiniteElasticTopN kraken crates/kraken/tests/fixtures/FiniteElasticTopN.env target/reference/FiniteElasticTopN-kraken/FiniteElasticTopN' \
             'FiniteElasticShearOnly kraken crates/kraken/tests/fixtures/FiniteElasticShearOnly.env target/reference/FiniteElasticShearOnly-kraken/FiniteElasticShearOnly' \

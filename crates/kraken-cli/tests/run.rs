@@ -231,6 +231,7 @@ fn cli_round_trips_layered_fluids() {
         "LayeredFluidBio",
         "LayeredFluidLeaky",
         "LayeredDoubleRefined",
+        "OriginalLayeredDouble",
         "LayeredNormalization",
         "LayeredFluidFractional",
     ] {
@@ -518,10 +519,22 @@ fn elastic_failures_preserve_output_and_remove_scratch() {
 fn layered_failures_preserve_output_and_remove_scratch() {
     let root = directory("layered-failures");
     let output = root.join("previous.h5");
-    let original = fixture("OriginalLayeredDouble.env");
+    let increased = root.join("increased.env");
+    fs::write(
+        &increased,
+        fs::read_to_string(fixture("OriginalLayeredDouble.env"))
+            .unwrap()
+            .replace("1400.0  2000.0", "1506.3905 1600.0"),
+    )
+    .unwrap();
+    fs::copy(
+        fixture("OriginalLayeredDouble.flp"),
+        increased.with_extension("flp"),
+    )
+    .unwrap();
     for engine in ["kraken", "krakenc"] {
         fs::write(&output, b"old layered output").unwrap();
-        let process = run(&original, &output, engine, &["--overwrite"]);
+        let process = run(&increased, &output, engine, &["--overwrite"]);
         assert_failure(&process, 3, &output, b"old layered output");
         assert!(String::from_utf8_lossy(&process.stderr).contains("mode count changed"));
     }

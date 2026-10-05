@@ -306,13 +306,14 @@ geo/brc/irc workflows with BOUNCE-generated resources, four cubic/analytic
 KRAKENC derivatives, broadband PCHIP Munk and original MunkS/MunkAnalytic
 environments with **derived** FIELD geometry, 27 water-material workflows and
 24 derived smooth-boundary/TRC workflows, 41 derived layered-fluid workflows
-(50 frequency blocks, 530 modes, 4,902 pressures), and the three fixed
+(50 frequency blocks, 530 modes, 4,902 pressures), two original TLslices `double`
+workflows (84 modes, 1,002 pressures), and the three fixed
 single-profile FIELD-extension workflows. The multi-profile checkpoint adds
 two small derivatives and both byte-original Gulf AD/CM paths (24 profile blocks,
 1,020 modes, 1,003,050 pressures), comparing every profile's modes and every
 pressure via actual CLI HDF5. Layer metadata, fractional
 interfaces, cross-layer sources/receivers, repeated frequencies and cumulative
-budgets are checked; original coarse `double` and a later-frequency root-work
+budgets are checked; count-increase rejection and a later-frequency root-work
 failure preserve old output and remove scratch. Every mode, shape and
 pressure is checked at the existing tolerances. The table derivatives have new
 Fortran goldens; no numerical tolerance is changed. Rust HDF5 artifacts

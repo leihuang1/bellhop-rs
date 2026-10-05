@@ -321,11 +321,17 @@ interface. Local maximum pressure error is 2.64e-9; tolerances are unchanged.
 All media records/frequencies are checked, including a last-medium corruption
 regression; ordinary tests also check metadata, shared budgets and output failure.
 
-**Original `double` is not accepted.** The byte-identical TLslices environment
-and official shared `fieldbat.flp` (selected by upstream `runtests.m`) are retained
-as `OriginalLayeredDouble`. Pinned KRAKEN changes 43 to 42 modes on meshes 1/2;
-both Rust backends reject changing mode counts. `LayeredDoubleRefined` explicitly
-doubles NG to 200/400/400, with 42 modes/501 pressures per engine. Likewise
+**Original `double` now passes both engines.** The byte-identical TLslices
+environment and official shared `fieldbat.flp` (selected by upstream `runtests.m`)
+are retained as `OriginalLayeredDouble`, with NG=100/200/200 and RMax=1000 km.
+Both pinned searches and Rust find 43 then 42 roots on meshes 1/2; refinement
+retains the surviving first-mesh shapes/group speeds/loss and Richardson columns.
+Count increases still return `KR0303`. All 42 modes and 501 pressures per engine
+pass API and actual legacy/JSON CLI-HDF5 comparisons; max |dp| is 1.1824e-11.
+Three unmodified runs produce identical MOD/SHD; `golden/original-double.sha256`
+locks two input files and six new artifacts. No earlier input, reference,
+tolerance or budget changes. `LayeredDoubleRefined` remains a separate derivative
+with doubled NG=200/400/400. Likewise
 `LayeredNormalization` removes the original `normal.env` bottom's shear speed
 and is labelled derived. Original normal/flused now pass the elastic half-space
 checkpoint below; original elsed/ice now pass the homogeneous finite-cap checkpoint.
@@ -721,7 +727,8 @@ MunkAnalytic environments are additionally checked through KRAKENC with
 separately derived FIELD geometry. The 27 derived water-material workflows
 above, plus 24 derived smooth-boundary/TRC workflows and 41 derived layered-fluid
 workflows, also have committed goldens and configured API/CLI-HDF5 fresh comparisons.
-Original `.mod/.shd` output is not committed.
+Original TLslices `double` additionally passes both engines with small committed
+goldens; large official `.mod/.shd` outputs remain fresh-reference artifacts.
 
 ## Repository shape
 

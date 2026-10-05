@@ -3,7 +3,10 @@
 **Not fixed; not an accepted workflow.** Following the user's scope review,
 this documented exception no longer blocks review/release of PR #25's validated
 fluid-stack subset. It is not a numerical fix or a general waiver for other
-parity failures. No solver, reference, tolerance or accepted golden was changed.
+parity failures. That scope decision changed no solver, reference, tolerance or
+accepted golden. The later original-`double` fix supports reference count
+reductions in shared refinement state; it does not fix this five-versus-four
+search trajectory. The ignored regression below remains failing.
 
 ## Reproducer and expected contract
 
@@ -14,13 +17,14 @@ GNU Fortran 12.2.0 with the documented fast-math flags, finds five modes on
 mesh 1 but only four on mesh 2. Rust finds five on both meshes. This is **not**
 a fifth root introduced by Richardson extrapolation or HDF5 serialization.
 
-If Rust reproduced that search, its existing mode-count-change guard would
-reject the run; silently truncating five modes to four is not the contract.
-The isolated, intentionally ignored reproducer currently **fails**:
+The original-`double` fix now retains surviving first-mesh data when a search
+actually reduces its count. This search still returns five Rust roots; silently
+truncating them to the oracle's four is not the contract. The isolated,
+intentionally ignored reproducer compares the pinned count and still **fails**:
 
 ```sh
 cargo test --release -p kraken --test layered \
-  wide_three_layer_refinement_rejects_the_pinned_count_change \
+  wide_three_layer_refinement_keeps_the_pinned_mode_count \
   -- --ignored --exact --nocapture
 ```
 
@@ -150,9 +154,10 @@ or prove this behavior occurs only in the one known fixture.
   three-layer, wide base-mesh, layered loss/broadband/leaky, V/R/A and interface
   workflows retain their existing complete comparisons. This is not a waiver
   for all three-layer refinement, all wide spectra or all KRAKENC failures.
-- API, CLI/HDF5 schema, atomic publication, quotas, work ceilings, physics and
-  the original `double` count-change rejection are unchanged. Layer-density
-  gradients, elasticity and multi-profile FIELD remain out of scope.
+- API, CLI/HDF5 schema, atomic publication, quotas and work ceilings are
+  unchanged by this exception. Original `double` now separately passes both
+  engines by retaining surviving first-mesh data after a true count reduction.
+  This exception does not extend to other material or FIELD paths.
 - The known case still may return five modes and CLI exit 0, without a warning
   or a parity-certification flag. This exception is documentary, **not** runtime
   rejection/protection. Users requiring exact legacy reproduction must exclude
@@ -173,7 +178,7 @@ or prove this behavior occurs only in the one known fixture.
 4. Any new parity failure, regression in an accepted workflow, or evidence of
    broader practical impact requires a separate scope review; no blanket waiver.
 5. Promotion of this workflow requires fresh unmodified-oracle API/CLI-HDF5
-   evidence and resolution of the count-change contract, or a separately
+   evidence and reproduction of its four-root search, or a separately
    approved numerical acceptance contract. The current exception does neither.
 
 This permits PR #25 to leave draft for normal review; it does not authorize

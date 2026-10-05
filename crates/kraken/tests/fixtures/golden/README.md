@@ -940,7 +940,7 @@ d1b1904e809f9afa1da2015ca69bdd56f54ea826c28325513f4af456bd50d374  golden/FluidTr
 fb2f022adb7652222a1d80a01668f3e6da6106ff8a2ed15acf9344e0c327b974  golden/FluidTrcRigid-krakenc.shd
 ```
 
-## Layered fluids: derived acceptance and original failure input
+## Layered fluids: derived and original acceptance
 
 The same pinned source/compiler/flags above generated all artifacts. Twenty-one
 **derived** pairs give 41 workflows (both engines except leaky broadband), 50
@@ -991,17 +991,23 @@ CLI-HDF5 comparisons; the local maximum pressure error is 2.64e-9.
   changing title and doubling NG=100/200/200 to 200/400/400. Its FLP is the
   **unmodified official common** `tests/TLslices/fieldbat.flp`, copied as
   directed by upstream `runtests.m`; 42 modes and 501 line-source pressures
-  pass per engine. This does not establish original `double` acceptance.
+  pass per engine. Original `double` has separate acceptance below.
 - `LayeredNormalization` derives from `tests/TLslices/normal.env`, changing
   only title and bottom cs=2000 to 0 (cp=4000/rho=3). It uses the same original
   common FLP: 44 modes/501 pressures per engine. Original normal/flused/elsed
   contain elastic material and are not accepted here.
 
 `OriginalLayeredDouble.env` is byte-identical to the upstream `double.env` and
-its `.flp` is byte-identical to official `fieldbat.flp`. It is a **failure fixture**,
-not an accepted golden. Pinned KRAKEN changes 43 to 42 modes on multipliers 1/2;
-both Rust backends return a mode-count-change diagnostic. CLI tests verify no
-partial result, preservation of old output and scratch cleanup, also after three
+its `.flp` is byte-identical to official `fieldbat.flp`. Both engines now pass
+42 modes and 501 pressures with the original NG=100/200/200 and RMax=1000 km.
+WRITE-only reference tracing (MOD/SHD byte controls) and Rust tracing confirm
+43 then 42 raw roots on meshes 1/2. Refinement retains surviving first-mesh
+shapes/group speeds/loss and Richardson columns; count increases still reject.
+API and actual legacy/JSON CLI-HDF5 compare every declared result at unchanged
+tolerances (max |dp|=1.1824e-11). Three unmodified runs have identical MOD/SHD;
+`original-double.sha256` records two inputs and six new artifacts. Only PRT
+trailing whitespace is trimmed, with timings retained; no older artifact changes.
+CLI tests retain output/scratch protection for an increased count and after three
 successful frequency blocks when the fourth hits the unchanged root-work limit.
 Analytic Munk and F/P/TRC stay single-layer; density gradients, shear/elasticity
 and multi-profile FIELD remain excluded. Budgets are totals across all layers.

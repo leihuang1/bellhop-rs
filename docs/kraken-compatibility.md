@@ -323,8 +323,8 @@ total loss values are retained. Mesh intervals, shape values, copied frequency
 inputs and numerical work use the previous ceilings **for the entire stack**.
 HDF5 v1 adds ordered finite-layer metadata without changing datasets or BELLHOP v3.
 
-Twenty-one explicitly derived pairs pass 41 full API/actual-CLI-HDF5 workflows:
-50 frequency blocks, 530 modes and 4,902 pressures, with byte-identical `.mod/.shd`
+Twenty-two explicitly derived pairs pass 43 full API/actual-CLI-HDF5 workflows:
+52 frequency blocks, 539 modes and 5,028 pressures, with byte-identical `.mod/.shd`
 in three pinned runs. N/C/P/S, unequal meshes, density/speed/loss jumps, all nine
 V/R/A combinations, fractional interfaces and interface-side samples are covered.
 Power-law and leaky PCHIP derivatives keep 75/50/62.5/50 Hz and meshes 1/2/4;
@@ -349,26 +349,19 @@ and is labelled derived. Original normal/flused now pass the elastic half-space
 checkpoint below; original elsed/ice now pass the homogeneous finite-cap checkpoint.
 Gulf's multi-profile environment is now covered by the FIELD checkpoint below.
 
-The three-layer accepted refined fixture uses cHigh=1700 (all four reference
-modes); its separate RMax=0 wide fixture uses cHigh=1800 (all five modes).
-A cHigh=1800, RMax=1000 km experiment is **not accepted**: pinned KRAKENC searches
-5 then 4 roots, while Rust retains 5. It remains a known branch-sensitive
-refinement-parity gap, not an input rejected by the current Rust guard. No
-reference is trimmed or re-labelled; narrowed and base-mesh inputs have their
-own complete reference outputs. Stable mode counts and triplicate binaries do
-not prove mathematical root completeness for arbitrary secant spectra.
-[Targeted diagnosis](kraken-layered-refinement-gap.md) localizes this gap to the
-second-mesh deflated secant trajectory: perturbing only the pinned fifth search
-seed by ±256 ULP changes its final count from four to five. Altered-reference
-outputs match Rust but are diagnostic evidence, **not** fixed-oracle acceptance.
-Following scope review, this documented workflow is a **non-blocking release
-exception**, still outside numerical acceptance. The 41 accepted workflows keep
-full fixed-oracle comparisons; no blanket waiver applies to other failures.
-A runnable, explicitly ignored failing regression preserves the unresolved gap.
-The affected calculation can still return five modes and CLI exit 0 without a
-warning: successful execution/HDF5 publication is not a parity certificate.
-The fifth mode may materially affect coherent FIELD; exact legacy reproduction
-must exclude this workflow and independently validate other unverified inputs.
+The three-layer narrowed refined fixture uses cHigh=1700 (four modes); its
+separate RMax=0 wide fixture uses cHigh=1800 (five modes). The added
+`LayeredFluidThreeWideRefined` changes only the wide input's RMax to 1000 km and
+now passes **both complete products**: five KRAKEN modes, four KRAKENC modes,
+63 pressures per engine. KRAKENC naturally searches 5 then 4 roots after
+restoring N² reciprocal-before-weighting; no roots or references are trimmed.
+[Diagnosis and acceptance](kraken-layered-refinement-gap.md) include one-variable
+probes, WRITE-only reference byte controls, an ordinary regression and full
+API/actual legacy/JSON CLI-HDF5 comparisons. The former PR #25 release exception
+is no longer needed for this case. Reference-only seed perturbations remain
+historical diagnostics, not accepted oracles. Old inputs/goldens, budgets and
+tolerances are unchanged; no arbitrary-spectrum root-completeness or universal
+CLI parity certificate is claimed.
 
 ### Elastic half-spaces
 
@@ -739,7 +732,7 @@ upstream MunkK, MunkKleaky, MunkKwb, MunkKbb, sductK, calibK, BroadBand/MunkK
 and all three neggradC geo/brc/irc modes and FIELD. Unmodified MunkS and
 MunkAnalytic environments are additionally checked through KRAKENC with
 separately derived FIELD geometry. The 27 derived water-material workflows
-above, plus 24 derived smooth-boundary/TRC workflows and 41 derived layered-fluid
+above, plus 24 derived smooth-boundary/TRC workflows and 43 derived layered-fluid
 workflows, also have committed goldens and configured API/CLI-HDF5 fresh comparisons.
 Original TLslices `double` additionally passes both engines with small committed
 goldens; large official `.mod/.shd` outputs remain fresh-reference artifacts.

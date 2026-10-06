@@ -67,15 +67,15 @@ with separately derived FIELD geometry also pass modes, FIELD and CLI/HDF5.
 Single-frequency, RMax=0 KRAKENC F/BRC and P/IRC bottoms also accept original
 TabRefCoef geo/brc/irc inputs with generated reference tables, including all
 151,803 pressures; auxiliary-file snapshots are recorded in CLI/HDF5 provenance.
-Twenty-one derived layered-fluid pairs pass 41 API/CLI-HDF5 workflows (530 modes,
-4,902 pressures). Byte-original TLslices `double` and official `fieldbat.flp`
+Twenty-two derived layered-fluid pairs pass 43 API/CLI-HDF5 workflows (539 modes,
+5,028 pressures). Byte-original TLslices `double` and official `fieldbat.flp`
 add two accepted workflows (84 modes, 1,002 pressures). Both engines retain the
 surviving first-mesh data when refinement reduces the spectrum from 43 to 42;
 the denser-mesh derivative remains separately labelled.
-A [known wide three-layer KRAKENC refinement gap](docs/kraken-layered-refinement-gap.md)
-remains outside acceptance as a non-blocking release exception: Rust can return
-five modes where the pinned reference returns four. CLI success is not a guarantee
-of arbitrary-input reference parity; the extra mode may affect coherent FIELD.
+The [wide three-layer KRAKENC refinement fix](docs/kraken-layered-refinement-gap.md)
+restores N² reciprocal-before-weighting arithmetic and naturally searches 5 then
+4 roots. Its complete FIELD and legacy/JSON CLI-HDF5 products now pass the pinned
+reference; CLI success still does not certify arbitrary-input reference parity.
 [Elastic half-spaces](docs/kraken-elastic-halfspaces.md) cover top/bottom A boundaries
 through both engines: 37 full API/CLI-HDF5 workflows, including original TLslices
 `scholte/normal/flused` (473 modes, 5,715 pressures). Real tops retain pinned

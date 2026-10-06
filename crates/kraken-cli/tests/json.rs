@@ -86,6 +86,7 @@ fn json_cli_exports_and_runs_relocated_documents_without_auxiliary_files() {
         ("WaterLossPower", "krakenc"),
         ("OriginalLayeredDouble", "kraken"),
         ("OriginalLayeredDouble", "krakenc"),
+        ("LayeredFluidThreeWideRefined", "krakenc"),
         ("FiniteSingleIceC", "kraken"),
         ("GradedElasticBottomN", "kraken"),
         ("GradedElasticTopS", "krakenc"),

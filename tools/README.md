@@ -322,8 +322,8 @@ CLI/HDF5 hashes that same bounded snapshot and protects its input path/aliases.
 These are constructed/derived tests, not original TRC input-pair acceptance.
 
 Layered-fluid fixtures use the same commands and comparator (for example,
-`case=LayeredFluidPower` and either engine). Twenty-one **derived** pairs provide
-41 API/actual-CLI-HDF5 workflows: N/C/P/S interfaces, all V/R/A combinations,
+`case=LayeredFluidPower` and either engine). Twenty-two **derived** pairs provide
+43 API/actual-CLI-HDF5 workflows, including wide refined three-layer KRAKENC: N/C/P/S interfaces, all V/R/A combinations,
 unequal/fractional meshes, per-layer power laws, biological loss, broadband
 leaky roots and cross-layer FIELD. `LayeredDoubleRefined` is a denser-mesh
 **derivative**, separately labelled from original TLslices `double`. The
@@ -366,12 +366,14 @@ unmodified Fortran oracle. Triplicate MOD/SHD byte controls, tolerances and
 work budgets are unchanged.
 
 `python3 tools/reference/probe-layered-refinement.py` is a **diagnostic-only**
-experiment for the open three-layer refinement gap. It runs the unmodified
+experiment for the historical three-layer refinement gap. It runs the unmodified
 oracle, a zero-perturbation control and ±256-ULP seed probes in a disposable
 container. The control binaries must match the oracle; altered results are
 never acceptance goldens. It requires the pinned image and refuses to overwrite
 `target/reference/layered-refinement-gap`. See the
-[diagnosis and failing regression](../docs/kraken-layered-refinement-gap.md).
+[fix, ordinary regression and historical diagnosis](../docs/kraken-layered-refinement-gap.md).
+The minimal N² arithmetic fix now passes the unmodified oracle; perturbed
+reference products remain diagnostic only.
 
 This compares every mode and pressure sample, including modal print precision,
 mode-shape phase alignment, dimensions, and coordinate vectors. CI runs all

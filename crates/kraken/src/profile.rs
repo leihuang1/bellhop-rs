@@ -210,19 +210,21 @@ impl<'a> Profile<'a> {
         let weight = t / (points[upper].depth_m - points[upper - 1].depth_m);
         match self.case.interpolation {
             Interpolation::N2Linear => {
-                if elastic
+                // n2Linear takes each reciprocal before weighting. Dividing
+                // the weights instead changes branch-sensitive deflated roots.
+                let one = Complex64::new(1.0, 0.0);
+                let top = one / a.powi(2);
+                let bottom = one / b.powi(2);
+                let z = (1.0 - weight) * top + weight * bottom;
+                let root = if elastic
                     || (self.case.mode_solver == crate::ModeSolver::Kraken
                         && crate::elastic::has_layers(self.case))
                 {
-                    let one = Complex64::new(1.0, 0.0);
-                    let top = one / a.powi(2);
-                    let bottom = one / b.powi(2);
-                    let z = (1.0 - weight) * top + weight * bottom;
-                    one / principal_root(z)
+                    principal_root(z)
                 } else {
-                    Complex64::new(1.0, 0.0)
-                        / ((1.0 - weight) / a.powi(2) + weight / b.powi(2)).sqrt()
-                }
+                    z.sqrt()
+                };
+                one / root
             }
             Interpolation::CLinear => (1.0 - weight) * a + weight * b,
             Interpolation::Pchip | Interpolation::Spline => {

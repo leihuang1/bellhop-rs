@@ -77,24 +77,39 @@ fn original_double_keeps_the_complete_pinned_spectrum() {
 }
 
 #[test]
-#[ignore = "known pinned secant parity gap; see docs/kraken-layered-refinement-gap.md"]
 fn wide_three_layer_refinement_keeps_the_pinned_mode_count() {
-    // Pinned mesh 1 finds five roots, mesh 2 only four. The original-double
-    // count-reduction fix must not hide Rust's different five-root trajectory.
-    let mut input = cases(
+    // Pinned mesh 1 finds five roots, mesh 2 only four; surviving first-mesh
+    // shapes and group speeds must not change when the search really contracts.
+    let input = cases(
         include_str!("fixtures/LayeredFluidThreeWide.env"),
         ModeSolver::Krakenc,
     )
     .unwrap()
     .remove(0)
     .into_definition();
-    input.max_range_m = 1_000_000.0;
-    let result = solve(&Case::from_definition(input).unwrap()).unwrap();
-    assert_eq!(
-        result.modes.modes.len(),
-        4,
-        "known gap: Rust retains five modes"
-    );
+    let first = solve(&Case::from_definition(input.clone()).unwrap()).unwrap();
+    assert_eq!(first.modes.modes.len(), 5);
+    let result = solve(
+        &Case::from_definition(CaseDefinition {
+            max_range_m: 1_000_000.0,
+            ..input
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(result.modes.modes.len(), 4);
+    assert_eq!(result.field.pressure.len(), 63);
+    for (mode, initial) in result.modes.modes.iter().zip(&first.modes.modes) {
+        assert_eq!(mode.eigenfunction, initial.eigenfunction);
+        assert_eq!(
+            mode.group_speed_mps.to_bits(),
+            initial.group_speed_mps.to_bits()
+        );
+        assert_ne!(
+            mode.horizontal_wavenumber_rad_per_m,
+            initial.horizontal_wavenumber_rad_per_m
+        );
+    }
 }
 
 #[test]

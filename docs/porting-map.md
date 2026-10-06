@@ -31,6 +31,7 @@
 | `Bellhop/influence.f90::{ApplyContribution,ScalePressure}` | `bellhop::solver::influence::{apply_contribution,scale_pressure}` | Golden verified |
 | `Bellhop/ArrMod.f90::AddArr` | `bellhop::solver::influence::add_arrival` | Golden verified |
 | `Kraken/BCImpedance{c}Mod.f90::{ElasticUP,ElasticDN}` | `kraken::elastic::{SolidMesh,cap_impedance}` | Homogeneous/depth-varying finite caps and contiguous fluid stacks verified through both engines, FIELD and CLI-HDF5 |
+| `misc/sspMod.f90::n2Linear` complex reciprocal interpolation | `kraken::profile::Profile::complex_speed` | Reciprocal-before-weighting; wide three-layer KRAKENC naturally searches 5 then 4, complete legacy/JSON products pass |
 | `Kraken/kraken{c}.f90::Solve` spectral reduction/Richardson history | `kraken::refinement::Refinement::advance` | Surviving first-mesh data retained; original TLslices double passes both engines, FIELD and legacy/JSON CLI-HDF5 |
 | `misc/RootFinderSecantMod.f90::ZSecantCX` | `kraken::complex_modes::{solve,secant}` | Unchanged secant/deflation; lossless-fluid spacing prediction bounded by bottom cp enables full original BroadBand/MunkK at unchanged 300M ceiling |
 | `Kraken/kraken.f90::Solve2` finite-solid real search | `kraken::modes::Mesh::solid_roots` | Deflated secants/raw-root Neville and ordered M search bound verified for single/multi-fluid finite elasticity |

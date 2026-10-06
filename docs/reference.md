@@ -141,9 +141,9 @@ scaling, simple-Gaussian beams, and Cartesian/ray-centered Cerveny beams.
 Dedicated reflection goldens cover acousto-elastic, grain-size, and `.irc`
 impedance-table amplitude and phase.
 
-Layered-fluid acceptance adds twenty-one **derived** pairs, twenty through both
-engines and a leaky broadband pair through KRAKENC: 41 workflows, 50 frequency
-blocks, 530 modes and 4,902 pressures. Each `.mod/.shd` is byte-identical in
+Layered-fluid acceptance adds twenty-two **derived** pairs, twenty-one through both
+engines and a leaky broadband pair through KRAKENC: 43 workflows, 52 frequency
+blocks, 539 modes and 5,028 pressures. Each `.mod/.shd` is byte-identical in
 three pinned runs. The comparator traverses every fluid medium record and every
 frequency/mode/FIELD sample, through both API and actual CLI-HDF5; local maximum
 pressure error is 2.64e-9 at unchanged tolerances. Offline goldens and layer
@@ -161,9 +161,13 @@ not use oracle counts. MOD/SHD are byte-identical in three unmodified runs;
 from the original `normal.env` bottom and is also explicitly derived. Original
 `normal/flused` now pass the half-space checkpoint and `elsed/ice` the finite-cap
 checkpoint below; Gulf's sequence now uses multi-profile
-FIELD. None is claimed as accepted by the fluid-stack stage. The wider-spectrum
-three-layer experiment described in the compatibility/golden provenance remains
-unaccepted; a matched subset is not advertised as full original acceptance.
+FIELD. None is claimed as accepted by the fluid-stack stage.
+`LayeredFluidThreeWideRefined` changes only the wide fixture's RMax to 1000 km:
+KRAKENC now naturally finds 5 then 4 roots via pinned N² reciprocal-before-weighting.
+All four modes and 63 pressures pass API and actual legacy/JSON CLI-HDF5; KRAKEN
+independently passes all five modes and 63 pressures. Three unmodified runs per
+engine agree; `golden/layered-refinement.sha256` locks the two inputs and six
+artifacts. See the [fix and historical diagnosis](kraken-layered-refinement-gap.md).
 
 Elastic-half-space acceptance adds 16 derived and three original input pairs:
 37 workflows, 49 frequency blocks, 473 modes and 5,715 pressures, through API and

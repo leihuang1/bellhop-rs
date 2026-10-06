@@ -170,6 +170,7 @@ fn layered_fluid_modes_and_field_match_pinned_goldens() {
         "LayeredBoundaryAA",
         "LayeredFluidThree",
         "LayeredFluidThreeWide",
+        "LayeredFluidThreeWideRefined",
         "LayeredFluidPlane",
         "LayeredFluidPower",
         "LayeredFluidBio",

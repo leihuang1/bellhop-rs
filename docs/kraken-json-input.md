@@ -136,8 +136,9 @@ poisoned to prove they are ignored. Output preservation covers malformed input,
 engine/FLP conflicts, quotas, unowned scratch, input/symlink aliases and numerical
 failure after a completed first frequency.
 
-Fresh pinned CI reuses twenty-three representative workflows: WaterLossPower,
-FieldPattern, FluidTrcC, LayeredFluidPower, both engines for original TLslices
+Fresh pinned CI reuses twenty-four representative workflows: WaterLossPower,
+FieldPattern, FluidTrcC, LayeredFluidPower, complex LayeredFluidThreeWideRefined,
+both engines for original TLslices
 `double`, FiniteElasticStack, real FiniteElasticTopN/ShearOnly/Power, real
 elastic-half-space TopN/BothS/TopBroadband, graded BottomN/TopS/Power/Bio,
 original TabRefCoef BRC/IRC, both engines for original BroadBand/MunkK at

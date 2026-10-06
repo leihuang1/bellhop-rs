@@ -71,11 +71,10 @@ builds it using the existing static HDF5 dependency.
   pinned KRAKEN elastic-loss limitation above is explicitly retained.
 
 Exit 0 and successful HDF5 publication certify completion, not fixed-oracle
-parity for arbitrary inputs. The documented
-[wide three-layer refinement exception](kraken-layered-refinement-gap.md) can
-return five modes versus the pinned reference's four without a warning or a
-parity-certification attribute. It remains outside numerical acceptance; this
-release-scope exception does not change the solver or add a runtime guard.
+parity for arbitrary inputs. The former
+[wide three-layer refinement exception](kraken-layered-refinement-gap.md) is fixed:
+its natural four-mode KRAKENC spectrum and complete legacy/JSON HDF5 products now
+pass the pinned reference. This does not add a runtime parity-certification flag.
 
 Rust adapters may call `bellhop_hdf5::kraken::run_legacy` with input/output
 paths, engine, overwrite policy and byte quota, or `run_json` for one JSON
@@ -305,8 +304,8 @@ KRAKENC pairs, and original BroadBand/MunkK (both engines/frequencies,
 geo/brc/irc workflows with BOUNCE-generated resources, four cubic/analytic
 KRAKENC derivatives, broadband PCHIP Munk and original MunkS/MunkAnalytic
 environments with **derived** FIELD geometry, 27 water-material workflows and
-24 derived smooth-boundary/TRC workflows, 41 derived layered-fluid workflows
-(50 frequency blocks, 530 modes, 4,902 pressures), two original TLslices `double`
+24 derived smooth-boundary/TRC workflows, 43 derived layered-fluid workflows
+(52 frequency blocks, 539 modes, 5,028 pressures), two original TLslices `double`
 workflows (84 modes, 1,002 pressures), and the three fixed
 single-profile FIELD-extension workflows. The multi-profile checkpoint adds
 two small derivatives and both byte-original Gulf AD/CM paths (24 profile blocks,

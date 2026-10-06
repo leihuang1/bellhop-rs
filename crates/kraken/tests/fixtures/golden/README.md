@@ -951,8 +951,9 @@ fb2f022adb7652222a1d80a01668f3e6da6106ff8a2ed15acf9344e0c327b974  golden/FluidTr
 ## Layered fluids: derived and original acceptance
 
 The same pinned source/compiler/flags above generated all artifacts. Twenty-one
-**derived** pairs give 41 workflows (both engines except leaky broadband), 50
-frequency blocks, 530 modes and 4,902 pressures. Each workflow's `.mod/.shd` was
+**derived** pairs originally gave 41 workflows. Adding the wide refined pair
+below gives twenty-two pairs, 43 workflows (both engines except leaky broadband),
+52 frequency blocks, 539 modes and 5,028 pressures. Each workflow's `.mod/.shd` was
 byte-identical in three independent runs. Only trailing whitespace was removed
 from `.prt`; timings were not normalized. Old goldens/tolerances were not changed.
 All frequencies, medium records, modes and pressures pass direct API and actual
@@ -974,10 +975,14 @@ CLI-HDF5 comparisons; the local maximum pressure error is 2.64e-9.
   105..140 m, NG=127, rho=2.2, cp=1600..1570, W=.04...035. It explicitly
   uses cHigh=1700 and refinement (four modes). `LayeredFluidThreeWide` keeps
   cHigh=1800 and sets RMax=0 (all five modes), with its own complete reference.
-  The cHigh=1800/RMax=1000 km experiment is **not accepted**: pinned KRAKENC
-  finds 5 then 4 roots while Rust retains 5; this is a known refinement-parity
-  gap, not currently a Rust input rejection. Neither accepted reference is
-  trimmed to mimic this experiment; none proves all mathematical secant roots.
+  `LayeredFluidThreeWideRefined` changes only the wide input's RMax to 1000 km
+  (including unchanged title). Both complete reference products now pass:
+  KRAKEN has five modes, KRAKENC naturally searches 5 then 4 after the N²
+  reciprocal-before-weighting fix. The new eight-record
+  `golden/layered-refinement.sha256` locks two inputs and six artifacts from
+  three byte-identical unmodified runs per engine. PRT trailing whitespace alone
+  is trimmed; earlier goldens are untouched. No roots/reference are trimmed and
+  no mathematical root-completeness claim is made.
 - `LayeredFluidPlane` uses C interpolation, cp=1500 and W=.02 throughout,
   with two rigid outer boundaries and the same density jump (six modes).
 - `LayeredFluidPower`: m units; nominal 50 Hz W node losses above are encoded
@@ -1036,6 +1041,7 @@ ff6c4c3516e0f7471793f9ac2e7708d61d84db0db84fd1ab513383b40214fa07  tests/TLslices
 | LayeredBoundaryRR/RA/AR/AA | both, each input | 6 | 63 |
 | LayeredFluidThree | both | 4 | 63 |
 | LayeredFluidThreeWide | both | 5 | 63 |
+| LayeredFluidThreeWideRefined | Kraken / Krakenc | 5 / 4 | 63 |
 | LayeredFluidPlane | both | 6 | 63 |
 | LayeredFluidPower (75/50/62.5/50 Hz) | both | 8/5/7/5 | 252 |
 | LayeredFluidLeaky (75/50/62.5/50 Hz) | KRAKENC | 11/7/9/7 | 252 |

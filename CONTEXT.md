@@ -1,6 +1,8 @@
-# Acoustics inputs and results
+# Pelagic: acoustics inputs and results
 
-Vocabulary for the existing BELLHOP and KRAKEN/KRAKENC workflows. Their validated models, numerical implementations and HDF5 schemas remain separate.
+Vocabulary for Pelagic's independent BELLHOP and KRAKEN/KRAKENC Modules. Their validated models, numerical Implementations and HDF5 schemas remain separate. See [architecture](docs/development/architecture.md) and the [documentation index](docs/README.md).
+
+The `pelagic` CLI and BELLHOP-only `pelagic-server` are separate Adapters. This structural release keeps single-file HDF5 publication and explicit overwrite; native output and result-directory replacement are not implemented.
 
 ## Language
 

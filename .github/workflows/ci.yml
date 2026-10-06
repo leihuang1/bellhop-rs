@@ -2,12 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  RUSTDOCFLAGS: "-D warnings"
 
 jobs:
   build-test:
@@ -21,11 +21,17 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --all-features
+      - name: Verify committed SHA manifests
+        run: |
+          (cd crates/bellhop/tests/fixtures/golden && grep -E '^[0-9a-f]{64}  ' README.md | sha256sum -c -)
+          for manifest in crates/kraken/tests/fixtures/golden/*.sha256; do
+            (cd crates/kraken/tests/fixtures && sha256sum -c "golden/$(basename "$manifest")")
+          done
       - name: Documentation build
-        run: cargo doc --workspace --no-deps
+        run: cargo doc --workspace --all-features --no-deps
 
   differential-reference:
     runs-on: ubuntu-22.04
@@ -40,7 +46,7 @@ jobs:
         run: |
           mkdir -p target/reference/cases
           docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/cases:/out" \
-            --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 \
+            --entrypoint /bin/sh pelagic-reference:v2023.5-amd64 \
             -c "cp /opt/acoustics-toolbox/tests/Munk/MunkB_Coh.env /out/ && \
                 cp /opt/acoustics-toolbox/tests/SBCX/sbcx_Arr_asc.env /out/ && \
                 cp /opt/acoustics-toolbox/tests/Munk/MunkK.env /opt/acoustics-toolbox/tests/Munk/MunkK.flp /out/ && \
@@ -89,7 +95,7 @@ jobs:
       - name: Single-profile FIELD extensions and actual CLI HDF5 differential
         run: |
           (cd crates/kraken/tests/fixtures && sha256sum -c golden/single-profile-field.sha256)
-          cargo build --release -p kraken-cli
+          cargo build --release -p cli
           for mapping in 'FieldScaled kraken' 'FieldPattern krakenc' 'FieldIncoherent krakenc'; do
             set -- $mapping
             case=$1
@@ -108,7 +114,7 @@ jobs:
             cp crates/kraken/tests/fixtures/original/Gulf/gulf_rd.env "target/reference/profile-cases/$1.env"
             cp "crates/kraken/tests/fixtures/original/Gulf/$2.flp" "target/reference/profile-cases/$1.flp"
           done
-          cargo build --release -p kraken-cli
+          cargo build --release -p cli
           for case in ProfilesAd ProfilesCm GulfAd GulfCm; do
             case "$case" in
               Gulf*) env="$PWD/target/reference/profile-cases/$case.env" ;;
@@ -119,7 +125,7 @@ jobs:
             KRAKEN_PROFILE_ENV="$env" KRAKEN_PROFILE_ROOT="$reference" \
               cargo test --release -p kraken --test differential_reference \
                 profile_fields_match_fresh_reference -- --ignored --exact --nocapture
-            target/release/kraken run "$env" --output "$reference.h5"
+            target/release/pelagic kraken run "$env" --output "$reference.h5"
             KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_PROFILE_ENV="$env" KRAKEN_PROFILE_ROOT="$reference" \
               cargo test --release -p kraken --test differential_reference \
                 profile_fields_match_fresh_reference -- --ignored --exact --nocapture
@@ -146,7 +152,7 @@ jobs:
           done
       - name: Water material modes, FIELD and actual CLI HDF5 differential
         run: |
-          cargo build --release -p kraken-cli
+          cargo build --release -p cli
           for engine in kraken krakenc; do
             for case in WaterLossN WaterLossC WaterLossP WaterLossS WaterLossUnitN WaterLossUnitM WaterLossUnitF WaterLossUnitQ WaterLossUnitL WaterLossPower WaterLossThorp WaterLossFg WaterLossBio WaterLossLeaky; do
               if [ "$case" = WaterLossLeaky ] && [ "$engine" = kraken ]; then continue; fi
@@ -155,7 +161,7 @@ jobs:
           done
       - name: Smooth boundary and TRC modes, FIELD and actual CLI HDF5 differential
         run: |
-          cargo build --release -p kraken-cli
+          cargo build --release -p cli
           for engine in kraken krakenc; do
             for case in FluidBoundaryVV FluidBoundaryVR FluidBoundaryVA FluidBoundaryRV FluidBoundaryRR FluidBoundaryRA FluidBoundaryAV FluidBoundaryAR FluidBoundaryAA FluidRigidPlaneLoss FluidBoundaryAir FluidTrcN FluidTrcC FluidTrcRigid; do
               if [ "$engine" = kraken ] && { [ "$case" = FluidBoundaryAir ] || [[ "$case" == FluidTrc* ]]; }; then continue; fi
@@ -167,69 +173,69 @@ jobs:
           (cd crates/kraken/tests/fixtures && sha256sum -c golden/original-double.sha256 && sha256sum -c golden/layered-refinement.sha256)
           mkdir -p target/reference/layered-original-inputs
           docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/layered-original-inputs:/out" \
-            --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 \
+            --entrypoint /bin/sh pelagic-reference:v2023.5-amd64 \
             -c 'cp /opt/acoustics-toolbox/tests/TLslices/double.env /opt/acoustics-toolbox/tests/TLslices/fieldbat.flp /out/'
           cmp target/reference/layered-original-inputs/double.env crates/kraken/tests/fixtures/OriginalLayeredDouble.env
           cmp target/reference/layered-original-inputs/fieldbat.flp crates/kraken/tests/fixtures/OriginalLayeredDouble.flp
-          cargo build --release -p kraken-cli
+          cargo build --release -p cli
           for engine in kraken krakenc; do
             for case in LayeredFluidN LayeredFluidC LayeredFluidP LayeredFluidS LayeredBoundaryVV LayeredBoundaryVR LayeredBoundaryRV LayeredBoundaryRR LayeredBoundaryRA LayeredBoundaryAV LayeredBoundaryAR LayeredBoundaryAA LayeredFluidThree LayeredFluidThreeWide LayeredFluidThreeWideRefined LayeredFluidPlane LayeredFluidPower LayeredFluidBio LayeredFluidLeaky LayeredDoubleRefined OriginalLayeredDouble LayeredNormalization LayeredFluidFractional; do
               if [ "$case" = LayeredFluidLeaky ] && [ "$engine" = kraken ]; then continue; fi
               tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             done
           done
-          cargo test --release -p kraken-cli --test run \
+          cargo test --release -p cli --test kraken_run \
             layered_failures_preserve_output_and_remove_scratch -- --exact --nocapture
       - name: Elastic half-space modes, FIELD and actual CLI HDF5 differential
         run: |
           (cd crates/kraken/tests/fixtures && sha256sum -c golden/elastic-halfspace.sha256)
           mkdir -p target/reference/elastic-original-inputs
           docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/elastic-original-inputs:/out" \
-            --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 \
+            --entrypoint /bin/sh pelagic-reference:v2023.5-amd64 \
             -c 'cp /opt/acoustics-toolbox/tests/TLslices/scholte.env /opt/acoustics-toolbox/tests/TLslices/normal.env /opt/acoustics-toolbox/tests/TLslices/flused.env /opt/acoustics-toolbox/tests/TLslices/fieldbat.flp /out/'
           for mapping in 'scholte OriginalElasticScholte' 'normal OriginalElasticNormal' 'flused OriginalElasticFlused'; do
             set -- $mapping
             cmp "target/reference/elastic-original-inputs/$1.env" "crates/kraken/tests/fixtures/$2.env"
             cmp target/reference/elastic-original-inputs/fieldbat.flp "crates/kraken/tests/fixtures/$2.flp"
           done
-          cargo build --release -p kraken-cli
+          cargo build --release -p cli
           for engine in kraken krakenc; do
             for case in ElasticHalfBottomN ElasticHalfBottomC ElasticHalfBottomP ElasticHalfBottomS ElasticHalfTopN ElasticHalfTopC ElasticHalfTopP ElasticHalfTopS ElasticHalfBothN ElasticHalfBothC ElasticHalfBothP ElasticHalfBothS ElasticHalfLeaky ElasticHalfTopBroadband ElasticHalfPower ElasticHalfShearOnly OriginalElasticScholte OriginalElasticNormal OriginalElasticFlused; do
               if [ "$engine" = kraken ] && [ "$case" = ElasticHalfLeaky ]; then continue; fi
               tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             done
           done
-          cargo test --release -p kraken-cli --test run \
+          cargo test --release -p cli --test kraken_run \
             elastic_failures_preserve_output_and_remove_scratch -- --exact --nocapture
       - name: Finite elastic modes, FIELD and actual CLI HDF5 differential
         run: |
           (cd crates/kraken/tests/fixtures && sha256sum -c golden/finite-elastic.sha256 && sha256sum -c golden/graded-elastic.sha256)
           mkdir -p target/reference/finite-elastic-original-inputs
           docker run --rm --platform linux/amd64 --volume "$PWD/target/reference/finite-elastic-original-inputs:/out" \
-            --entrypoint /bin/sh bellhop-rs-reference:v2023.5-amd64 \
+            --entrypoint /bin/sh pelagic-reference:v2023.5-amd64 \
             -c 'cp /opt/acoustics-toolbox/tests/TLslices/elsed.env /opt/acoustics-toolbox/tests/TLslices/ice.env /opt/acoustics-toolbox/tests/TLslices/fieldbat.flp /out/'
           for mapping in 'elsed OriginalElasticSediment' 'ice OriginalElasticIce'; do
             set -- $mapping
             cmp "target/reference/finite-elastic-original-inputs/$1.env" "crates/kraken/tests/fixtures/$2.env"
             cmp target/reference/finite-elastic-original-inputs/fieldbat.flp "crates/kraken/tests/fixtures/$2.flp"
           done
-          cargo build --release -p kraken-cli
+          cargo build --release -p cli
           for engine in kraken krakenc; do
             for case in FiniteElasticBothC FiniteElasticBothN FiniteElasticBothP FiniteElasticBothS FiniteElasticBottomC FiniteElasticBottomN FiniteElasticBottomP FiniteElasticBottomS FiniteElasticPower FiniteElasticRigid FiniteElasticShearOnly FiniteElasticStack FiniteElasticTopC FiniteElasticTopN FiniteElasticTopP FiniteElasticTopS FiniteElasticVacuum FiniteSingleIceC FiniteSingleIceP FiniteSingleIceS FiniteSingleSedimentC FiniteSingleSedimentP FiniteSingleSedimentS OriginalElasticIce OriginalElasticSediment GradedElasticTopN GradedElasticTopC GradedElasticTopP GradedElasticTopS GradedElasticBottomN GradedElasticBottomC GradedElasticBottomP GradedElasticBottomS GradedElasticStack GradedElasticPower GradedElasticBio; do
               tools/reference/compare-kraken-hdf5.sh "$engine" "crates/kraken/tests/fixtures/$case.env"
             done
           done
           tools/reference/compare-kraken-hdf5.sh kraken crates/kraken/tests/fixtures/GradedElasticTopNRefined.env
-          cargo test --release -p kraken-cli --test run \
+          cargo test --release -p cli --test kraken_run \
             finite_elastic_failures_preserve_output_and_remove_scratch -- --exact --nocapture
       - name: KRAKEN CLI HDF5 numerical differential
         run: |
-          cargo build --release -p kraken-cli
+          cargo build --release -p cli
           for case in PekerisBroadband PekerisComplexBroadband MunkLeakyPchipBroadband; do
             engine=kraken
             if [ "$case" != PekerisBroadband ]; then engine=krakenc; fi
             output="$PWD/target/reference/$case-$engine/$case.h5"
-            target/release/kraken run "crates/kraken/tests/fixtures/$case.env" --solver "$engine" --output "$output"
+            target/release/pelagic kraken run "crates/kraken/tests/fixtures/$case.env" --solver "$engine" --output "$output"
             KRAKEN_HDF5_RESULT="$output" \
             KRAKEN_FREQUENCY_SOLVER="$engine" \
             KRAKEN_DIFFERENTIAL_ENV="$PWD/crates/kraken/tests/fixtures/$case.env" \
@@ -239,7 +245,7 @@ jobs:
           done
           for case in MunkKleaky MunkKwb MunkKbb sductK calibK; do
             output="$PWD/target/reference/$case-krakenc/$case.h5"
-            target/release/kraken run "target/reference/cases/$case.env" --solver krakenc --output "$output"
+            target/release/pelagic kraken run "target/reference/cases/$case.env" --solver krakenc --output "$output"
             KRAKEN_HDF5_RESULT="$output" \
             KRAKEN_ORIGINAL_COMPLEX_ENV="$PWD/target/reference/cases/$case.env" \
             KRAKEN_ORIGINAL_COMPLEX_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -247,7 +253,7 @@ jobs:
                 complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
           done
           output="$PWD/target/reference/MunkK-kraken/MunkK.h5"
-          target/release/kraken run target/reference/cases/MunkK.env --output "$output"
+          target/release/pelagic kraken run target/reference/cases/MunkK.env --output "$output"
           KRAKEN_HDF5_RESULT="$output" \
           KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/MunkK.env" \
           KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/MunkK-kraken/MunkK" \
@@ -255,7 +261,7 @@ jobs:
               fluid_matches_fresh_reference -- --ignored --exact --nocapture
           for engine in kraken krakenc; do
             output="$PWD/target/reference/BroadBand-MunkK-$engine/MunkK.h5"
-            target/release/kraken run target/reference/cases/BroadBand/MunkK.env --solver "$engine" --output "$output"
+            target/release/pelagic kraken run target/reference/cases/BroadBand/MunkK.env --solver "$engine" --output "$output"
             KRAKEN_FREQUENCY_SOLVER="$engine" KRAKEN_HDF5_RESULT="$output" \
             KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
             KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-$engine/MunkK" \
@@ -267,7 +273,7 @@ jobs:
           tools/reference/prepare-tabref.sh
           for case in TabRefBrcN TabRefBrcC TabRefIrcN TabRefIrcC; do
             output="$PWD/target/reference/$case-krakenc/$case.h5"
-            target/release/kraken run "crates/kraken/tests/fixtures/$case.env" --solver krakenc --output "$output"
+            target/release/pelagic kraken run "crates/kraken/tests/fixtures/$case.env" --solver krakenc --output "$output"
             KRAKEN_HDF5_RESULT="$output" \
             KRAKEN_COMPLEX_CASE="$case" \
             KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -280,7 +286,7 @@ jobs:
             KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
               cargo test --release -p kraken --test differential_reference \
                 complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
-            target/release/kraken run "$env" --solver krakenc --output "$root.h5"
+            target/release/pelagic kraken run "$env" --solver krakenc --output "$root.h5"
             KRAKEN_HDF5_RESULT="$root.h5" \
             KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
               cargo test --release -p kraken --test differential_reference \
@@ -290,7 +296,7 @@ jobs:
         run: |
           for case in MunkLeakyPartialP MunkLeakyPartialS PekerisComplexSpline3 MunkAnalyticComplex; do
             output="$PWD/target/reference/$case-krakenc/$case.h5"
-            target/release/kraken run "crates/kraken/tests/fixtures/$case.env" --solver krakenc --output "$output"
+            target/release/pelagic kraken run "crates/kraken/tests/fixtures/$case.env" --solver krakenc --output "$output"
             KRAKEN_HDF5_RESULT="$output" \
             KRAKEN_COMPLEX_CASE="$case" \
             KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -307,18 +313,18 @@ jobs:
             KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
               cargo test --release -p kraken --test differential_reference \
                 complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
-            target/release/kraken run "$env" --solver krakenc --output "$root.h5"
+            target/release/pelagic kraken run "$env" --solver krakenc --output "$root.h5"
             KRAKEN_HDF5_RESULT="$root.h5" \
             KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
               cargo test --release -p kraken --test differential_reference \
                 complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
           done
           KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
-            cargo test --release -p kraken-cli --test run \
+            cargo test --release -p cli --test kraken_run \
               original_complex_spline_broadband_is_complete_and_preserves_late_failure -- --ignored --exact --nocapture
       - name: Self-contained KRAKEN JSON API and actual CLI HDF5 differential
         run: |
-          cargo build --release -p kraken-cli
+          cargo build --release -p cli
           mkdir -p target/reference/json
           for mapping in \
             'WaterLossPower kraken crates/kraken/tests/fixtures/WaterLossPower.env target/reference/WaterLossPower-kraken/WaterLossPower' \
@@ -347,11 +353,11 @@ jobs:
             'GulfCm kraken target/reference/profile-cases/GulfCm.env target/reference/GulfCm-kraken/GulfCm'; do
             set -- $mapping
             json="$PWD/target/reference/json/$1.json"
-            target/release/kraken export "$3" --solver "$2" > "$json"
+            target/release/pelagic kraken export "$3" --solver "$2" > "$json"
             KRAKEN_JSON_INPUT="$json" KRAKEN_JSON_ENV="$PWD/$3" KRAKEN_JSON_REFERENCE_ROOT="$PWD/$4" \
               cargo test --release -p kraken --test differential_reference \
                 json_fields_match_fresh_reference -- --ignored --exact --nocapture
-            target/release/kraken run "$json" --output "${json%.json}.h5"
+            target/release/pelagic kraken run "$json" --output "${json%.json}.h5"
             KRAKEN_HDF5_RESULT="${json%.json}.h5" KRAKEN_JSON_INPUT="$json" \
             KRAKEN_JSON_ENV="$PWD/$3" KRAKEN_JSON_REFERENCE_ROOT="$PWD/$4" \
               cargo test --release -p kraken --test differential_reference \

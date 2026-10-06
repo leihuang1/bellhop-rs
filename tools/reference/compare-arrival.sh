@@ -10,7 +10,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 case_path=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 stem=$(basename "$case_path" .env)
 output="$root/target/reference/$stem"
-image=${BELLHOP_REFERENCE_IMAGE:-bellhop-rs-reference:v2023.5-amd64}
+image=${BELLHOP_REFERENCE_IMAGE:-pelagic-reference:v2023.5-amd64}
 
 if ! docker image inspect "$image" >/dev/null 2>&1; then
   "$root/tools/reference/build-image.sh"

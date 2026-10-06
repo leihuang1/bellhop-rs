@@ -11,7 +11,7 @@ import tarfile
 repo = Path(__file__).resolve().parents[2]
 out = repo / "target/reference/layered-refinement-gap"
 out.mkdir(parents=True, exist_ok=False)  # Keep old evidence rather than overwrite it.
-image = os.environ.get("BELLHOP_REFERENCE_IMAGE", "bellhop-rs-reference:v2023.5-amd64")
+image = os.environ.get("BELLHOP_REFERENCE_IMAGE", "pelagic-reference:v2023.5-amd64")
 docker = ["docker", "run", "--rm", "--platform", "linux/amd64"]
 archive = subprocess.run(
     docker + ["--entrypoint", "tar", image, "cf", "-", "-C",

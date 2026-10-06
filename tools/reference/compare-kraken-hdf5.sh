@@ -18,5 +18,5 @@ compare() {
       multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
 }
 compare
-"$root/target/release/kraken" run "$case_path" --solver "$engine" --output "$reference.h5"
+"$root/target/release/pelagic" kraken run "$case_path" --solver "$engine" --output "$reference.h5"
 KRAKEN_HDF5_RESULT="$reference.h5" compare

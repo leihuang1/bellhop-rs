@@ -13,7 +13,7 @@ case_name=$(basename "$case_path")
 stem=${case_name%.env}
 output="$root/target/reference/$stem"
 rust_image='rust:1.88.0-bookworm@sha256:af306cfa71d987911a781c37b59d7d67d934f49684058f96cf72079c3626bfe0'
-reference_image=${BELLHOP_REFERENCE_IMAGE:-bellhop-rs-reference:v2023.5-amd64}
+reference_image=${BELLHOP_REFERENCE_IMAGE:-pelagic-reference:v2023.5-amd64}
 
 if ! docker image inspect "$reference_image" >/dev/null 2>&1; then
   "$root/tools/reference/build-image.sh"
@@ -31,8 +31,8 @@ docker run --rm \
   --volume "$root:/repo:ro" \
   --volume "$case_dir:/case:ro" \
   --volume "$output:/reference:ro" \
-  --volume bellhop-rs-cargo-registry:/usr/local/cargo/registry \
-  --volume bellhop-rs-linux-target:/target \
+  --volume pelagic-cargo-registry:/usr/local/cargo/registry \
+  --volume pelagic-linux-target:/target \
   --workdir /repo \
   "$rust_image" \
   cargo test --package bellhop --test differential_reference \

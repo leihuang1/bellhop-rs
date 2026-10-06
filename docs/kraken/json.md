@@ -7,7 +7,7 @@ This is the modern adapter for the **currently supported** KRAKEN/KRAKENC and
 
 ```console
 pelagic kraken export case.env --solver krakenc > case.json
-pelagic kraken run case.json --output result.h5
+pelagic kraken run case.json --output results/case --format both
 pelagic kraken export case.json > canonical.json
 ```
 

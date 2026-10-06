@@ -51,8 +51,9 @@ cargo build --release -p cli
 tools/reference/compare-kraken-hdf5.sh krakenc crates/kraken/tests/fixtures/LayeredFluidPower.env
 ```
 
-The helper runs fresh Fortran first and requires its HDF5 destination not to
-exist. CI shares this sequence across the six material/FIELD groups; their
+The helper runs fresh Fortran first and writes CLI `both` products into a
+separate result directory, then independently reads every native value and
+compares HDF5 with the oracle. CI shares this sequence across the six material/FIELD groups; their
 case lists, exclusions, reference checks and tolerances remain independent.
 
 For the derived KRAKENC Pekeris and reduced 1 km, seven-knot MunkLeakyPartial
@@ -127,8 +128,8 @@ for case in ProfilesAd ProfilesCm GulfAd GulfCm; do
   KRAKEN_PROFILE_ENV="$env" KRAKEN_PROFILE_ROOT="$reference" \
     cargo test --release -p kraken --test differential_reference \
       profile_fields_match_fresh_reference -- --ignored --exact --nocapture
-  target/release/pelagic kraken run "$env" --output "$reference.h5" --overwrite
-  KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_PROFILE_ENV="$env" KRAKEN_PROFILE_ROOT="$reference" \
+  tools/reference/run-cli-kraken.sh "$env" "$reference.cli"
+  KRAKEN_HDF5_RESULT="$reference.cli/$case.h5" KRAKEN_PROFILE_ENV="$env" KRAKEN_PROFILE_ROOT="$reference" \
     cargo test --release -p kraken --test differential_reference \
       profile_fields_match_fresh_reference -- --ignored --exact --nocapture
 done
@@ -152,8 +153,8 @@ target/release/pelagic kraken export "$env" > "$json"
 KRAKEN_JSON_INPUT="$json" KRAKEN_JSON_ENV="$env" KRAKEN_JSON_REFERENCE_ROOT="$reference" \
   cargo test --release -p kraken --test differential_reference \
     json_fields_match_fresh_reference -- --ignored --exact --nocapture
-target/release/pelagic kraken run "$json" --output "${json%.json}.h5" --overwrite
-KRAKEN_HDF5_RESULT="${json%.json}.h5" KRAKEN_JSON_INPUT="$json" \
+tools/reference/run-cli-kraken.sh "$json" "${json%.json}.cli"
+KRAKEN_HDF5_RESULT="${json%.json}.cli/WaterLossPower.h5" KRAKEN_JSON_INPUT="$json" \
 KRAKEN_JSON_ENV="$env" KRAKEN_JSON_REFERENCE_ROOT="$reference" \
   cargo test --release -p kraken --test differential_reference \
     json_fields_match_fresh_reference -- --ignored --exact --nocapture
@@ -184,8 +185,8 @@ for case in MunkS MunkAnalytic; do
   KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
     cargo test --release -p kraken --test differential_reference \
       complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
-  target/release/pelagic kraken run "$env" --solver krakenc --output "$root.h5" --overwrite
-  KRAKEN_HDF5_RESULT="$root.h5" \
+  tools/reference/run-cli-kraken.sh "$env" "$root.cli" --solver krakenc
+  KRAKEN_HDF5_RESULT="$root.cli/$case.h5" \
   KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
     cargo test --release -p kraken --test differential_reference \
       complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
@@ -215,8 +216,8 @@ for case in neggradC_geo neggradC_brc neggradC_irc; do
   KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
     cargo test --release -p kraken --test differential_reference \
       complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
-  target/release/pelagic kraken run "$env" --solver krakenc --output "$root.h5" --overwrite
-  KRAKEN_HDF5_RESULT="$root.h5" \
+  tools/reference/run-cli-kraken.sh "$env" "$root.cli" --solver krakenc
+  KRAKEN_HDF5_RESULT="$root.cli/$case.h5" \
   KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
     cargo test --release -p kraken --test differential_reference \
       complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
@@ -277,9 +278,10 @@ To validate the actual Rust [CLI/HDF5 product](../guide/kraken-hdf5.md),
 set `KRAKEN_HDF5_RESULT` for the same comparator. With the fresh reference above:
 
 ```sh
-cargo run --release -p cli -- kraken run target/reference/cases/BroadBand/MunkK.env \
-  --output target/reference/BroadBand-MunkK-kraken/MunkK.h5 --overwrite
-KRAKEN_HDF5_RESULT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK.h5" \
+cargo build --release -p cli
+tools/reference/run-cli-kraken.sh target/reference/cases/BroadBand/MunkK.env \
+  target/reference/BroadBand-MunkK-kraken/MunkK.cli
+KRAKEN_HDF5_RESULT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK.cli/MunkK.h5" \
 KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
 KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-kraken/MunkK" \
   cargo test --release -p kraken --test differential_reference \
@@ -303,8 +305,9 @@ engine=krakenc
 env="$PWD/crates/kraken/tests/fixtures/$case.env"
 reference="$PWD/target/reference/$case-$engine/$case"
 tools/reference/run-kraken-case.sh "$engine" "$env"
-cargo run --release -p cli -- kraken run "$env" --solver "$engine" --output "$reference.h5"
-KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_FREQUENCY_SOLVER="$engine" \
+cargo build --release -p cli
+tools/reference/run-cli-kraken.sh "$env" "$reference.cli" --solver "$engine"
+KRAKEN_HDF5_RESULT="$reference.cli/$case.h5" KRAKEN_FREQUENCY_SOLVER="$engine" \
 KRAKEN_DIFFERENTIAL_ENV="$env" KRAKEN_DIFFERENTIAL_ROOT="$reference" \
   cargo test --release -p kraken --test differential_reference \
     multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture

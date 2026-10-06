@@ -125,8 +125,8 @@ jobs:
             KRAKEN_PROFILE_ENV="$env" KRAKEN_PROFILE_ROOT="$reference" \
               cargo test --release -p kraken --test differential_reference \
                 profile_fields_match_fresh_reference -- --ignored --exact --nocapture
-            target/release/pelagic kraken run "$env" --output "$reference.h5"
-            KRAKEN_HDF5_RESULT="$reference.h5" KRAKEN_PROFILE_ENV="$env" KRAKEN_PROFILE_ROOT="$reference" \
+            tools/reference/run-cli-kraken.sh "$env" "$(dirname "$reference")/pelagic"
+            KRAKEN_HDF5_RESULT="$(dirname "$reference")/pelagic/$case.h5" KRAKEN_PROFILE_ENV="$env" KRAKEN_PROFILE_ROOT="$reference" \
               cargo test --release -p kraken --test differential_reference \
                 profile_fields_match_fresh_reference -- --ignored --exact --nocapture
           done
@@ -234,8 +234,8 @@ jobs:
           for case in PekerisBroadband PekerisComplexBroadband MunkLeakyPchipBroadband; do
             engine=kraken
             if [ "$case" != PekerisBroadband ]; then engine=krakenc; fi
-            output="$PWD/target/reference/$case-$engine/$case.h5"
-            target/release/pelagic kraken run "crates/kraken/tests/fixtures/$case.env" --solver "$engine" --output "$output"
+            output="$PWD/target/reference/$case-$engine/pelagic/$case.h5"
+            tools/reference/run-cli-kraken.sh "crates/kraken/tests/fixtures/$case.env" "$(dirname "$output")" --solver "$engine"
             KRAKEN_HDF5_RESULT="$output" \
             KRAKEN_FREQUENCY_SOLVER="$engine" \
             KRAKEN_DIFFERENTIAL_ENV="$PWD/crates/kraken/tests/fixtures/$case.env" \
@@ -244,24 +244,24 @@ jobs:
                 multifrequency_fluid_matches_fresh_reference -- --ignored --exact --nocapture
           done
           for case in MunkKleaky MunkKwb MunkKbb sductK calibK; do
-            output="$PWD/target/reference/$case-krakenc/$case.h5"
-            target/release/pelagic kraken run "target/reference/cases/$case.env" --solver krakenc --output "$output"
+            output="$PWD/target/reference/$case-krakenc/pelagic/$case.h5"
+            tools/reference/run-cli-kraken.sh "target/reference/cases/$case.env" "$(dirname "$output")" --solver krakenc
             KRAKEN_HDF5_RESULT="$output" \
             KRAKEN_ORIGINAL_COMPLEX_ENV="$PWD/target/reference/cases/$case.env" \
             KRAKEN_ORIGINAL_COMPLEX_ROOT="$PWD/target/reference/$case-krakenc/$case" \
               cargo test --release -p kraken --test differential_reference \
                 complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
           done
-          output="$PWD/target/reference/MunkK-kraken/MunkK.h5"
-          target/release/pelagic kraken run target/reference/cases/MunkK.env --output "$output"
+          output="$PWD/target/reference/MunkK-kraken/pelagic/MunkK.h5"
+          tools/reference/run-cli-kraken.sh target/reference/cases/MunkK.env "$(dirname "$output")"
           KRAKEN_HDF5_RESULT="$output" \
           KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/MunkK.env" \
           KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/MunkK-kraken/MunkK" \
             cargo test --release -p kraken --test differential_reference \
               fluid_matches_fresh_reference -- --ignored --exact --nocapture
           for engine in kraken krakenc; do
-            output="$PWD/target/reference/BroadBand-MunkK-$engine/MunkK.h5"
-            target/release/pelagic kraken run target/reference/cases/BroadBand/MunkK.env --solver "$engine" --output "$output"
+            output="$PWD/target/reference/BroadBand-MunkK-$engine/pelagic/MunkK.h5"
+            tools/reference/run-cli-kraken.sh target/reference/cases/BroadBand/MunkK.env "$(dirname "$output")" --solver "$engine"
             KRAKEN_FREQUENCY_SOLVER="$engine" KRAKEN_HDF5_RESULT="$output" \
             KRAKEN_DIFFERENTIAL_ENV="$PWD/target/reference/cases/BroadBand/MunkK.env" \
             KRAKEN_DIFFERENTIAL_ROOT="$PWD/target/reference/BroadBand-MunkK-$engine/MunkK" \
@@ -272,8 +272,8 @@ jobs:
         run: |
           tools/reference/prepare-tabref.sh
           for case in TabRefBrcN TabRefBrcC TabRefIrcN TabRefIrcC; do
-            output="$PWD/target/reference/$case-krakenc/$case.h5"
-            target/release/pelagic kraken run "crates/kraken/tests/fixtures/$case.env" --solver krakenc --output "$output"
+            output="$PWD/target/reference/$case-krakenc/pelagic/$case.h5"
+            tools/reference/run-cli-kraken.sh "crates/kraken/tests/fixtures/$case.env" "$(dirname "$output")" --solver krakenc
             KRAKEN_HDF5_RESULT="$output" \
             KRAKEN_COMPLEX_CASE="$case" \
             KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -286,8 +286,8 @@ jobs:
             KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
               cargo test --release -p kraken --test differential_reference \
                 complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
-            target/release/pelagic kraken run "$env" --solver krakenc --output "$root.h5"
-            KRAKEN_HDF5_RESULT="$root.h5" \
+            tools/reference/run-cli-kraken.sh "$env" "$(dirname "$root")/pelagic-$case" --solver krakenc
+            KRAKEN_HDF5_RESULT="$(dirname "$root")/pelagic-$case/$case.h5" \
             KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
               cargo test --release -p kraken --test differential_reference \
                 complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
@@ -295,8 +295,8 @@ jobs:
       - name: KRAKENC cubic and analytic profiles through CLI HDF5
         run: |
           for case in MunkLeakyPartialP MunkLeakyPartialS PekerisComplexSpline3 MunkAnalyticComplex; do
-            output="$PWD/target/reference/$case-krakenc/$case.h5"
-            target/release/pelagic kraken run "crates/kraken/tests/fixtures/$case.env" --solver krakenc --output "$output"
+            output="$PWD/target/reference/$case-krakenc/pelagic/$case.h5"
+            tools/reference/run-cli-kraken.sh "crates/kraken/tests/fixtures/$case.env" "$(dirname "$output")" --solver krakenc
             KRAKEN_HDF5_RESULT="$output" \
             KRAKEN_COMPLEX_CASE="$case" \
             KRAKEN_COMPLEX_REFERENCE_ROOT="$PWD/target/reference/$case-krakenc/$case" \
@@ -313,8 +313,8 @@ jobs:
             KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
               cargo test --release -p kraken --test differential_reference \
                 complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
-            target/release/pelagic kraken run "$env" --solver krakenc --output "$root.h5"
-            KRAKEN_HDF5_RESULT="$root.h5" \
+            tools/reference/run-cli-kraken.sh "$env" "$(dirname "$root")/pelagic" --solver krakenc
+            KRAKEN_HDF5_RESULT="$(dirname "$root")/pelagic/$case.h5" \
             KRAKEN_ORIGINAL_COMPLEX_ENV="$env" KRAKEN_ORIGINAL_COMPLEX_ROOT="$root" \
               cargo test --release -p kraken --test differential_reference \
                 complex_original_fluid_matches_fresh_reference -- --ignored --exact --nocapture
@@ -357,8 +357,8 @@ jobs:
             KRAKEN_JSON_INPUT="$json" KRAKEN_JSON_ENV="$PWD/$3" KRAKEN_JSON_REFERENCE_ROOT="$PWD/$4" \
               cargo test --release -p kraken --test differential_reference \
                 json_fields_match_fresh_reference -- --ignored --exact --nocapture
-            target/release/pelagic kraken run "$json" --output "${json%.json}.h5"
-            KRAKEN_HDF5_RESULT="${json%.json}.h5" KRAKEN_JSON_INPUT="$json" \
+            tools/reference/run-cli-kraken.sh "$json" "${json%.json}-results"
+            KRAKEN_HDF5_RESULT="${json%.json}-results/$1.h5" KRAKEN_JSON_INPUT="$json" \
             KRAKEN_JSON_ENV="$PWD/$3" KRAKEN_JSON_REFERENCE_ROOT="$PWD/$4" \
               cargo test --release -p kraken --test differential_reference \
                 json_fields_match_fresh_reference -- --ignored --exact --nocapture
@@ -369,3 +369,14 @@ jobs:
         run: tools/reference/compare-field.sh target/reference/cases/MunkB_Coh.env
       - name: Official 50k-receiver ASCII arrival fan (sbcx_Arr_asc)
         run: tools/reference/compare-arrival.sh target/reference/cases/sbcx_Arr_asc.env
+      - name: Actual BELLHOP CLI native and HDF5 full-grid readback
+        run: |
+          cargo build --release -p cli
+          for case in MunkB_Coh sbcx_Arr_asc; do
+            input="$PWD/target/reference/cases/$case.env"
+            output="$PWD/target/reference/$case-cli"
+            target/release/pelagic bellhop run "$input" --format both --output "$output"
+            BELLHOP_NATIVE_INPUT="$input" BELLHOP_NATIVE_OUTPUT="$output" \
+              cargo test --release -p cli --test native_output \
+                actual_cli_native_layouts_match_all_hdf5_values -- --ignored --exact --nocapture
+          done

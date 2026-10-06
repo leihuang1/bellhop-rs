@@ -75,7 +75,7 @@ CLI accepts the resulting file anywhere it accepts a legacy `.env` file:
 
 ```console
 pelagic bellhop validate case.json
-pelagic bellhop run case.json --output result.h5
+pelagic bellhop run case.json --output results/case --format both
 ```
 
 Exporting an existing JSON case validates and canonicalizes it. The legacy `W`

@@ -11,6 +11,13 @@ pub(crate) mod reflection;
 
 pub use field::{solve_field, solve_frequencies};
 
+/// First-mesh fluid interval counts for native MOD metadata; uses the solver's mesh policy.
+/// # Errors
+/// Returns the existing mesh diagnostic when the first mesh is inadmissible.
+pub fn base_mesh_intervals(case: &Case) -> Result<Vec<usize>, DiagnosticReport> {
+    layers::mesh_intervals(case, 1)
+}
+
 use crate::{
     Case, Diagnostic, DiagnosticReport, MAX_FIELD_SAMPLES, MAX_MODE_LIMIT, ModeAddition, ModeSet,
     ModeSolver, PressureField, SimulationResult, SourceGeometry,

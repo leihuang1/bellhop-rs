@@ -18,16 +18,16 @@ pub enum Command {
         /// Path to a self-contained .json case or primary legacy .env file.
         case: PathBuf,
     },
-    /// Run a modern JSON or legacy case and write a versioned HDF5 result.
+    /// Run a modern JSON or legacy case and safely update a result directory.
     Run {
         /// Path to a self-contained .json case or primary legacy .env file.
         case: PathBuf,
-        /// Result path; defaults to `<case-stem>.h5` in the current directory.
+        /// Result directory, default `<case-stem>` in the current directory. Only owned files are replaced.
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// Replace an existing result.
-        #[arg(long)]
-        overwrite: bool,
+        /// Numerical output format; HTTP is unaffected.
+        #[arg(long, value_enum, default_value = "legacy")]
+        format: crate::Format,
     },
     /// Convert a legacy or modern case to canonical, self-contained JSON.
     Export {
@@ -42,8 +42,8 @@ pub fn execute(command: Command) -> ExitCode {
         Command::Run {
             case,
             output,
-            overwrite,
-        } => run(&case, output.as_deref(), overwrite),
+            format,
+        } => run(&case, output.as_deref(), format.into()),
         Command::Export { case } => export(&case),
     }
 }
@@ -79,15 +79,12 @@ fn validate(path: &Path) -> ExitCode {
     }
 }
 
-fn run(path: &Path, requested_output: Option<&Path>, overwrite: bool) -> ExitCode {
+fn run(
+    path: &Path,
+    requested_output: Option<&Path>,
+    format: output::directory::Format,
+) -> ExitCode {
     let output_path = requested_output.map_or_else(|| default_output_path(path), Path::to_path_buf);
-    if output_path.exists() && !overwrite {
-        eprintln!(
-            "error[BH0401]: output already exists: {}; pass --overwrite to replace it",
-            output_path.display()
-        );
-        return ExitCode::from(4);
-    }
 
     let LoadedInput {
         outcome,
@@ -114,14 +111,23 @@ fn run(path: &Path, requested_output: Option<&Path>, overwrite: bool) -> ExitCod
     let input_filename = path
         .file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-    if let Err(error) = output::bellhop::write_hdf5_atomic(
+    let stem = match output::directory::stem(path) {
+        Ok(stem) => stem,
+        Err(error) => {
+            eprintln!("error[BH0402]: {error}");
+            return ExitCode::from(4);
+        }
+    };
+    if let Err(error) = output::bellhop::write_directory(
         &output_path,
+        &stem,
+        &outcome.value,
         &input_filename,
         &input_bytes,
         &result,
         &outcome.warnings,
         &input_paths.iter().map(PathBuf::as_path).collect::<Vec<_>>(),
-        overwrite,
+        format,
     ) {
         eprintln!("error[BH0402]: {error}");
         return ExitCode::from(4);
@@ -228,7 +234,7 @@ fn default_output_path(input: &Path) -> PathBuf {
     let stem = input
         .file_stem()
         .map_or_else(|| "bellhop".into(), std::ffi::OsStr::to_os_string);
-    PathBuf::from(stem).with_extension("h5")
+    PathBuf::from(stem)
 }
 
 fn render_report(report: &bellhop::DiagnosticReport) {

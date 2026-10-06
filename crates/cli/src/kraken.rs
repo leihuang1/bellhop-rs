@@ -5,11 +5,13 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Subcommand, ValueEnum};
-use output::kraken::{DEFAULT_MAX_OUTPUT_BYTES, RunError, run_json, run_legacy};
+use output::kraken::{
+    DEFAULT_MAX_OUTPUT_BYTES, RunError, run_json_directory, run_legacy_directory,
+};
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Run legacy .env/.flp or self-contained .json input and atomically write HDF5 v1.
+    /// Run legacy .env/.flp or self-contained .json input and safely update a result directory.
     Run {
         case: PathBuf,
         /// Legacy FIELD geometry; defaults to the same-stem .flp. Invalid for JSON.
@@ -18,12 +20,12 @@ pub enum Command {
         /// Legacy engine (default kraken); for JSON, assert the document's engine.
         #[arg(long, value_enum)]
         solver: Option<Solver>,
-        /// Defaults to `<case-stem>.h5` in the current directory.
+        /// Result directory, default `<case-stem>` in the current directory. Only owned files are replaced.
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// Atomically replace an existing result, never an input file.
-        #[arg(long)]
-        overwrite: bool,
+        /// Numerical output format; HTTP is unaffected.
+        #[arg(long, value_enum, default_value = "legacy")]
+        format: crate::Format,
         /// Cumulative file/payload quota, checked before datasets and after flushes.
         #[arg(long, default_value_t = DEFAULT_MAX_OUTPUT_BYTES, value_parser = clap::value_parser!(u64).range(1..))]
         max_output_bytes: u64,
@@ -60,7 +62,7 @@ pub fn execute(command: Command) -> ExitCode {
             flp,
             solver,
             output,
-            overwrite,
+            format,
             max_output_bytes,
         } => {
             let output = output.unwrap_or_else(|| {
@@ -68,25 +70,24 @@ pub fn execute(command: Command) -> ExitCode {
                     case.file_stem()
                         .unwrap_or_else(|| std::ffi::OsStr::new("kraken")),
                 )
-                .with_extension("h5")
             });
             let result = if is_json(&case) {
                 reject_json_flp(flp.as_deref()).and_then(|()| {
-                    run_json(
+                    run_json_directory(
                         &case,
                         &output,
                         solver.map(Into::into),
-                        overwrite,
+                        format.into(),
                         max_output_bytes,
                     )
                 })
             } else {
-                run_legacy(
+                run_legacy_directory(
                     &case,
                     &flp.unwrap_or_else(|| case.with_extension("flp")),
                     &output,
                     solver.unwrap_or(Solver::Kraken).into(),
-                    overwrite,
+                    format.into(),
                     max_output_bytes,
                 )
             };

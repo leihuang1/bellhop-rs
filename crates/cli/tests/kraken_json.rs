@@ -1,34 +1,35 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-
 use hdf5::types::VarLenUnicode;
 use hdf5::{File, Group};
 use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+#[path = "support/publication.rs"]
+mod publication;
+use publication::{h5, old_output, read_output};
+#[path = "support/native.rs"]
+#[allow(dead_code)]
+mod native;
 
 fn directory(name: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!("kraken-json-{name}-{}", std::process::id()));
     fs::create_dir_all(&root).unwrap();
     root
 }
-
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../kraken/tests/fixtures")
         .join(name)
         .with_extension("env")
 }
-
 fn invoke(command: &str, input: &Path, extra: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_pelagic"))
-        .arg("kraken")
-        .arg(command)
-        .arg(input)
-        .args(extra)
-        .output()
-        .unwrap()
+    let mut process = Command::new(env!("CARGO_BIN_EXE_pelagic"));
+    process.args(["kraken", command]).arg(input);
+    if command == "run" {
+        process.args(["--format", "both"]);
+    }
+    process.args(extra).output().unwrap()
 }
-
 fn text(location: &hdf5::Location, name: &str) -> String {
     location
         .attr(name)
@@ -38,7 +39,6 @@ fn text(location: &hdf5::Location, name: &str) -> String {
         .as_str()
         .to_owned()
 }
-
 fn assert_datasets(left: &Group, right: &Group) {
     assert_eq!(left.attr_names().unwrap(), right.attr_names().unwrap());
     for name in left.attr_names().unwrap() {
@@ -79,7 +79,7 @@ fn assert_datasets(left: &Group, right: &Group) {
 }
 
 #[test]
-#[allow(clippy::too_many_lines)] // One interface check covers relocation, provenance and full dataset equality.
+#[allow(clippy::too_many_lines)]
 fn json_cli_exports_and_runs_relocated_documents_without_auxiliary_files() {
     let root = directory("round-trip");
     for (name, solver) in [
@@ -116,11 +116,9 @@ fn json_cli_exports_and_runs_relocated_documents_without_auxiliary_files() {
         let mut source = export.stdout;
         fs::write(&document, &source).unwrap();
         assert_eq!(invoke("export", &document, &[]).stdout, source);
-        // Noncanonical whitespace must be included in provenance, not reconstructed away.
         source.splice(0..0, b" \r\n".iter().copied());
         source.extend_from_slice(b"\r\n \t");
         fs::write(&document, &source).unwrap();
-        // Poison every potential same-stem resource: JSON must never resolve them.
         for extension in ["env", "flp", "trc", "brc", "irc", "sbp"] {
             fs::write(
                 document.with_extension(extension),
@@ -128,8 +126,8 @@ fn json_cli_exports_and_runs_relocated_documents_without_auxiliary_files() {
             )
             .unwrap();
         }
-        let legacy_output = root.join(format!("{stem}-legacy.h5"));
-        let json_output = root.join(format!("{stem}-json.h5"));
+        let legacy_output = root.join(format!("{stem}-legacy"));
+        let json_output = root.join(format!("{stem}-json"));
         for (input, output, flags) in [
             (&env, &legacy_output, vec!["--solver", solver]),
             (&document, &json_output, vec![]),
@@ -137,14 +135,17 @@ fn json_cli_exports_and_runs_relocated_documents_without_auxiliary_files() {
             let mut flags = flags;
             flags.extend(["--output", output.to_str().unwrap()]);
             let process = invoke("run", input, &flags);
+            if process.status.success() {
+                native::kraken(output, input);
+            }
             assert!(
                 process.status.success(),
                 "{}",
                 String::from_utf8_lossy(&process.stderr)
             );
         }
-        let left = File::open(&legacy_output).unwrap();
-        let right = File::open(&json_output).unwrap();
+        let left = File::open(h5(&legacy_output, &env)).unwrap();
+        let right = File::open(h5(&json_output, &document)).unwrap();
         assert_eq!(text(&right, "solver"), solver);
         assert_eq!(
             right
@@ -185,7 +186,7 @@ fn json_cli_exports_and_runs_relocated_documents_without_auxiliary_files() {
                 .unwrap(),
             source.len() as u64
         );
-        assert!(!json_output.with_extension("h5.tmp").exists());
+        assert!(!json_output.join(".pelagic-stage").exists());
     }
     fs::remove_dir_all(root).unwrap();
 }
@@ -197,13 +198,15 @@ fn json_failures_preserve_outputs_and_protect_input_aliases() {
     let document = root.join("case.json");
     let source = invoke("export", &fixture("PekerisBroadband"), &[]).stdout;
     fs::write(&document, &source).unwrap();
-    let output = root.join("old.h5");
-    fs::write(&output, b"old result").unwrap();
+    let output = root.join("old");
+    old_output(&output, b"old result");
+    let conflict = h5(&output, &document);
+    fs::write(&conflict, b"old result").unwrap();
     for (flags, code) in [
         (vec![], 4),
-        (vec!["--overwrite", "--max-output-bytes", "1"], 4),
-        (vec!["--overwrite", "--solver", "krakenc"], 2),
-        (vec!["--overwrite", "--flp", "missing.flp"], 2),
+        (vec!["--max-output-bytes", "1"], 4),
+        (vec!["--solver", "krakenc"], 2),
+        (vec!["--flp", "missing.flp"], 2),
     ] {
         let mut flags = flags;
         flags.extend(["--output", output.to_str().unwrap()]);
@@ -214,26 +217,22 @@ fn json_failures_preserve_outputs_and_protect_input_aliases() {
             "{}",
             String::from_utf8_lossy(&process.stderr)
         );
-        assert_eq!(fs::read(&output).unwrap(), b"old result");
-        assert!(!output.with_extension("h5.tmp").exists());
+        assert_eq!(read_output(&output), b"old result");
+        assert!(!output.join(".pelagic-stage").exists());
     }
-    let process = invoke(
-        "run",
-        &document,
-        &["--overwrite", "--output", document.to_str().unwrap()],
+    fs::remove_file(conflict).unwrap();
+    assert_eq!(
+        invoke("run", &document, &["--output", document.to_str().unwrap()])
+            .status
+            .code(),
+        Some(4)
     );
-    assert_eq!(process.status.code(), Some(4));
     assert_eq!(fs::read(&document).unwrap(), source);
-    // Fail after a valid first frequency: retain the original destination and clean scratch.
     let mut value: serde_json::Value = serde_json::from_slice(&source).unwrap();
     value["frequencies"][1]["profiles"][0]["c_low_mps"] = serde_json::json!(100.0);
     value["frequencies"][1]["profiles"][0]["c_high_mps"] = serde_json::json!(200.0);
     fs::write(&document, serde_json::to_vec(&value).unwrap()).unwrap();
-    let process = invoke(
-        "run",
-        &document,
-        &["--overwrite", "--output", output.to_str().unwrap()],
-    );
+    let process = invoke("run", &document, &["--output", output.to_str().unwrap()]);
     assert_eq!(
         process.status.code(),
         Some(3),
@@ -241,79 +240,60 @@ fn json_failures_preserve_outputs_and_protect_input_aliases() {
         String::from_utf8_lossy(&process.stderr)
     );
     assert!(String::from_utf8_lossy(&process.stderr).contains("frequency[1]"));
-    assert_eq!(fs::read(&output).unwrap(), b"old result");
-    assert!(!output.with_extension("h5.tmp").exists());
-    fs::write(&document, b"{ malformed JSON").unwrap();
-    let process = invoke(
-        "run",
-        &document,
-        &["--overwrite", "--output", output.to_str().unwrap()],
-    );
-    assert_eq!(process.status.code(), Some(2));
-    assert_eq!(fs::read(&output).unwrap(), b"old result");
-    let process = invoke("export", &document, &[]);
-    assert_eq!(process.status.code(), Some(2));
-    assert_eq!(process.stdout, b"");
-    fs::write(&document, vec![b' '; 1_048_577]).unwrap();
-    assert_eq!(
-        invoke(
-            "run",
-            &document,
-            &["--overwrite", "--output", output.to_str().unwrap()]
-        )
-        .status
-        .code(),
-        Some(2)
-    );
-    assert_eq!(fs::read(&output).unwrap(), b"old result");
-    fs::write(output.with_extension("h5.tmp"), b"unowned scratch").unwrap();
+    assert_eq!(read_output(&output), b"old result");
+    assert!(!output.join(".pelagic-stage").exists());
+    for bad in [b"{ malformed JSON".to_vec(), vec![b' '; 1_048_577]] {
+        fs::write(&document, bad).unwrap();
+        assert_eq!(
+            invoke("run", &document, &["--output", output.to_str().unwrap()])
+                .status
+                .code(),
+            Some(2)
+        );
+        let export = invoke("export", &document, &[]);
+        assert_eq!(export.status.code(), Some(2));
+        assert!(export.stdout.is_empty());
+        assert_eq!(read_output(&output), b"old result");
+    }
+    fs::write(output.join(".pelagic-stage"), b"unowned scratch").unwrap();
     fs::write(&document, &source).unwrap();
     assert_eq!(
-        invoke(
-            "run",
-            &document,
-            &["--overwrite", "--output", output.to_str().unwrap()]
-        )
-        .status
-        .code(),
+        invoke("run", &document, &["--output", output.to_str().unwrap()])
+            .status
+            .code(),
         Some(4)
     );
     assert_eq!(
-        fs::read(output.with_extension("h5.tmp")).unwrap(),
+        fs::read(output.join(".pelagic-stage")).unwrap(),
         b"unowned scratch"
     );
-    assert_eq!(fs::read(&output).unwrap(), b"old result");
+    assert_eq!(read_output(&output), b"old result");
     #[cfg(unix)]
     {
-        let alias = root.join("input-alias.h5");
+        let alias = root.join("input-alias");
         std::os::unix::fs::symlink(&document, &alias).unwrap();
         assert_eq!(
-            invoke(
-                "run",
-                &document,
-                &["--overwrite", "--output", alias.to_str().unwrap()]
-            )
-            .status
-            .code(),
+            invoke("run", &document, &["--output", alias.to_str().unwrap()])
+                .status
+                .code(),
             Some(4)
         );
         assert_eq!(fs::read(&document).unwrap(), source);
     }
-    // Compressed legacy vectors can expand beyond JSON's byte ceiling: emit no partial export.
     let env = root.join("expanded.env");
     fs::copy(fixture("Pekeris"), &env).unwrap();
     let flp = fs::read_to_string(fixture("Pekeris").with_extension("flp")).unwrap();
     let expanded = flp.replace("3\n0.5 1.0 2.0 /", "100000\n0.0 1000.0 /");
     assert_ne!(expanded, flp);
     fs::write(env.with_extension("flp"), expanded).unwrap();
-    let process = invoke("export", &env, &[]);
+    let export = invoke("export", &env, &[]);
     assert_eq!(
-        process.status.code(),
+        export.status.code(),
         Some(2),
         "{}",
-        String::from_utf8_lossy(&process.stderr)
+        String::from_utf8_lossy(&export.stderr)
     );
-    assert!(String::from_utf8_lossy(&process.stderr).contains("exported JSON exceeds 1 MiB"));
-    assert_eq!(process.stdout, b"");
+    assert!(String::from_utf8_lossy(&export.stderr).contains("exported JSON exceeds 1 MiB"));
+    assert!(export.stdout.is_empty());
     fs::remove_dir_all(root).unwrap();
 }

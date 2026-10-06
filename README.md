@@ -25,16 +25,18 @@ packages.
 
 ```sh
 pelagic bellhop validate examples/field-g.json
-pelagic bellhop run examples/field-g.json --output field.h5
-pelagic kraken run crates/kraken/tests/fixtures/Pekeris.env --output modes.h5
-pelagic kraken run crates/kraken/tests/fixtures/PekerisComplexBlank.env --solver krakenc --output complex.h5
+pelagic bellhop run examples/field-g.json --output results/field
+pelagic kraken run crates/kraken/tests/fixtures/Pekeris.env --output results/pekeris --format both
+pelagic kraken run crates/kraken/tests/fixtures/PekerisComplexBlank.env --solver krakenc --output results/complex
 pelagic kraken export crates/kraken/tests/fixtures/Pekeris.env > case.json
 ```
 
 Both solvers accept legacy inputs and their own strict, self-contained JSON
-schema. This release still writes **HDF5 only**, to a single file; existing
-outputs require `--overwrite`. Consumed inputs and their symlink aliases cannot
-be destinations. See the [CLI guide](docs/guide/cli.md).
+schema. Computation defaults to **native output**; `--format hdf5|both` selects
+HDF5 or both from one solve. All formats write result directories and safely
+update only verified owned artifacts, preserving unrelated files and consumed
+inputs. See the [CLI guide](docs/guide/cli.md) and
+[native layouts/publication contract](docs/guide/native-output.md).
 
 ## HTTP
 

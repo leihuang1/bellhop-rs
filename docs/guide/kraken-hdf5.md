@@ -12,8 +12,8 @@ FIELD through both engines and legacy/JSON CLI-HDF5 at unchanged work ceilings.
 ## CLI
 
 ```console
-cargo run --release -p cli -- kraken run path/to/case.env --output result.h5
-cargo run --release -p cli -- kraken run path/to/case.env --solver krakenc --flp geometry.flp --output complex.h5
+cargo run --release -p cli -- kraken run path/to/case.env --format hdf5 --output results/case
+cargo run --release -p cli -- kraken run path/to/case.env --solver krakenc --flp geometry.flp --format both --output results/complex
 ```
 
 The installed computation binary is `pelagic`; `cargo install --path crates/cli`
@@ -61,10 +61,11 @@ builds it using the existing static HDF5 dependency. See the [CLI guide](cli.md)
 - `.flp` defaults to the environment's same-stem file. It remains required:
   `.env` controls modal samples; `.flp` controls FIELD geometry, mode addition,
   source-pattern selection and mode limit. `*` consumes the `.flp` stem's `.sbp`.
-- Output defaults to `<case-stem>.h5` in the current directory. Its parent
-  directory must already exist.
-- Existing destinations require `--overwrite`. Input paths and symlink aliases
-  of inputs are rejected as destinations even with that flag.
+- All CLI formats use result directories, default `<case-stem>` in the current
+  directory. Select `--format hdf5|both` for `CASE.h5`; default is native output.
+- Verified owned products are replaced by default, stale owned products removed,
+  and unknown conflicts/inputs/aliases protected. See the
+  [native output and file-group contract](native-output.md); no `--overwrite` flag.
 - Exit codes: `0` success, `2` input/argument failure, `3` numerical failure,
   `4` output/quota/I/O failure. Numerical errors identify the zero-based
   frequency index and Hz value. Unsupported combinations are rejected; the
@@ -78,7 +79,9 @@ pass the pinned reference. This does not add a runtime parity-certification flag
 
 Rust adapters may call `output::kraken::run_legacy` with input/output
 paths, engine, overwrite policy and byte quota, or `run_json` for one JSON
-snapshot with an optional matching engine assertion. Both share the same writer.
+snapshot with an optional matching engine assertion. These existing Rust APIs
+retain single-file publication; CLI uses `run_legacy_directory` or
+`run_json_directory`, sharing the same HDF5 writer and ordered solve iterator.
 The numerical `kraken` crate
 has no production HDF5 dependency.
 
@@ -101,8 +104,10 @@ The default cumulative output limit is **268,435,456 bytes (256 MiB)**;
 are admitted against it before numerical work. Numeric dataset payloads are
 charged cumulatively before writing; actual HDF5 file size, including metadata,
 is checked after the header, each frequency flush, final summary attributes,
-and HDF5 close before publication.
-A rejected run publishes nothing and attempts to remove its owned scratch file;
+and HDF5 close before publication. CLI additionally checks cumulative physical
+bytes across all selected native/HDF5 products, report and manifest; see
+[the group quota/failure contract](native-output.md).
+A rejected pre-installation run publishes nothing and attempts to remove its owned scratch;
 a cleanup I/O failure is reported as a warning.
 
 Only one frequency's `SimulationResult` and one large component-write buffer
@@ -113,7 +118,8 @@ cancellation mechanism. A scratch file can temporarily exceed the physical
 quota during the header or one bounded frequency's writes, before its flush check; there is
 no hard byte-limited HDF5 filesystem driver.
 
-The private publication module is shared with local BELLHOP output; its v3
+For the retained **Rust single-file APIs** (not CLI group publication), the
+private publication module is shared with BELLHOP; its v3
 schema and absence of a KRAKEN byte quota remain separate. KRAKEN payload
 accounting and header/profile/frequency flush checks stay in the v1 writer;
 the shared publisher checks its existing physical quota again after close.
@@ -294,7 +300,8 @@ Ordinary tests run the CLI, verify schema/types/units/metadata, compare all
 serialized values exactly with the Rust result, retain duplicates and varying
 mode counts, and exercise overwrite/input-alias/scratch protection, input bounds,
 physical/payload quotas and failure after a successful first frequency.
-BELLHOP v3 tests continue unchanged.
+HDF5 schemas and numerical assertions are unchanged; CLI tests now use result
+directories and verify complete native readback alongside the same HDF5 checks.
 
 Fresh pinned CI additionally passes CLI-produced `.h5` files back through the
 same strict `.mod/.prt/.shd` comparator (`KRAKEN_HDF5_RESULT`): both derived

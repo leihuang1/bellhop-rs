@@ -3,17 +3,18 @@
 KRAKEN/KRAKENC use a [separate schema v1](kraken-hdf5.md); this
 BELLHOP v3 contract is unchanged.
 
-Schema version 3 is written by both `pelagic bellhop run` and `POST /v1/run` through the
-shared `output` crate. Local BELLHOP and KRAKEN runs share one publication
-implementation, not a numerical model or schema. BELLHOP exclusively creates
-`<output>.tmp`, writes schema v3, closes and syncs it, then installs the complete
-file: an atomic hard link without `--overwrite`, an atomic rename with it.
-Destinations appearing during the run are not clobbered without that flag.
-Primary inputs, consumed auxiliary inputs and their symlink aliases cannot be
-destinations. Pre-existing scratch is never truncated or removed; failure removes
-only owned scratch and preserves the previous result. The output parent must
-exist, with same-filesystem hard-link/rename support; this is not a directory
-power-loss durability guarantee. No KRAKEN byte quota is imposed on BELLHOP.
+Schema version 3 is written by `pelagic bellhop run --format hdf5|both` and
+`POST /v1/run` through the shared `output` crate. CLI products now use
+[result-directory publication](native-output.md), with one `CASE.h5` when
+selected. The CLI defaults to native files; the HTTP protocol does not.
+No KRAKEN byte quota is imposed on BELLHOP.
+
+The existing Rust single-file publisher still exclusively creates
+`<output>.tmp`, writes/closes/syncs schema v3 and installs via an exclusive
+hard link or explicit overwrite rename. It protects consumed inputs and
+symlink aliases, never adopts existing scratch, and requires an existing
+parent with same-filesystem hard-link/rename support. This is not a directory
+power-loss durability guarantee or the new CLI group-installation policy.
 
 Rust callers can use `write_hdf5_atomic` with all consumed input paths for this
 policy. The existing `write_hdf5` remains a low-level path writer for trusted

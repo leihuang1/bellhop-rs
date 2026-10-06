@@ -1,7 +1,7 @@
 use std::process::Command;
 
 #[test]
-fn unified_cli_routes_solver_commands_without_old_root_aliases_or_new_formats() {
+fn unified_cli_routes_solver_commands_and_rejects_invalid_formats_and_old_overwrite() {
     for args in [
         vec!["--help"],
         vec!["bellhop", "--help"],
@@ -21,8 +21,8 @@ fn unified_cli_routes_solver_commands_without_old_root_aliases_or_new_formats() 
     }
     for args in [
         vec!["run", "case.env"],
-        vec!["bellhop", "run", "case.env", "--format", "legacy"],
-        vec!["kraken", "run", "case.env", "--format", "both"],
+        vec!["bellhop", "run", "case.env", "--format", "csv"],
+        vec!["kraken", "run", "case.env", "--overwrite"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_pelagic"))
             .args(&args)

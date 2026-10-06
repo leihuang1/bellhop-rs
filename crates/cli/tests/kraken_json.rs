@@ -252,7 +252,7 @@ fn json_failures_preserve_outputs_and_protect_input_aliases() {
         );
         let export = invoke("export", &document, &[]);
         assert_eq!(export.status.code(), Some(2));
-        assert!(export.stdout.is_empty());
+        assert_eq!(export.stdout, [] as [u8; 0]);
         assert_eq!(read_output(&output), b"old result");
     }
     fs::write(output.join(".pelagic-stage"), b"unowned scratch").unwrap();
@@ -294,6 +294,6 @@ fn json_failures_preserve_outputs_and_protect_input_aliases() {
         String::from_utf8_lossy(&export.stderr)
     );
     assert!(String::from_utf8_lossy(&export.stderr).contains("exported JSON exceeds 1 MiB"));
-    assert!(export.stdout.is_empty());
+    assert_eq!(export.stdout, [] as [u8; 0]);
     fs::remove_dir_all(root).unwrap();
 }

@@ -1,25 +1,13 @@
 use crate::diagnostic::{Diagnostic, DiagnosticReport, LoadOutcome, SourceLocation};
+use crate::model::LegacyArrivalEncoding;
 use crate::model::{
     BeamFamily, Boundary, BoundaryCondition, BoundaryMaterial, BoundaryShape, EnvironmentCase,
-    RangeDependentSoundSpeed, ReceiverGrid, ReflectionCoefficientTable, RunKind, SourceBeamPattern,
-    SspInterpolation,
+    RangeDependentSoundSpeed, ReceiverGrid, ReflectionCoefficientTable, RunKind, SspInterpolation,
 };
-use crate::model::{InternalReflectionCoefficientTable, LegacyArrivalEncoding};
 use std::collections::HashMap;
 use std::ops::Deref;
 
-/// Unvalidated data used to construct a [`Case`].
-#[derive(Clone, Debug, PartialEq)]
-pub struct CaseDefinition {
-    pub environment: EnvironmentCase,
-    pub range_dependent_sound_speed: Option<RangeDependentSoundSpeed>,
-    pub altimetry: Option<BoundaryShape>,
-    pub bathymetry: Option<BoundaryShape>,
-    pub bottom_reflection: Option<ReflectionCoefficientTable>,
-    pub top_reflection: Option<ReflectionCoefficientTable>,
-    pub internal_reflection: Option<InternalReflectionCoefficientTable>,
-    pub source_beam_pattern: Option<SourceBeamPattern>,
-}
+pub use crate::model::CaseDefinition;
 
 /// A fully loaded and validated two-dimensional BELLHOP input case.
 ///

@@ -43,8 +43,8 @@ RUN make -C misc FC=gfortran \
         'programs bellhop-fortran kraken-fortran krakenc-fortran bounce-fortran field-fortran' \
         > /opt/reference-build.txt
 
-LABEL org.opencontainers.image.title="bellhop-rs BELLHOP/KRAKEN reference" \
-      org.opencontainers.image.source="https://github.com/leihuang1/bellhop-rs" \
+LABEL org.opencontainers.image.title="Pelagic BELLHOP/KRAKEN reference" \
+      org.opencontainers.image.source="https://github.com/leihuang1/pelagic" \
       org.opencontainers.image.version="Acoustics Toolbox v2023.5"
 
 WORKDIR /work

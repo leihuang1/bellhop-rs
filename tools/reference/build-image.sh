@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-image=${BELLHOP_REFERENCE_IMAGE:-bellhop-rs-reference:v2023.5-amd64}
+image=${BELLHOP_REFERENCE_IMAGE:-pelagic-reference:v2023.5-amd64}
 commit=475108519289c6fb488b58980c644ea14eccc604
 expected=f8a7a2c1e80a73431cd230a10bef5fcfc996c88889a0e1540771c3922ee2a21f
 archive="$root/tools/reference/Acoustics-Toolbox-$commit.tar.gz"

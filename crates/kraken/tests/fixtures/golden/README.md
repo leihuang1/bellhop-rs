@@ -210,7 +210,7 @@ numerical changes first, copy its `.mod/.shd/.prt` here, trim trailing whitespac
 from `.prt` lines, and update hashes below. Binary files are unmodified; `.prt`
 CPU timings are nondeterministic, so the test reads only its modal table.
 The test-only reader is `../../differential_reference.rs`. For broadband
-regeneration commands, see [tools/README.md](../../../../../tools/README.md).
+regeneration commands, see [reference workflows](../../../../../docs/development/reference-workflows.md).
 It compares all per-frequency record blocks and includes a later-frequency
 corruption check; it never treats the first block as the entire file.
 
@@ -1123,7 +1123,7 @@ No earlier golden or tolerance was changed. The ten added workflows (58 modes,
 kept MOD/SHD byte controls. Finite solids are outside this half-space checkpoint;
 failed slow-interface and 75 Hz top/both broadband probes are **not** accepted. Original elsed/ice now
 pass the separate finite-cap checkpoint below. The existing layered exception
-does not waive any elastic failure. See the [half-space checkpoint](../../../../../docs/kraken-elastic-halfspaces.md).
+does not waive any elastic failure. See the [half-space checkpoint](../../../../../docs/kraken/elastic-halfspaces.md).
 
 ## Homogeneous finite elastic layers
 
@@ -1164,7 +1164,7 @@ than cropping to a reference count. When later meshes reduce M, pinned WriteMode
 can leave first-mesh records beyond the declared spectrum; the comparator checks
 all declared modes/shapes/pressures and bounds those stale trailing records.
 No other record-length/count check or numerical tolerance is relaxed.
-See [finite-cap scope and stiffness semantics](../../../../../docs/kraken-finite-elastic-layers.md).
+See [finite-cap scope and stiffness semantics](../../../../../docs/kraken/finite-elastic-layers.md).
 
 Existing half-space, layered and single-fluid goldens/tolerances are unchanged.
 
@@ -1215,7 +1215,7 @@ The unchanged reference source hashes are:
 | `KrakenField/ReadModes.f90` | `0561feeeacc36089eb65878049ed46a7ba8d4760e2da3352bae518b4d68998b3` |
 | `KrakenField/field.f90` | `fe5ef3e7df5bdf4d42dea236439171df841f501fe9a0898e735ed841cd5120d4` |
 
-See [propagation semantics and limits](../../../../../docs/kraken-multi-profile-field.md).
+See [propagation semantics and limits](../../../../../docs/kraken/field.md).
 No newly discovered combination changes the initial acceptance target.
 
 ## Depth-varying finite elastic material
@@ -1249,4 +1249,4 @@ All MOD/SHD outputs are byte-identical in three independent runs. PRT only trims
 trailing whitespace and retains CPU timings. `graded-elastic.sha256` locks 24
 input files and 69 artifacts (93 records); older manifests/artifacts are untouched.
 JSON API/CLI comparison uses the same oracle for BottomN, TopS, Power and Bio.
-See [sampling and loss semantics](../../../../../docs/kraken-finite-elastic-layers.md).
+See [sampling and loss semantics](../../../../../docs/kraken/finite-elastic-layers.md).

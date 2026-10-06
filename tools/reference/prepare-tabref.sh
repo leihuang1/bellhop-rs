@@ -9,7 +9,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 output=${1:-$root/target/reference/TabRefCoef}
 mkdir -p "$output/inputs"
 output=$(cd "$output" && pwd)
-image=${BELLHOP_REFERENCE_IMAGE:-bellhop-rs-reference:v2023.5-amd64}
+image=${BELLHOP_REFERENCE_IMAGE:-pelagic-reference:v2023.5-amd64}
 if ! docker image inspect "$image" >/dev/null 2>&1; then
   "$root/tools/reference/build-image.sh"
 fi

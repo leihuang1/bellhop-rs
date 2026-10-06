@@ -26,7 +26,7 @@ fi
 output=${3:-$root/target/reference/$stem-$engine}
 mkdir -p "$output"
 output=$(cd "$output" && pwd)
-image=${BELLHOP_REFERENCE_IMAGE:-bellhop-rs-reference:v2023.5-amd64}
+image=${BELLHOP_REFERENCE_IMAGE:-pelagic-reference:v2023.5-amd64}
 
 if ! docker image inspect "$image" >/dev/null 2>&1; then
   "$root/tools/reference/build-image.sh"

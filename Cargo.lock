@@ -157,46 +157,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bellhop-cli"
-version = "0.2.0"
-dependencies = [
- "bellhop",
- "bellhop-hdf5",
- "clap",
- "serde_json",
-]
-
-[[package]]
-name = "bellhop-hdf5"
-version = "0.2.0"
-dependencies = [
- "bellhop",
- "hdf5-metno",
- "kraken",
- "sha2 0.10.9",
-]
-
-[[package]]
-name = "bellhop-server"
-version = "0.2.0"
-dependencies = [
- "axum",
- "bellhop",
- "bellhop-hdf5",
- "clap",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "utoipa",
- "utoipa-swagger-ui",
-]
-
-[[package]]
 name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -287,6 +247,19 @@ name = "clap_lex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
+
+[[package]]
+name = "cli"
+version = "0.2.0"
+dependencies = [
+ "bellhop",
+ "clap",
+ "hdf5-metno",
+ "kraken",
+ "output",
+ "serde_json",
+ "sha2 0.10.9",
+]
 
 [[package]]
 name = "cmake"
@@ -810,18 +783,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kraken-cli"
-version = "0.2.0"
-dependencies = [
- "bellhop-hdf5",
- "clap",
- "hdf5-metno",
- "kraken",
- "serde_json",
- "sha2 0.10.9",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -990,6 +951,16 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "output"
+version = "0.2.0"
+dependencies = [
+ "bellhop",
+ "hdf5-metno",
+ "kraken",
+ "sha2 0.10.9",
+]
 
 [[package]]
 name = "parking_lot"
@@ -1272,6 +1243,26 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "server"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "bellhop",
+ "clap",
+ "output",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "utoipa",
+ "utoipa-swagger-ui",
 ]
 
 [[package]]

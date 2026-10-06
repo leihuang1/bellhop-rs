@@ -1,11 +1,10 @@
 [workspace]
 members = [
     "crates/bellhop",
-    "crates/bellhop-cli",
-    "crates/bellhop-hdf5",
-    "crates/bellhop-server",
     "crates/kraken",
-    "crates/kraken-cli",
+    "crates/output",
+    "crates/cli",
+    "crates/server",
 ]
 resolver = "2"
 
@@ -14,7 +13,8 @@ version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/leihuang1/bellhop-rs"
+repository = "https://github.com/leihuang1/pelagic"
+publish = false
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

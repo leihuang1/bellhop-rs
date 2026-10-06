@@ -17,7 +17,7 @@ stem=$(basename "$case_path" .env)
 output=${2:-$root/target/reference/$stem}
 mkdir -p "$output"
 output=$(cd "$output" && pwd)
-image=${BELLHOP_REFERENCE_IMAGE:-bellhop-rs-reference:v2023.5-amd64}
+image=${BELLHOP_REFERENCE_IMAGE:-pelagic-reference:v2023.5-amd64}
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/bellhop-reference.XXXXXX")
 trap 'rm -rf "$work"' EXIT

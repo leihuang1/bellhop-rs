@@ -134,7 +134,7 @@ pub fn kraken(root: &Path, input: &Path) {
         );
         let bytes = fs::read(root.join(format!("{name}.mod"))).unwrap();
         let record_bytes = 4 * i32_at(&bytes, 0);
-        assert!(record_bytes >= 128 && record_bytes % 8 == 0);
+        assert!(record_bytes >= 128 && record_bytes.is_multiple_of(8));
         assert_eq!(bytes.len() % record_bytes, 0);
         let rec = |i: usize| &bytes[i * record_bytes..(i + 1) * record_bytes];
         let mut start = 0;

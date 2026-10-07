@@ -9,8 +9,14 @@ an arbitrary-input numerical-parity certificate.
 
 ## Install
 
-Requires Rust 1.88 or later and a C/C++ build toolchain with CMake for static
-HDF5. The HTTP build also downloads Swagger UI assets.
+Windows x64 CLI builds are attached to new [GitHub Releases](https://github.com/leihuang1/pelagic/releases)
+as `pelagic-vX.Y.Z-windows-x64.zip`, with a SHA-256 checksum file. Extract the ZIP
+and run `pelagic.exe`; HDF5 and the MSVC runtime are statically linked. The ZIP
+includes license notices, the exact source commit and dependency source links.
+`pelagic-server` is not included.
+
+To build from source, use Rust 1.88 or later and a C/C++ build toolchain with
+CMake for static HDF5. The HTTP build also downloads Swagger UI assets.
 
 ```sh
 cargo install --path crates/cli
@@ -57,4 +63,4 @@ capabilities, architecture, pinned-reference reproduction and historical evidenc
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+GPL-3.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

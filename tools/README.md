@@ -7,6 +7,7 @@ Executable helpers live in `tools/reference/`:
 - `run-kraken-case.sh`: run reference KRAKEN/KRAKENC and FIELD.
 - `compare-kraken.sh`: compare API modes and FIELD with fresh reference.
 - `compare-kraken-hdf5.sh`: compare API and actual Pelagic CLI/HDF5 products.
+- `run-cli-kraken.sh`: one actual CLI `both` solve and complete independent native readback.
 - `compare-ray.sh` / `compare-ray-linux.sh`: semantic ray comparison.
 - `compare-arrival.sh` / `compare-field.sh`: arrival/pressure comparison.
 - `check-critical-rays.sh`: focused boundary/interface comparisons.

@@ -3,13 +3,15 @@
 ## Use Pelagic
 
 - [CLI: installation, validation, export and computation](guide/cli.md)
-- [BELLHOP HDF5 schema v3 and single-file publication](guide/bellhop-hdf5.md)
+- [Native numerical layouts, result directories and safe replacement](guide/native-output.md)
+- [BELLHOP HDF5 schema v3](guide/bellhop-hdf5.md)
 - [KRAKEN/KRAKENC HDF5 schema v1, quotas and publication](guide/kraken-hdf5.md)
 - [BELLHOP HTTP routes, authentication and limits](guide/http.md)
 
-HDF5 remains the only local output format in this structural release. Native
-files, result directories and default replacement are separate future work;
-Fortran reference artifacts are comparison evidence, not current Rust outputs.
+CLI computation defaults to native numerical files; HDF5 and `both` are
+explicit choices, using one solve and result-directory publication. HTTP
+formats remain unchanged. Fortran reference artifacts are fixed comparison
+evidence, not newly generated Rust goldens.
 
 ## BELLHOP
 

@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::Path;
 
 use bellhop::diagnostic::Diagnostic;
@@ -50,6 +51,45 @@ pub fn write_hdf5_atomic(
 ) -> Result<(), String> {
     publication::publish(path, input_paths, overwrite, None, "BH0402", |file, _| {
         write_hdf5_contents(file, input_filename, input_bytes, result, warnings)
+    })
+}
+
+/// Publish CLI artifacts in a result directory. Does not affect HTTP single-file publication.
+/// # Errors
+/// Returns serialization, ownership, input protection or recoverable publication errors.
+#[allow(clippy::too_many_arguments)]
+pub fn write_directory(
+    path: &Path,
+    stem: &str,
+    case: &bellhop::Case,
+    input_filename: &str,
+    input_bytes: &[u8],
+    result: &SimulationResult,
+    warnings: &[Diagnostic],
+    input_paths: &[&Path],
+    format: super::directory::Format,
+) -> Result<(), String> {
+    super::directory::publish(path, input_paths, None, |scratch| {
+        if format.legacy() {
+            super::bellhop_native::write(scratch, stem, case, result)?;
+        }
+        if format.hdf5() {
+            let file = File::create_excl(scratch.join(format!("{stem}.h5"))).map_err(hdf5_error)?;
+            write_hdf5_contents(&file, input_filename, input_bytes, result, warnings)?;
+            file.close().map_err(hdf5_error)?;
+        }
+        let report = format!(
+            "Pelagic {} BELLHOP run report (not the Fortran PRT format)\nreference: Acoustics Toolbox v2023.5\ntitle: {:?}\nfrequency_hz: {}\nformat: {format:?}\ninput: {input_filename:?}\ninput_sha256: {:x}\nconsumed_inputs: {input_paths:?}\nwarnings: {warnings:?}\n",
+            env!("CARGO_PKG_VERSION"),
+            result.title,
+            result.frequency_hz,
+            Sha256::digest(input_bytes)
+        );
+        let mut file = super::native::create(&scratch.join(format!("{stem}.prt")))
+            .map_err(|e| e.to_string())?;
+        file.write_all(report.as_bytes())
+            .and_then(|()| file.flush())
+            .map_err(|e| e.to_string())
     })
 }
 

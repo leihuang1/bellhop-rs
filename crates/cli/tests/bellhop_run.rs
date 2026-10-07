@@ -8,17 +8,14 @@ fn directory(name: &str) -> PathBuf {
     path
 }
 
-fn run(input: &Path, output: &Path, overwrite: bool) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_pelagic"));
-    command
-        .args(["bellhop", "run"])
+fn run(input: &Path, output: &Path, format: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_pelagic"))
+        .args(["bellhop", "run", "--format", format])
         .arg(input)
         .arg("--output")
-        .arg(output);
-    if overwrite {
-        command.arg("--overwrite");
-    }
-    command.output().unwrap()
+        .arg(output)
+        .output()
+        .unwrap()
 }
 
 #[test]
@@ -59,32 +56,37 @@ fn run_protects_primary_and_consumed_auxiliary_inputs_including_symlinks() {
     }
     let unused = reflection.with_extension("irc");
     fs::write(&unused, b"poisoned unused table").unwrap();
-    let process = run(&reflection, &unused, true);
+    let process = run(&reflection, &root.join("unused-resource-run"), "both");
     assert!(
         process.status.success(),
         "{}",
         String::from_utf8_lossy(&process.stderr)
     );
+    assert_eq!(fs::read(&unused).unwrap(), b"poisoned unused table");
     pairs.push((reflection, paths));
     for (input, paths) in pairs {
         for path in paths {
             let before = fs::read(&path).unwrap();
-            let process = run(&input, &path, true);
-            assert_eq!(
-                process.status.code(),
-                Some(4),
-                "{}",
-                String::from_utf8_lossy(&process.stderr)
-            );
-            assert!(String::from_utf8_lossy(&process.stderr).contains("must not replace an input"));
-            assert_eq!(fs::read(&path).unwrap(), before);
-            #[cfg(unix)]
-            {
-                let alias = root.join("alias.h5");
-                std::os::unix::fs::symlink(&path, &alias).unwrap();
-                assert_eq!(run(&input, &alias, true).status.code(), Some(4));
+            for format in ["legacy", "hdf5", "both"] {
+                let process = run(&input, &path, format);
+                assert_eq!(
+                    process.status.code(),
+                    Some(4),
+                    "{}",
+                    String::from_utf8_lossy(&process.stderr)
+                );
+                assert!(
+                    String::from_utf8_lossy(&process.stderr).contains("must not replace an input")
+                );
                 assert_eq!(fs::read(&path).unwrap(), before);
-                fs::remove_file(alias).unwrap();
+                #[cfg(unix)]
+                {
+                    let alias = root.join("alias");
+                    std::os::unix::fs::symlink(&path, &alias).unwrap();
+                    assert_eq!(run(&input, &alias, format).status.code(), Some(4));
+                    assert_eq!(fs::read(&path).unwrap(), before);
+                    fs::remove_file(alias).unwrap();
+                }
             }
         }
     }
@@ -92,27 +94,51 @@ fn run_protects_primary_and_consumed_auxiliary_inputs_including_symlinks() {
 }
 
 #[test]
-fn run_preserves_existing_destinations_and_unowned_scratch() {
+fn run_updates_only_owned_artifacts_and_preserves_unowned_scratch() {
     let root = directory("publication");
     let input = root.join("case.json");
     fs::write(&input, include_bytes!("../../../examples/field-g.json")).unwrap();
-    let output = root.join("result.h5");
-    let scratch = root.join("result.h5.tmp");
-    fs::write(&output, b"original result").unwrap();
-    assert_eq!(run(&input, &output, false).status.code(), Some(4));
-    assert_eq!(fs::read(&output).unwrap(), b"original result");
+    let output = root.join("results");
+    fs::create_dir(&output).unwrap();
+    fs::write(output.join("case.h5"), b"unowned result").unwrap();
+    assert_eq!(run(&input, &output, "both").status.code(), Some(4));
+    assert_eq!(fs::read(output.join("case.h5")).unwrap(), b"unowned result");
+    fs::remove_file(output.join("case.h5")).unwrap();
+    let scratch = output.join(".pelagic-stage");
     fs::write(&scratch, b"unowned scratch").unwrap();
-    assert_eq!(run(&input, &output, true).status.code(), Some(4));
+    assert_eq!(run(&input, &output, "both").status.code(), Some(4));
     assert_eq!(fs::read(&scratch).unwrap(), b"unowned scratch");
-    assert_eq!(fs::read(&output).unwrap(), b"original result");
     fs::remove_file(scratch).unwrap();
-    let process = run(&input, &output, true);
+    let process = run(&input, &output, "both");
     assert!(
         process.status.success(),
         "{}",
         String::from_utf8_lossy(&process.stderr)
     );
-    assert!(fs::read(&output).unwrap().starts_with(b"\x89HDF\r\n\x1a\n"));
-    assert!(!root.join("result.h5.tmp").exists());
+    assert!(
+        fs::read(output.join("case.h5"))
+            .unwrap()
+            .starts_with(b"\x89HDF\r\n\x1a\n")
+    );
+    fs::write(output.join("notes.txt"), b"unrelated notes").unwrap();
+    assert!(run(&input, &output, "legacy").status.success());
+    assert!(!output.join("case.h5").exists());
+    assert!(output.join("case.shd").is_file());
+    assert_eq!(
+        fs::read(output.join("notes.txt")).unwrap(),
+        b"unrelated notes"
+    );
+    let manifest = fs::read(output.join("pelagic-manifest.json")).unwrap();
+    fs::write(output.join("case.shd"), b"modified by someone else").unwrap();
+    assert_eq!(run(&input, &output, "hdf5").status.code(), Some(4));
+    assert_eq!(
+        fs::read(output.join("case.shd")).unwrap(),
+        b"modified by someone else"
+    );
+    assert_eq!(
+        fs::read(output.join("pelagic-manifest.json")).unwrap(),
+        manifest
+    );
+    assert!(!output.join(".pelagic-stage").exists());
     fs::remove_dir_all(root).unwrap();
 }

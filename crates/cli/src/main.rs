@@ -5,7 +5,24 @@ mod kraken;
 
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum Format {
+    Legacy,
+    Hdf5,
+    Both,
+}
+
+impl From<Format> for output::directory::Format {
+    fn from(value: Format) -> Self {
+        match value {
+            Format::Legacy => Self::Legacy,
+            Format::Hdf5 => Self::Hdf5,
+            Format::Both => Self::Both,
+        }
+    }
+}
 
 #[derive(Debug, Parser)]
 #[command(

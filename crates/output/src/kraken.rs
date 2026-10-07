@@ -1,9 +1,9 @@
-//! Sequential legacy/JSON KRAKEN/KRAKENC runs with atomic HDF5 schema-v1 output.
+//! Sequential legacy/JSON KRAKEN/KRAKENC runs; HDF5 v1 and protected CLI native groups.
 //! This schema is independent of BELLHOP schema v3; no solver result types are unified.
 
 use std::fmt;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 
 use hdf5::{File, Group, H5Type};
@@ -171,51 +171,219 @@ fn run_cases(
         Some(max_output_bytes),
         "KR0402",
         |file, temporary| {
-            let mut budget = Budget {
-                payload: 0,
-                maximum: max_output_bytes,
-            };
-            write_header(file, cases, inputs, &mut budget).map_err(RunError::Output)?;
-            check_file(file, temporary, max_output_bytes).map_err(RunError::Output)?;
-            let frequencies = file
-                .create_group("frequencies")
-                .map_err(|e| RunError::Output(hdf5_error(e)))?;
-            let mut summary = RunSummary {
-                frequency_count: cases.len(),
-                ..RunSummary::default()
-            };
-            for (index, (case, result)) in cases
-                .iter()
-                .zip(kraken::solve_frequencies(cases))
-                .enumerate()
-            {
-                let result = result.map_err(|report| RunError::Simulation {
-                    frequency_index: index,
-                    frequency_hz: case.profiles()[0].frequency_hz,
-                    report,
-                })?;
-                let group = frequencies
-                    .create_group(&index.to_string())
-                    .map_err(|e| RunError::Output(hdf5_error(e)))?;
-                write_frequency(&group, case, &result, &mut budget, file, temporary)
-                    .map_err(RunError::Output)?;
-                summary.mode_count += result
-                    .modes
-                    .iter()
-                    .map(|m| m.modes.len() as u64)
-                    .sum::<u64>();
-                summary.pressure_count += result.field.pressure.len() as u64;
-                check_file(file, temporary, max_output_bytes).map_err(RunError::Output)?;
+            write_run(
+                cases,
+                inputs,
+                Some((file, temporary)),
+                None,
+                max_output_bytes,
+            )
+        },
+    )
+}
+
+/// Run legacy inputs once and publish selected CLI formats as a protected file group.
+/// # Errors
+/// Returns input, ordered numerical, quota or recoverable publication errors.
+pub fn run_legacy_directory(
+    env: &Path,
+    flp: &Path,
+    output: &Path,
+    solver: ModeSolver,
+    format: super::directory::Format,
+    maximum: u64,
+) -> Result<RunSummary, RunError> {
+    let input =
+        kraken::input::load_legacy(env, flp, solver).map_err(|r| RunError::Input(r.to_string()))?;
+    let snapshots = input
+        .snapshots()
+        .iter()
+        .map(|s| (s.role(), s.path(), s.source()))
+        .collect::<Vec<_>>();
+    run_directory(
+        input.cases(),
+        &snapshots,
+        output,
+        &super::directory::stem(env)?,
+        format,
+        maximum,
+    )
+}
+
+/// Run self-contained JSON once; an explicit solver remains an assertion, not an override.
+/// # Errors
+/// Returns input, ordered numerical, quota or recoverable publication errors.
+pub fn run_json_directory(
+    path: &Path,
+    output: &Path,
+    solver: Option<ModeSolver>,
+    format: super::directory::Format,
+    maximum: u64,
+) -> Result<RunSummary, RunError> {
+    let source = read_source(path)?;
+    let cases = kraken::json::load_case_document_named(source.as_bytes(), path)
+        .map_err(|r| RunError::Input(r.to_string()))?;
+    if solver.is_some_and(|s| s != cases[0].profiles()[0].mode_solver) {
+        return Err(RunError::Input(
+            "error[KR0202]: --solver must match the JSON document (mode_solver)".into(),
+        ));
+    }
+    run_directory(
+        &cases,
+        &[("json", path, &source)],
+        output,
+        &super::directory::stem(path)?,
+        format,
+        maximum,
+    )
+}
+
+fn run_directory(
+    cases: &[FieldCase],
+    inputs: &[(&str, &Path, &str)],
+    output: &Path,
+    stem: &str,
+    format: super::directory::Format,
+    maximum: u64,
+) -> Result<RunSummary, RunError> {
+    if maximum == 0 {
+        return Err(RunError::Output("max_output_bytes must be positive".into()));
+    }
+    // Keep the original pre-solve FIELD payload admission for every format.
+    let payload = cases.iter().try_fold(0_u64, |n, sequence| {
+        let c = &sequence.profiles()[0];
+        n.checked_add(
+            (c.source_depths_m.len() as u64)
+                .checked_mul(c.receiver_depths_m.len() as u64)?
+                .checked_mul(c.receiver_ranges_m.len() as u64)?
+                .checked_mul(8)?,
+        )
+    });
+    if payload.is_none_or(|n| n > maximum) {
+        return Err(RunError::Output(format!(
+            "FIELD payload exceeds {maximum} bytes"
+        )));
+    }
+    super::directory::publish(
+        output,
+        &inputs.iter().map(|(_, p, _)| *p).collect::<Vec<_>>(),
+        Some(maximum),
+        |scratch| {
+            let path = scratch.join(format!("{stem}.h5"));
+            let file = format
+                .hdf5()
+                .then(|| File::create_excl(&path).map_err(hdf5_error))
+                .transpose()?;
+            let summary = write_run(
+                cases,
+                inputs,
+                file.as_ref().map(|f| (f, path.as_path())),
+                Some((scratch, stem, format)),
+                maximum,
+            )?;
+            if let Some(file) = file {
+                file.close().map_err(hdf5_error)?;
             }
-            drop(frequencies);
-            write_scalar_attribute(file, "mode_count", &summary.mode_count)
-                .map_err(RunError::Output)?;
-            write_scalar_attribute(file, "pressure_count", &summary.pressure_count)
-                .map_err(RunError::Output)?;
-            check_file(file, temporary, max_output_bytes).map_err(RunError::Output)?;
             Ok(summary)
         },
     )
+}
+
+#[allow(clippy::too_many_lines, clippy::unnecessary_debug_formatting)] // Quote input paths so embedded newlines cannot spoof report fields.
+fn write_run(
+    cases: &[FieldCase],
+    inputs: &[(&str, &Path, &str)],
+    hdf5: Option<(&File, &Path)>,
+    directory: Option<(&Path, &str, super::directory::Format)>,
+    maximum: u64,
+) -> Result<RunSummary, RunError> {
+    let mut budget = Budget {
+        payload: 0,
+        maximum,
+    };
+    let frequencies = if let Some((file, path)) = hdf5 {
+        write_header(file, cases, inputs, &mut budget)?;
+        check_file(file, path, maximum)?;
+        Some(file.create_group("frequencies").map_err(hdf5_error)?)
+    } else {
+        None
+    };
+    let mut report = directory
+        .map(|(root, stem, _)| super::native::create(&root.join(format!("{stem}.prt"))))
+        .transpose()
+        .map_err(|e| RunError::Output(e.to_string()))?;
+    if let Some(report) = &mut report {
+        writeln!(report, "Pelagic {} KRAKEN run report (not the Fortran PRT format)\nreference: Acoustics Toolbox v2023.5\nformat: {:?}\nmax_output_bytes: {maximum}", env!("CARGO_PKG_VERSION"), directory.unwrap().2).map_err(|e| e.to_string())?;
+        for (role, path, source) in inputs {
+            writeln!(
+                report,
+                "input {role}: {:?} sha256={:x}",
+                path.as_os_str(),
+                Sha256::digest(source.as_bytes())
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    let mut summary = RunSummary {
+        frequency_count: cases.len(),
+        ..RunSummary::default()
+    };
+    // Exactly one iterator carries the existing cross-frequency seeds and stops at first error.
+    for (index, (case, result)) in cases
+        .iter()
+        .zip(kraken::solve_frequencies(cases))
+        .enumerate()
+    {
+        let result = result.map_err(|report| RunError::Simulation {
+            frequency_index: index,
+            frequency_hz: case.profiles()[0].frequency_hz,
+            report,
+        })?;
+        if let (Some(frequencies), Some((file, path))) = (&frequencies, hdf5) {
+            let group = frequencies
+                .create_group(&index.to_string())
+                .map_err(hdf5_error)?;
+            write_frequency(&group, case, &result, &mut budget, file, path)?;
+            check_file(file, path, maximum)?;
+        }
+        if let Some((root, stem, format)) = directory {
+            let name = if cases.len() == 1 {
+                stem.to_owned()
+            } else {
+                format!("{stem}.f{index:04}")
+            };
+            if format.legacy() {
+                super::kraken_native::write(root, &name, case, &result, maximum)?;
+            }
+            if let Some(report) = &mut report {
+                writeln!(report, "frequency[{index}] {} Hz; native_stem={name}; profiles={} ranges_m={:?}; modes={:?}; pressures={}", case.profiles()[0].frequency_hz, case.profiles().len(), case.ranges_m(), result.modes.iter().map(|m| m.modes.len()).collect::<Vec<_>>(), result.field.pressure.len()).map_err(|e| e.to_string())?;
+                for (profile, environment) in case.profiles().iter().enumerate() {
+                    writeln!(report, "  profile[{profile}] title={:?}; solver={:?}; mesh_reference_frequency_hz={}; source_geometry={:?}; mode_addition={:?}", environment.title, environment.mode_solver, environment.mesh_reference_frequency_hz.unwrap_or(environment.frequency_hz), environment.source_geometry, environment.mode_addition).map_err(|e| e.to_string())?;
+                }
+                report.flush().map_err(|e| e.to_string())?;
+            }
+            super::directory::check_quota(root, Some(maximum))?;
+        }
+        summary.mode_count += result
+            .modes
+            .iter()
+            .map(|m| m.modes.len() as u64)
+            .sum::<u64>();
+        summary.pressure_count += result.field.pressure.len() as u64;
+        if let Some((file, path)) = hdf5 {
+            check_file(file, path, maximum)?;
+        }
+    }
+    drop(frequencies);
+    if let Some((file, path)) = hdf5 {
+        write_scalar_attribute(file, "mode_count", &summary.mode_count)?;
+        write_scalar_attribute(file, "pressure_count", &summary.pressure_count)?;
+        check_file(file, path, maximum)?;
+    }
+    if let Some(mut report) = report {
+        report.flush().map_err(|e| e.to_string())?;
+    }
+    Ok(summary)
 }
 
 fn read_source(path: &Path) -> Result<String, RunError> {

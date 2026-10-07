@@ -9,6 +9,12 @@ use hdf5::types::VarLenUnicode;
 use hdf5::{File, Group, H5Type};
 use kraken::{Case, ModeSolver, SimulationResult};
 use sha2::{Digest, Sha256};
+#[path = "support/publication.rs"]
+mod publication;
+use publication::{h5, old_output, read_output};
+#[path = "support/native.rs"]
+#[allow(dead_code)]
+mod native;
 
 fn directory(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("kraken-cli-{name}-{}", std::process::id()));
@@ -25,7 +31,7 @@ fn fixture(name: &str) -> PathBuf {
 
 fn run(env: &Path, output: &Path, solver: &str, extra: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_pelagic"))
-        .args(["kraken", "run"])
+        .args(["kraken", "run", "--format", "both"])
         .arg(env)
         .args(["--solver", solver, "--output"])
         .arg(output)
@@ -87,7 +93,7 @@ fn cli_round_trips_single_and_multifrequency_results() {
             String::from_utf8_lossy(&process.stderr)
         );
         assert_product(&output, &env, &env.with_extension("flp"), solver);
-        assert!(!output.with_extension("h5.tmp").exists());
+        assert!(!output.join(".pelagic-stage").exists());
     }
     // Duplicate frequencies must have distinct index groups, never Hz-named keys.
     let env = root.join("duplicate.env");
@@ -122,15 +128,15 @@ fn original_complex_spline_broadband_is_complete_and_preserves_late_failure() {
     assert_eq!(cases[1].interpolation, kraken::Interpolation::Spline);
     let root = directory("complex-spline-broadband");
     let output = root.join("previous.h5");
-    fs::write(&output, b"previous output").unwrap();
-    let process = run(&env, &output, "krakenc", &["--overwrite"]);
+    old_output(&output, b"previous output");
+    let process = run(&env, &output, "krakenc", &[]);
     assert!(
         process.status.success(),
         "{}",
         String::from_utf8_lossy(&process.stderr)
     );
     assert_product(&output, &env, &env.with_extension("flp"), "krakenc");
-    assert!(!output.with_extension("h5.tmp").exists());
+    assert!(!output.join(".pelagic-stage").exists());
     // Derived failure: both original frequencies succeed before 7500 Hz hits
     // the unchanged 300M root budget. Never publish the successful prefix.
     let late = root.join("late.env");
@@ -143,8 +149,8 @@ fn original_complex_spline_broadband_is_complete_and_preserves_late_failure() {
     )
     .unwrap();
     fs::copy(env.with_extension("flp"), late.with_extension("flp")).unwrap();
-    fs::write(&output, b"previous output").unwrap();
-    let process = run(&late, &output, "krakenc", &["--overwrite"]);
+    old_output(&output, b"previous output");
+    let process = run(&late, &output, "krakenc", &[]);
     assert_failure(&process, 3, &output, b"previous output");
     let message = String::from_utf8_lossy(&process.stderr);
     assert!(
@@ -335,7 +341,7 @@ fn finite_elastic_failures_preserve_output_and_remove_scratch() {
     let root = directory("finite-elastic-failures");
     let output = root.join("old.h5");
     let old = b"old finite elastic output";
-    fs::write(&output, old).unwrap();
+    old_output(&output, old);
     let env = root.join("bad-material.env");
     fs::write(
         &env,
@@ -345,7 +351,7 @@ fn finite_elastic_failures_preserve_output_and_remove_scratch() {
     )
     .unwrap();
     fs::copy(fixture("FiniteElasticBothN.flp"), env.with_extension("flp")).unwrap();
-    let process = run(&env, &output, "kraken", &["--overwrite"]);
+    let process = run(&env, &output, "kraken", &[]);
     assert_failure(&process, 2, &output, old);
     assert!(String::from_utf8_lossy(&process.stderr).contains("positive bulk modulus"));
     let env = root.join("bad.env");
@@ -361,18 +367,13 @@ fn finite_elastic_failures_preserve_output_and_remove_scratch() {
         env.with_extension("flp"),
     )
     .unwrap();
-    assert_failure(
-        &run(&env, &output, "kraken", &["--overwrite"]),
-        3,
-        &output,
-        old,
-    );
+    assert_failure(&run(&env, &output, "kraken", &[]), 3, &output, old);
     assert_failure(
         &run(
             &fixture("OriginalElasticIce.env"),
             &output,
             "krakenc",
-            &["--overwrite", "--max-output-bytes", "1"],
+            &["--max-output-bytes", "1"],
         ),
         4,
         &output,
@@ -435,7 +436,7 @@ fn finite_elastic_metadata_checks_the_last_frequency() {
         String::from_utf8_lossy(&process.stderr)
     );
     // Retain one RW handle; parallel children must not force a native lock upgrade.
-    let file = File::open_rw(&output).unwrap();
+    let file = File::open_rw(h5(&output, &env)).unwrap();
     assert_product(&output, &env, &env.with_extension("flp"), "krakenc");
     file.group("frequencies/3/elastic_media/bottom/0")
         .unwrap()
@@ -469,7 +470,7 @@ fn elastic_metadata_checks_the_last_frequency() {
         String::from_utf8_lossy(&process.stderr)
     );
     // Avoid a read-to-write reopen: parallel CLI children can inherit native read handles.
-    let file = File::open_rw(&output).unwrap();
+    let file = File::open_rw(h5(&output, &env)).unwrap();
     assert_product(&output, &env, &env.with_extension("flp"), "krakenc");
     file.group("frequencies/3")
         .unwrap()
@@ -495,7 +496,7 @@ fn elastic_metadata_checks_the_last_frequency() {
 fn elastic_failures_preserve_output_and_remove_scratch() {
     let root = directory("elastic-failures");
     let output = root.join("previous.h5");
-    fs::write(&output, b"old elastic output").unwrap();
+    old_output(&output, b"old elastic output");
     let invalid = root.join("invalid.env");
     fs::write(
         &invalid,
@@ -509,7 +510,7 @@ fn elastic_failures_preserve_output_and_remove_scratch() {
         invalid.with_extension("flp"),
     )
     .unwrap();
-    let process = run(&invalid, &output, "kraken", &["--overwrite"]);
+    let process = run(&invalid, &output, "kraken", &[]);
     assert_failure(&process, 2, &output, b"old elastic output");
     assert!(String::from_utf8_lossy(&process.stderr).contains("cp² > 4/3 cs²"));
 
@@ -522,7 +523,7 @@ fn elastic_failures_preserve_output_and_remove_scratch() {
     )
     .unwrap();
     fs::copy(fixture("ElasticHalfBottomN.flp"), env.with_extension("flp")).unwrap();
-    let process = run(&env, &output, "kraken", &["--overwrite"]);
+    let process = run(&env, &output, "kraken", &[]);
     assert_failure(&process, 3, &output, b"old elastic output");
     assert!(String::from_utf8_lossy(&process.stderr).contains("phase-speed limits"));
 
@@ -530,7 +531,7 @@ fn elastic_failures_preserve_output_and_remove_scratch() {
         &fixture("ElasticHalfBothN.env"),
         &output,
         "krakenc",
-        &["--overwrite", "--max-output-bytes", "1"],
+        &["--max-output-bytes", "1"],
     );
     assert_failure(&process, 4, &output, b"old elastic output");
     fs::remove_dir_all(root).unwrap();
@@ -554,8 +555,8 @@ fn layered_failures_preserve_output_and_remove_scratch() {
     )
     .unwrap();
     for engine in ["kraken", "krakenc"] {
-        fs::write(&output, b"old layered output").unwrap();
-        let process = run(&increased, &output, engine, &["--overwrite"]);
+        old_output(&output, b"old layered output");
+        let process = run(&increased, &output, engine, &[]);
         assert_failure(&process, 3, &output, b"old layered output");
         assert!(String::from_utf8_lossy(&process.stderr).contains("mode count changed"));
     }
@@ -568,7 +569,7 @@ fn layered_failures_preserve_output_and_remove_scratch() {
     )
     .unwrap();
     fs::copy(fixture("LayeredFluidPower.flp"), env.with_extension("flp")).unwrap();
-    let process = run(&env, &output, "krakenc", &["--overwrite"]);
+    let process = run(&env, &output, "krakenc", &[]);
     assert_failure(&process, 3, &output, b"old layered output");
     let message = String::from_utf8_lossy(&process.stderr);
     assert!(
@@ -577,12 +578,7 @@ fn layered_failures_preserve_output_and_remove_scratch() {
         "{message}"
     );
     let env = fixture("LayeredFluidN.env");
-    let process = run(
-        &env,
-        &output,
-        "krakenc",
-        &["--overwrite", "--max-output-bytes", "1"],
-    );
+    let process = run(&env, &output, "krakenc", &["--max-output-bytes", "1"]);
     assert_failure(&process, 4, &output, b"old layered output");
     fs::remove_dir_all(root).unwrap();
 }
@@ -661,13 +657,14 @@ fn assert_finite_elastic_metadata(group: &hdf5::Group, case: &kraken::Case) {
 
 #[allow(clippy::too_many_lines)]
 fn assert_product(output: &Path, env: &Path, flp: &Path, solver: &str) {
+    native::kraken(output, env);
     let engine = if solver == "krakenc" {
         ModeSolver::Krakenc
     } else {
         ModeSolver::Kraken
     };
     let cases = kraken::legacy::load_frequency_cases(env, flp, engine).unwrap();
-    let file = File::open(output).unwrap();
+    let file = File::open(h5(output, env)).unwrap();
     assert_eq!(
         file.attr("schema_version")
             .unwrap()
@@ -1112,7 +1109,7 @@ fn cli_round_trips_profile_fields_and_preserves_outputs_on_later_failure() {
         let cases =
             kraken::legacy::load_field_cases(&env, &flp, kraken::ModeSolver::Kraken).unwrap();
         let expected = kraken::solve_field(&cases[0]).unwrap();
-        let file = hdf5::File::open(&output).unwrap();
+        let file = hdf5::File::open(h5(&output, &env)).unwrap();
         for (kind, path) in [("env", &env), ("flp", &flp)] {
             let input = file.group(&format!("inputs/{kind}")).unwrap();
             assert_eq!(
@@ -1159,7 +1156,7 @@ fn cli_round_trips_profile_fields_and_preserves_outputs_on_later_failure() {
         drop(profiles);
         drop(group);
         file.close().unwrap();
-        let old = fs::read(&output).unwrap();
+        let old = read_output(&output);
         let source = fs::read_to_string(&env).unwrap();
         // The fourth profile validates, but has no root in its selected spectral interval.
         let split = source.rfind("1400.0 1700.0").unwrap();
@@ -1172,17 +1169,12 @@ fn cli_round_trips_profile_fields_and_preserves_outputs_on_later_failure() {
             ),
         )
         .unwrap();
-        let process = run(&env, &output, "kraken", &["--overwrite"]);
+        let process = run(&env, &output, "kraken", &[]);
         assert_failure(&process, 3, &output, &old);
         assert!(String::from_utf8_lossy(&process.stderr).contains("profiles[3]"));
         fs::write(&env, &source).unwrap();
         assert_failure(
-            &run(
-                &env,
-                &output,
-                "kraken",
-                &["--overwrite", "--max-output-bytes", "100"],
-            ),
+            &run(&env, &output, "kraken", &["--max-output-bytes", "100"]),
             4,
             &output,
             &old,
@@ -1194,12 +1186,7 @@ fn cli_round_trips_profile_fields_and_preserves_outputs_on_later_failure() {
                 .replace("4\n0.0 0.8 1.6 2.4", "3\n0.0 0.8 1.6"),
         )
         .unwrap();
-        assert_failure(
-            &run(&env, &output, "kraken", &["--overwrite"]),
-            2,
-            &output,
-            &old,
-        );
+        assert_failure(&run(&env, &output, "kraken", &[]), 2, &output, &old);
     }
     let env = root.join("layered.env");
     let flp = env.with_extension("flp");
@@ -1220,7 +1207,7 @@ fn cli_round_trips_profile_fields_and_preserves_outputs_on_later_failure() {
         "{}",
         String::from_utf8_lossy(&process.stderr)
     );
-    let old = fs::read(&output).unwrap();
+    let old = read_output(&output);
     // Only the second profile omits internal interfaces; the single-profile case is otherwise valid.
     let coarse = source.replace(
         "3\n31.0 70.0 105.0 /\n7\n0.0 69.99 70.0 70.01 105.0 139.99 140.0 /",
@@ -1228,7 +1215,7 @@ fn cli_round_trips_profile_fields_and_preserves_outputs_on_later_failure() {
     );
     assert_ne!(coarse, source);
     fs::write(&env, format!("{source}{coarse}")).unwrap();
-    let process = run(&env, &output, "kraken", &["--overwrite"]);
+    let process = run(&env, &output, "kraken", &[]);
     assert_failure(&process, 2, &output, &old);
     assert!(
         String::from_utf8_lossy(&process.stderr).contains("fluid-interface quadrature stencil")
@@ -1286,13 +1273,13 @@ fn cli_discovers_and_routes_profile_boundary_resources() {
             assert_eq!(case.surface_boundary, expected.surface_boundary);
         }
         let output = env.with_extension("h5");
-        let process = run(&env, &output, "krakenc", &["--overwrite"]);
+        let process = run(&env, &output, "krakenc", &[]);
         assert!(
             process.status.success(),
             "{}",
             String::from_utf8_lossy(&process.stderr)
         );
-        let file = File::open(&output).unwrap();
+        let file = File::open(h5(&output, &env)).unwrap();
         for ext in ["brc", "irc", "trc"] {
             let input = file.group(&format!("inputs/{ext}")).unwrap();
             assert_eq!(
@@ -1314,23 +1301,13 @@ fn cli_discovers_and_routes_profile_boundary_resources() {
             &product,
         );
         file.close().unwrap();
-        let old = fs::read(&output).unwrap();
+        let old = read_output(&output);
         for ext in ["brc", "irc", "trc"] {
             let path = env.with_extension(ext);
             let bytes = fs::read(&path).unwrap();
-            assert_failure(
-                &run(&env, &path, "krakenc", &["--overwrite"]),
-                4,
-                &path,
-                &bytes,
-            );
+            assert_failure(&run(&env, &path, "krakenc", &[]), 4, &path, &bytes);
             fs::remove_file(&path).unwrap();
-            assert_failure(
-                &run(&env, &output, "krakenc", &["--overwrite"]),
-                2,
-                &output,
-                &old,
-            );
+            assert_failure(&run(&env, &output, "krakenc", &[]), 2, &output, &old);
             fs::write(path, bytes).unwrap();
         }
     }
@@ -1352,58 +1329,29 @@ fn cli_protects_consumed_resources_and_preserves_outputs_on_resource_errors() {
             fs::copy(fixture(name).with_extension(ext), env.with_extension(ext)).unwrap();
         }
         let bytes = fs::read(&table).unwrap();
-        assert_failure(
-            &run(&env, &table, "krakenc", &["--overwrite"]),
-            4,
-            &table,
-            &bytes,
-        );
+        assert_failure(&run(&env, &table, "krakenc", &[]), 4, &table, &bytes);
         #[cfg(unix)]
         {
             let alias = root.join(format!("{name}-alias.h5"));
             std::os::unix::fs::symlink(&table, &alias).unwrap();
-            assert_failure(
-                &run(&env, &alias, "krakenc", &["--overwrite"]),
-                4,
-                &alias,
-                &bytes,
-            );
+            assert_failure(&run(&env, &alias, "krakenc", &[]), 4, &alias, &bytes);
         }
         let output = root.join(name).with_extension("h5");
         let old = b"old complete output";
-        fs::write(&output, old).unwrap();
+        old_output(&output, old);
         for bad in [b"0\n".to_vec(), vec![0xff], vec![b' '; 1_048_577]] {
             fs::write(&table, bad).unwrap();
-            assert_failure(
-                &run(&env, &output, "krakenc", &["--overwrite"]),
-                2,
-                &output,
-                old,
-            );
+            assert_failure(&run(&env, &output, "krakenc", &[]), 2, &output, old);
         }
         fs::remove_file(&table).unwrap();
-        assert_failure(
-            &run(&env, &output, "krakenc", &["--overwrite"]),
-            2,
-            &output,
-            old,
-        );
+        assert_failure(&run(&env, &output, "krakenc", &[]), 2, &output, old);
         if matches!(extension, "brc" | "trc") {
             // Valid finite rows, singular F impedance: failure after HDF5 creation.
             fs::write(&table, "2\n0.0 1.0 0.0\n90.0 1.0 0.0\n").unwrap();
-            assert_failure(
-                &run(&env, &output, "krakenc", &["--overwrite"]),
-                3,
-                &output,
-                old,
-            );
+            assert_failure(&run(&env, &output, "krakenc", &[]), 3, &output, old);
         }
         fs::write(&table, &bytes).unwrap();
-        assert!(
-            run(&env, &output, "krakenc", &["--overwrite"])
-                .status
-                .success()
-        );
+        assert!(run(&env, &output, "krakenc", &[]).status.success());
         assert_product(&output, &env, &env.with_extension("flp"), "krakenc");
     }
     fs::remove_dir_all(root).unwrap();
@@ -1416,10 +1364,10 @@ fn assert_failure(process: &Output, code: i32, output: &Path, old: &[u8]) {
         "{}",
         String::from_utf8_lossy(&process.stderr)
     );
-    assert_eq!(fs::read(output).unwrap(), old);
-    let mut scratch = output.as_os_str().to_os_string();
-    scratch.push(".tmp");
-    assert!(!PathBuf::from(scratch).exists());
+    assert_eq!(read_output(output), old);
+    assert!(!output.join(".pelagic-stage").exists());
+    assert!(!output.join(".pelagic-backup").exists());
+    assert!(!output.join(".pelagic-lock").exists());
 }
 
 #[test]
@@ -1432,26 +1380,19 @@ fn cli_preserves_old_outputs_and_inputs_on_failure() {
     fs::copy(fixture("PekerisBroadband.flp"), &flp).unwrap();
     let output = root.join("result.h5");
     let old = b"previous complete result";
-    fs::write(&output, old).unwrap();
+    old_output(&output, old);
+    let conflict = h5(&output, &env);
+    fs::write(&conflict, old).unwrap();
     assert_failure(&run(&env, &output, "kraken", &[]), 4, &output, old);
+    fs::remove_file(conflict).unwrap();
     assert_failure(
-        &run(
-            &env,
-            &output,
-            "kraken",
-            &["--overwrite", "--max-output-bytes", "100"],
-        ),
+        &run(&env, &output, "kraken", &["--max-output-bytes", "100"]),
         4,
         &output,
         old,
     );
     assert_failure(
-        &run(
-            &env,
-            &output,
-            "kraken",
-            &["--overwrite", "--max-output-bytes", "4096"],
-        ),
+        &run(&env, &output, "kraken", &["--max-output-bytes", "4096"]),
         4,
         &output,
         old,
@@ -1459,68 +1400,48 @@ fn cli_preserves_old_outputs_and_inputs_on_failure() {
 
     // First frequency succeeds; 5 Hz has no trapped mode. No partial publication.
     fs::write(&env, source.replace("75.0 50.0 62.5 /", "75.0 5.0 62.5 /")).unwrap();
-    let process = run(&env, &output, "kraken", &["--overwrite"]);
+    let process = run(&env, &output, "kraken", &[]);
     assert_failure(&process, 3, &output, old);
     assert!(String::from_utf8_lossy(&process.stderr).contains("frequency[1] (5 Hz)"));
     fs::write(&env, &source).unwrap();
     for input in [&env, &flp] {
         let bytes = fs::read(input).unwrap();
-        let process = run(&env, input, "kraken", &["--overwrite"]);
+        let process = run(&env, input, "kraken", &[]);
         assert_eq!(process.status.code(), Some(4));
         assert_eq!(fs::read(input).unwrap(), bytes);
     }
-    let temporary = output.with_extension("h5.tmp");
+    let temporary = output.join(".pelagic-stage");
     fs::write(&temporary, b"someone else's scratch file").unwrap();
-    let process = run(&env, &output, "kraken", &["--overwrite"]);
+    let process = run(&env, &output, "kraken", &[]);
     assert_eq!(process.status.code(), Some(4));
     assert_eq!(
         fs::read(&temporary).unwrap(),
         b"someone else's scratch file"
     );
-    assert_eq!(fs::read(&output).unwrap(), old);
+    assert_eq!(read_output(&output), old);
     fs::remove_file(temporary).unwrap();
 
     // A quota just below the complete file size also catches cumulative/metadata growth.
-    let process = run(&env, &output, "kraken", &["--overwrite"]);
+    let process = run(&env, &output, "kraken", &[]);
     assert!(
         process.status.success(),
         "{}",
         String::from_utf8_lossy(&process.stderr)
     );
-    let complete = fs::read(&output).unwrap();
+    let complete = read_output(&output);
     let quota = (complete.len() - 1).to_string();
     assert_failure(
-        &run(
-            &env,
-            &output,
-            "kraken",
-            &["--overwrite", "--max-output-bytes", &quota],
-        ),
+        &run(&env, &output, "kraken", &["--max-output-bytes", &quota]),
         4,
         &output,
         &complete,
     );
     fs::write(&env, "unsupported input").unwrap();
-    assert_failure(
-        &run(&env, &output, "kraken", &["--overwrite"]),
-        2,
-        &output,
-        &complete,
-    );
+    assert_failure(&run(&env, &output, "kraken", &[]), 2, &output, &complete);
     fs::write(&env, [0xff]).unwrap();
-    assert_failure(
-        &run(&env, &output, "kraken", &["--overwrite"]),
-        2,
-        &output,
-        &complete,
-    );
+    assert_failure(&run(&env, &output, "kraken", &[]), 2, &output, &complete);
     fs::write(&env, vec![b' '; 1_048_577]).unwrap();
-    assert_failure(
-        &run(&env, &output, "kraken", &["--overwrite"]),
-        2,
-        &output,
-        &complete,
-    );
+    assert_failure(&run(&env, &output, "kraken", &[]), 2, &output, &complete);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -1531,7 +1452,7 @@ fn explicit_field_input_and_default_output_work() {
     let flp = fixture("PekerisBroadband.flp");
     let process = Command::new(env!("CARGO_BIN_EXE_pelagic"))
         .current_dir(&root)
-        .args(["kraken", "run"])
+        .args(["kraken", "run", "--format", "both"])
         .arg(&env)
         .arg("--flp")
         .arg(&flp)
@@ -1542,7 +1463,7 @@ fn explicit_field_input_and_default_output_work() {
         "{}",
         String::from_utf8_lossy(&process.stderr)
     );
-    assert_product(&root.join("PekerisBroadband.h5"), &env, &flp, "kraken");
+    assert_product(&root.join("PekerisBroadband"), &env, &flp, "kraken");
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -1554,7 +1475,7 @@ fn symlink_input_alias_cannot_be_overwritten() {
     let output = root.join("alias.h5");
     std::os::unix::fs::symlink(&env, &output).unwrap();
     let old = fs::read(&env).unwrap();
-    let process = run(&env, &output, "kraken", &["--overwrite"]);
+    let process = run(&env, &output, "kraken", &[]);
     assert_eq!(process.status.code(), Some(4));
     assert_eq!(fs::read(&env).unwrap(), old);
     assert!(output.is_symlink());

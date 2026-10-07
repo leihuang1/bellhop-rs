@@ -959,6 +959,9 @@ dependencies = [
  "bellhop",
  "hdf5-metno",
  "kraken",
+ "same-file",
+ "serde",
+ "serde_json",
  "sha2 0.10.9",
 ]
 

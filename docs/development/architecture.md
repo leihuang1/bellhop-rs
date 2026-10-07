@@ -34,16 +34,23 @@ canonical solve-frequency material. See the [implementation map](kraken-internal
 one dispatch entry. `server` is an independent HTTP Adapter, still BELLHOP-only.
 Neither introduces solver-independent transport models.
 
-`output/src/{bellhop,kraken}.rs` own HDF5 v3/v1 separately. Only existing HDF5
-metadata I/O and single-file publication policy are shared. Publication, input
-protection, sequential failure handling, quotas and rollback behavior are
-unchanged. The `implementation` metadata identifies Pelagic; dataset schemas,
-precision and numerical contents are unchanged.
+`output/src/{bellhop,kraken}.rs` own HDF5 v3/v1 separately.
+`{bellhop,kraken}_native.rs` own solver-specific native products; `native.rs`
+shares only pinned record/primitive I/O. BELLHOP's range-major result order is
+converted to native SHD/ARR depth-major order here, not in numerical code.
+KRAKEN exposes its existing first-mesh interval policy for MOD metadata rather
+than duplicating that algorithm. One ordered frequency iterator writes both
+formats before dropping each result; cross-frequency solver state is retained.
 
-This first structural PR does not implement native output, `--format`, result
-directories, artifact manifests or default replacement. Those are a separate
-Adapter capability and acceptance boundary, not a side effect of moving files.
-The original numerical/input target, references, tolerances, budgets and legacy
-fixture bytes remain unchanged. Naming is not evidence of increased Depth;
-the Leverage here is one CLI and predictable responsibility navigation, not a
-new universal core.
+`directory.rs` owns CLI file-group publication, verified artifact ownership,
+exclusive scratch/lock and handled-error rollback. The separate single-file
+publisher stays available to existing Rust callers. HTTP still uses private
+HDF5 files and its unchanged protocol; it never adopts CLI defaults.
+See the [exact publication scope and native layouts](../guide/native-output.md).
+HDF5 schemas, precision and numerical contents are unchanged.
+
+PR 1 isolated structural changes; PR 2 adds native adapters, format selection
+and safe result-directory updates as an independently checked capability.
+The original numerical/input target, references, tolerances, work budgets and
+legacy fixture bytes remain unchanged. There is no new universal core or
+solver-independent Case/result model.

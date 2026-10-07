@@ -2,7 +2,7 @@
 
 Vocabulary for Pelagic's independent BELLHOP and KRAKEN/KRAKENC Modules. Their validated models, numerical Implementations and HDF5 schemas remain separate. See [architecture](docs/development/architecture.md) and the [documentation index](docs/README.md).
 
-The `pelagic` CLI and BELLHOP-only `pelagic-server` are separate Adapters. This structural release keeps single-file HDF5 publication and explicit overwrite; native output and result-directory replacement are not implemented.
+The `pelagic` CLI and BELLHOP-only `pelagic-server` are separate Adapters. CLI calculation publishes native/HDF5/both products in protected result directories; HTTP keeps its existing single-response HDF5/JSON contract.
 
 ## Language
 
@@ -31,9 +31,17 @@ A primary or auxiliary path actually read under the selected acoustic options. A
 _Avoid_: All neighboring files
 
 **HDF5 result**:
-A complete numerical product in BELLHOP schema v3 or KRAKEN schema v1. Fortran MOD/SHD/RAY artifacts are pinned comparison evidence, not interchangeable output schemas.
+A complete numerical product in BELLHOP schema v3 or KRAKEN schema v1. Native MOD/SHD/RAY/ARR products use separate pinned reader layouts; Fortran goldens remain fixed comparison evidence, not new Rust outputs.
 _Avoid_: Fortran golden, common solver result
 
 **HDF5 publication**:
 Installing a complete local HDF5 result only after writing, closing and syncing succeeds. Consumed inputs are protected, scratch is exclusively owned, and no-overwrite installation must reject destinations that appear during execution.
 _Avoid_: Best-effort overwrite, early existence check alone
+
+**Native result**:
+An existing solver result serialized for the pinned v2023.5 numerical readers, with explicit precision, units and order. KRAKEN native pairs are per ordered frequency block; irregular BELLHOP arrivals are per paired receiver. Neither adapter changes physics or reconstructs inputs.
+_Avoid_: Fortran-identical bytes, common solver output model
+
+**Result directory**:
+A CLI file group with a bounded ownership manifest, numerical artifacts and a Pelagic run report. Verified owned artifacts are updated by default, stale owned artifacts removed and unrelated files retained. Installation can be rolled back; failed rollback retains named recovery data. This is not an atomic reader snapshot or crash-recovery journal.
+_Avoid_: Atomic directory replacement, all neighboring files are ours

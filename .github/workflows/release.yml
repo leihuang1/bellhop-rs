@@ -89,7 +89,8 @@ jobs:
           $sources | Set-Content "$stage\BUILD-INFO.txt" -Encoding utf8
           Compress-Archive -Path "$stage\*" -DestinationPath "dist\$name.zip"
           $hash = (Get-FileHash "dist\$name.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $name.zip" | Set-Content "dist\$name.zip.sha256" -Encoding ascii
+          $checksum = Join-Path (Get-Location).Path "dist\$name.zip.sha256"
+          [IO.File]::WriteAllText($checksum, "$hash  $name.zip`n")
       - name: Test the extracted ZIP
         shell: pwsh
         run: |

@@ -79,7 +79,9 @@ fn rays(path: &Path, case: &Case, result: &SimulationResult) -> io::Result<()> {
         "'{title}'\n{:.17e}\n1 1 {}\n{} 1\n{:.17e}\n{:.17e}\n'rz'",
         env.frequency_hz,
         env.positions.source_depths_m.len(),
-        env.trace.launch_angles_degrees.len(),
+        env.trace
+            .selected_launch_angle
+            .map_or(env.trace.launch_angles_degrees.len(), |_| 1),
         env.sound_speed.top_depth_m,
         env.sound_speed.bottom_depth_m
     )?;

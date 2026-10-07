@@ -66,7 +66,9 @@ fn bellhop(input: &Path, output: &Path) {
                 1,
                 1,
                 pos.source_depths_m.len(),
-                env.trace.launch_angles_degrees.len(),
+                env.trace
+                    .selected_launch_angle
+                    .map_or(env.trace.launch_angles_degrees.len(), |_| 1),
                 1,
             ] {
                 assert_eq!(tokens.next().unwrap().parse::<usize>().unwrap(), n);
@@ -405,6 +407,62 @@ fn bellhop_full_native_layouts_match_every_hdf5_value() {
         );
         let output = root.join(name);
         run("bellhop", &input, &output, Some("both"));
+        bellhop(&input, &output);
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn selected_ray_header_dimensions_match_complete_multisource_body() {
+    let root = directory("selected-rays");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../bellhop/tests/fixtures/golden/N2_one_ray.env");
+    let case = bellhop::legacy::load_case(&fixture).unwrap().value;
+    let mut document = bellhop::json::export_case_document(&case).unwrap();
+    document.trace.launch_angles_degrees = vec![-5.0, 0.0, 5.0];
+    document.positions.source_depths_m = vec![40.0, 50.0];
+    for selected in [Some(1), Some(2), Some(3), None] {
+        document.trace.selected_launch_angle = selected;
+        let input = root.join(format!("selected-{selected:?}.json"));
+        fs::write(&input, serde_json::to_vec(&document).unwrap()).unwrap();
+        let output = root.join(format!("results-{selected:?}"));
+        run("bellhop", &input, &output, Some("both"));
+        let stem = input.file_stem().unwrap().to_string_lossy();
+        let ray = fs::read_to_string(output.join(format!("{stem}.ray"))).unwrap();
+        let lines: Vec<_> = ray.lines().collect();
+        let sources = lines[2]
+            .split_whitespace()
+            .last()
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
+        let angles = lines[3]
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
+        assert_eq!(sources, 2);
+        assert_eq!(angles, if selected.is_some() { 1 } else { 3 });
+        let mut body = lines[7..].iter();
+        for _ in 0..sources * angles {
+            body.next()
+                .expect("missing launch angle")
+                .parse::<f64>()
+                .unwrap();
+            let points = body
+                .next()
+                .unwrap()
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .parse::<usize>()
+                .unwrap();
+            for _ in 0..points {
+                body.next().expect("incomplete trajectory");
+            }
+        }
+        assert!(body.next().is_none(), "undeclared trajectories");
         bellhop(&input, &output);
     }
     fs::remove_dir_all(root).unwrap();

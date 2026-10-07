@@ -209,7 +209,11 @@ impl Transaction {
             .map_err(message)?;
         check_quota(&self.stage, maximum)?;
         for name in names.iter().map(String::as_str).chain([MANIFEST]) {
-            File::open(self.stage.join(name))
+            // Windows FlushFileBuffers requires write access, as in single-file publication.
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(self.stage.join(name))
                 .and_then(|f| f.sync_all())
                 .map_err(message)?;
         }

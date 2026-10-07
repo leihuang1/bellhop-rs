@@ -1255,6 +1255,7 @@ dependencies = [
  "axum",
  "bellhop",
  "clap",
+ "futures-util",
  "output",
  "serde",
  "serde_json",

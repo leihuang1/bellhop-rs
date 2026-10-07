@@ -20,6 +20,8 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
+      - name: Preserve committed fixture bytes
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -28,7 +30,8 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
       - name: Test on Windows
-        run: cargo test --locked --release --workspace --all-features --target $env:TARGET --no-fail-fast
+        # ponytail: serial Windows tests; parallelize when native HDF5 handles are non-inheritable.
+        run: cargo test --locked --release --workspace --all-features --target $env:TARGET --no-fail-fast -- --test-threads=1
       - name: Build CLI
         run: cargo build --locked --release -p cli --target $env:TARGET
       - name: Check DLL dependencies

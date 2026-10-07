@@ -1444,7 +1444,17 @@ mod tests {
             request_timeout: Duration::ZERO,
             ..ServerConfig::default()
         })
-        .oneshot(json_request("/v1/run", CASE))
+        // A ready response can beat a zero timeout; keep body extraction pending instead.
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/run")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from_stream(futures_util::stream::pending::<
+                    Result<axum::body::Bytes, std::io::Error>,
+                >()))
+                .unwrap(),
+        )
         .await
         .unwrap();
         assert_eq!(timed_out.status(), StatusCode::GATEWAY_TIMEOUT);

@@ -63,6 +63,47 @@ fn table_snapshots_do_not_reread_files_and_old_snapshot_api_requires_the_resourc
 }
 
 #[test]
+fn reflection_table_diagnostics_preserve_boundary_role_and_location() {
+    for (name, extension, field) in [
+        ("FluidTrcC", "trc", "surface_boundary"),
+        ("TabRefBrcC", "brc", "bottom_boundary"),
+    ] {
+        let root = fixture(name);
+        let env = fs::read_to_string(root.with_extension("env")).unwrap();
+        let flp = fs::read_to_string(root.with_extension("flp")).unwrap();
+        for (table, suffix, code, line, column) in [
+            ("", ".count", "KR0101", 1, 1),
+            ("  0\n", ".count", "KR0201", 1, 3),
+            ("100001\n", ".count", "KR0201", 1, 1),
+            ("-1\n", ".count", "KR0102", 1, 1),
+            ("invalid\n", ".count", "KR0102", 1, 1),
+            ("2\n", "", "KR0101", 2, 1),
+            ("2\n  0 invalid 0\n", "", "KR0102", 2, 5),
+        ] {
+            let report = legacy::load_frequency_cases_with_boundary_tables(
+                &env,
+                &flp,
+                &root.with_extension("env"),
+                &root.with_extension("flp"),
+                ModeSolver::Krakenc,
+                (extension == "trc").then_some(table),
+                (extension == "brc").then_some(table),
+            )
+            .unwrap_err();
+            let diagnostic = &report.diagnostics()[0];
+            assert_eq!(
+                diagnostic.field,
+                format!("{field}{suffix}"),
+                "{extension}: {table:?}"
+            );
+            assert_eq!(diagnostic.path, root.with_extension(extension));
+            assert_eq!(diagnostic.code, code);
+            assert_eq!((diagnostic.line, diagnostic.column), (line, column));
+        }
+    }
+}
+
+#[test]
 fn surface_table_limits_are_validated_at_the_public_case_boundary() {
     let root = fixture("FluidTrcN");
     let input = legacy::load_complex_case(root.with_extension("env"), root.with_extension("flp"))

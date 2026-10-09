@@ -47,3 +47,33 @@ Unavailable because the corresponding reference paths are incomplete:
 Three-dimensional options are rejected explicitly.
 
 The complete case loader has also been exercised against 69 two-dimensional environments invoked by the official `v2023.5` MATLAB test scripts, including all auxiliary files they request. `tests/MunkRot/MunkRot.env` is intentionally rejected because its run type explicitly selects three-dimensional behavior.
+
+### Irregular receiver-grid limitation
+
+Irregular grids retain the pinned v2023.5 influence behavior, which differs
+by beam family:
+
+| Beam family | Depth used at receiver range `i` |
+| --- | --- |
+| Cartesian geometric-hat (`G`) and geometric-Gaussian (`B`) | Paired `depths[i]` |
+| Ray-centered geometric-hat (`g`), simple-Gaussian (`S`), Cerveny (`C/R`) | First depth `depths[0]` |
+
+For the latter four families, output coordinates still label the requested
+paired depths, **not the depths used to calculate the pressure**. Do not use
+these combinations to model varying-depth paired receivers. Use `G/B`, or a
+rectilinear grid and select the desired range/depth cells afterwards.
+This is a reference limitation, not a Rust porting defect; changing the
+influence calculation would break numerical compatibility.
+
+The pinned source sets `NRz_per_range=1` in `Bellhop/bellhop.f90:202`.
+`Bellhop/influence.f90:64,252,322,693` then use `Rz(iz)`, while lines 458/578
+explicitly select `Rz(ir)`. Six ordinary Rust characterization tests and an
+opt-in fresh-reference test cover coherent fields with mixed depths `[20,90]`
+and uniform controls `[20,20]`/`[90,90]`. The latter runs all 18 derived cases,
+checks reference pairing byte-for-byte, and compares receiver 1's Rust pressure
+with Fortran at the unchanged `5e-8` absolute component tolerance:
+
+```sh
+# Requires the pinned image; see ../development/reference-workflows.md.
+cargo test --release -p bellhop --test irregular_pairing -- --include-ignored --nocapture
+```

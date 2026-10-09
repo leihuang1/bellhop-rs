@@ -533,7 +533,11 @@ fn environment_cases(
             )
         })?;
         check_input_size(source, &path)?;
-        environment.bottom_boundary = parse_bottom_table(source, &path, extension)?;
+        environment.bottom_boundary = if extension == "brc" {
+            parse_reflection_table(source, &path, "bottom_boundary")?
+        } else {
+            parse_impedance_table(source, &path)?
+        };
         crate::solver::reflection::validate_table(
             &environment.bottom_boundary,
             environment.frequency_hz,
@@ -562,15 +566,7 @@ fn environment_cases(
             )
         })?;
         check_input_size(source, &path)?;
-        environment.surface_boundary =
-            parse_bottom_table(source, &path, "brc").map_err(|mut report| {
-                for d in &mut report.diagnostics {
-                    if d.field == "bottom_boundary" {
-                        d.field = "surface_boundary".into();
-                    }
-                }
-                report
-            })?;
+        environment.surface_boundary = parse_reflection_table(source, &path, "surface_boundary")?;
         crate::solver::reflection::validate_table(
             &environment.surface_boundary,
             environment.frequency_hz,
@@ -1790,26 +1786,27 @@ fn read_vector_values(
     Ok(values)
 }
 
-fn parse_bottom_table(
+fn parse_reflection_table(
     source: &str,
     path: &Path,
-    extension: &str,
+    field: &str,
 ) -> Result<BottomBoundary, DiagnosticReport> {
-    if extension == "brc" {
-        let mut reader = Reader::new(source, path)?;
-        let count = reader.count("bottom_boundary.count")?;
-        let mut points = Vec::with_capacity(count);
-        for _ in 0..count {
-            let values = reader.numbers("bottom_boundary", 3)?;
-            points.push(crate::ReflectionPoint {
-                angle_degrees: values[0],
-                magnitude: values[1],
-                phase_radians: values[2].to_radians(),
-            });
-        }
-        reader.finish()?;
-        return Ok(BottomBoundary::Reflection(points));
+    let mut reader = Reader::new(source, path)?;
+    let count = reader.count(&format!("{field}.count"))?;
+    let mut points = Vec::with_capacity(count);
+    for _ in 0..count {
+        let values = reader.numbers(field, 3)?;
+        points.push(crate::ReflectionPoint {
+            angle_degrees: values[0],
+            magnitude: values[1],
+            phase_radians: values[2].to_radians(),
+        });
     }
+    reader.finish()?;
+    Ok(BottomBoundary::Reflection(points))
+}
+
+fn parse_impedance_table(source: &str, path: &Path) -> Result<BottomBoundary, DiagnosticReport> {
     let mut lines = source.lines();
     let header = lines.next().unwrap_or("");
     let mut reader = Reader::new(header, path)?;
@@ -2064,16 +2061,14 @@ mod tests {
         };
         let source = format!("'fixed width' 50.0\n2\n{}{}", row("1.0"), row("2.0"));
         let crate::BottomBoundary::Impedance { points, .. } =
-            super::parse_bottom_table(&source, std::path::Path::new("fixed.irc"), "irc").unwrap()
+            super::parse_impedance_table(&source, std::path::Path::new("fixed.irc")).unwrap()
         else {
             panic!()
         };
         assert_eq!(points[0].f.re.to_bits(), (-0.123_456_7e-100_f64).to_bits());
         assert_eq!(points[1].g.re.to_bits(), 1.0_f64.to_bits());
         let invalid = source.replace("1.0D+00", "NaN");
-        assert!(
-            super::parse_bottom_table(&invalid, std::path::Path::new("fixed.irc"), "irc").is_err()
-        );
+        assert!(super::parse_impedance_table(&invalid, std::path::Path::new("fixed.irc")).is_err());
     }
     use std::path::Path;
 

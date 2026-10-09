@@ -1,7 +1,7 @@
 // Adapted from Acoustics Toolbox v2023.5 misc/pchipMod.f90, splinec.f90, and munk.f90,
 // Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
 // Constant-density fluid profiles. Complex speeds are converted before interpolation.
-use crate::solver::error;
+use crate::solver::{elastic::complex_speed, error};
 use crate::{CaseDefinition, DiagnosticReport, Interpolation};
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -85,7 +85,7 @@ impl<'a> Profile<'a> {
                         let neper = a * case.frequency_hz / (8.685_889_6 * p.sound_speed_mps);
                         neper * p.sound_speed_mps.powi(2) / (2.0 * PI * case.frequency_hz)
                     } else {
-                        a * p.sound_speed_mps / (8.685_889_6 * 2.0 * PI)
+                        complex_speed(p.sound_speed_mps, a).im
                     }
                 })
                 .collect()

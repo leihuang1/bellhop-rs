@@ -5,8 +5,8 @@
 //! Real, layered-fluid finite-difference path from KRAKEN v2023.5.
 //! Sturm counts isolate modes; inverse iteration samples the first mesh;
 //! Richardson extrapolation refines eigenvalues only, as in the reference.
-use crate::solver::error;
 use crate::solver::profile::Profile;
+use crate::solver::{elastic::complex_speed, error};
 use crate::{
     BottomBoundary, Case, DiagnosticReport, MAX_MODE_LIMIT, ModeSet, NormalMode, SurfaceBoundary,
 };
@@ -23,10 +23,9 @@ pub(super) fn solve(case: &Case, mut root_limit: usize) -> Result<ModeSet, Diagn
     let omega = 2.0 * PI * case.frequency_hz;
     let (bottom_k2, bottom_complex_k2) = if case.bottom_boundary.is_half_space() {
         // AttenMod::CRCI converts dB/wavelength to a positive imaginary sound speed.
-        let bottom_c = Complex64::new(
+        let bottom_c = complex_speed(
             case.bottom_sound_speed_mps,
-            case.bottom_attenuation_db_per_wavelength * case.bottom_sound_speed_mps
-                / (8.685_889_6 * 2.0 * PI),
+            case.bottom_attenuation_db_per_wavelength,
         );
         (
             (omega / case.bottom_sound_speed_mps).powi(2),
@@ -157,10 +156,9 @@ impl<'a> Mesh<'a> {
             ));
         }
         let (surface_k2, surface_complex_k2) = if case.surface_boundary.is_half_space() {
-            let c = Complex64::new(
+            let c = complex_speed(
                 case.surface_sound_speed_mps,
-                case.surface_attenuation_db_per_wavelength * case.surface_sound_speed_mps
-                    / (8.685_889_6 * 2.0 * PI),
+                case.surface_attenuation_db_per_wavelength,
             );
             (
                 (omega / case.surface_sound_speed_mps).powi(2),

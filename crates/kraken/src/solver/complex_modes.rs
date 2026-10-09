@@ -3,8 +3,8 @@
 // Copyright (C) 2009 Michael B. Porter. GPL-3.0-or-later; see LICENSE.
 //! N/C/P/S fluid stacks with smooth V/R/A boundaries and bounded Richardson
 //! extrapolation; analytic Munk and N/C table boundaries remain single-layer.
-use crate::solver::error;
 use crate::solver::profile::Profile;
+use crate::solver::{elastic::complex_speed, error};
 use crate::{BottomBoundary, Case, DiagnosticReport, ModeSet, NormalMode, SurfaceBoundary};
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -24,15 +24,13 @@ pub(super) fn solve(case: &Case) -> Result<ModeSet, DiagnosticReport> {
     let profiles = crate::solver::layers::iter(case)
         .map(|layer| Profile::new_layer(case, layer))
         .collect::<Result<Vec<_>, _>>()?;
-    let bottom_c = Complex64::new(
+    let bottom_c = complex_speed(
         case.bottom_sound_speed_mps,
-        case.bottom_attenuation_db_per_wavelength * case.bottom_sound_speed_mps
-            / (8.685_889_6 * 2.0 * PI),
+        case.bottom_attenuation_db_per_wavelength,
     );
-    let surface_c = Complex64::new(
+    let surface_c = complex_speed(
         case.surface_sound_speed_mps,
-        case.surface_attenuation_db_per_wavelength * case.surface_sound_speed_mps
-            / (8.685_889_6 * 2.0 * PI),
+        case.surface_attenuation_db_per_wavelength,
     );
     let surface_k2 = if case.surface_boundary.is_half_space() {
         (Complex64::new(omega, 0.0) / surface_c).powi(2)
@@ -695,10 +693,9 @@ fn mode(
         }
     }
     if case.surface_boundary.is_half_space() {
-        let c = Complex64::new(
+        let c = complex_speed(
             case.surface_sound_speed_mps,
-            case.surface_attenuation_db_per_wavelength * case.surface_sound_speed_mps
-                / (8.685_889_6 * 2.0 * PI),
+            case.surface_attenuation_db_per_wavelength,
         );
         slow += phi[0].powi(2)
             / (2.0 * (x - bottom.surface_k2).sqrt())

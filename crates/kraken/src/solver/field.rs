@@ -1,6 +1,6 @@
 //! Range-dependent 2D FIELD propagation.
 use crate::case::MAX_SEQUENCE_VALUES;
-use crate::solver::{double, error, single, source_pattern_scale};
+use crate::solver::{double, elastic::complex_speed, error, single, source_pattern_scale};
 use crate::{
     Case, DiagnosticReport, FieldCase, FieldPropagation, ModeAddition, ModeSet, PressureField,
     ProfileSimulationResult, SourceGeometry,
@@ -383,10 +383,7 @@ fn gamma(case: &Case, mode: &crate::NormalMode, top: bool) -> Complex32 {
             case.bottom_attenuation_db_per_wavelength,
         )
     };
-    let cp = Complex32::new(
-        cp as f32,
-        (loss * cp / (8.685_889_6 * 2.0 * std::f64::consts::PI)) as f32,
-    );
+    let cp = single(complex_speed(cp, loss));
     let kb = single(
         (Complex64::new(2.0 * f64::from(3.141_592_6_f32) * case.frequency_hz, 0.0) / double(cp))
             .powi(2),

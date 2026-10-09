@@ -227,9 +227,9 @@ fn irregular_pairing_matches_pinned_reference() {
             let actual = result.field_sources[0].samples[1].pressure;
             for (component, expected) in [actual.re, actual.im]
                 .into_iter()
-                .zip(pressure.chunks_exact(4))
+                .zip(pressure.as_chunks::<4>().0)
             {
-                let expected = f32::from_le_bytes(expected.try_into().unwrap());
+                let expected = f32::from_le_bytes(*expected);
                 assert!(
                     (f64::from(component) - f64::from(expected)).abs() <= 5.0e-8,
                     "{stem}: Rust {component}, reference {expected}"

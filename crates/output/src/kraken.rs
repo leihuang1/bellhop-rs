@@ -136,14 +136,7 @@ pub fn run_json(
     )
 }
 
-#[allow(clippy::too_many_lines)]
-fn run_cases(
-    cases: &[FieldCase],
-    inputs: &[(&str, &Path, &str)],
-    output_path: &Path,
-    overwrite: bool,
-    max_output_bytes: u64,
-) -> Result<RunSummary, RunError> {
+fn check_field_payload(cases: &[FieldCase], max_output_bytes: u64) -> Result<(), RunError> {
     if max_output_bytes == 0 {
         return Err(RunError::Output("max_output_bytes must be positive".into()));
     }
@@ -163,7 +156,17 @@ fn run_cases(
             "FIELD payload exceeds {max_output_bytes} bytes"
         )));
     }
+    Ok(())
+}
 
+fn run_cases(
+    cases: &[FieldCase],
+    inputs: &[(&str, &Path, &str)],
+    output_path: &Path,
+    overwrite: bool,
+    max_output_bytes: u64,
+) -> Result<RunSummary, RunError> {
+    check_field_payload(cases, max_output_bytes)?;
     publish(
         output_path,
         &inputs.iter().map(|(_, path, _)| *path).collect::<Vec<_>>(),
@@ -246,24 +249,7 @@ fn run_directory(
     format: super::directory::Format,
     maximum: u64,
 ) -> Result<RunSummary, RunError> {
-    if maximum == 0 {
-        return Err(RunError::Output("max_output_bytes must be positive".into()));
-    }
-    // Keep the original pre-solve FIELD payload admission for every format.
-    let payload = cases.iter().try_fold(0_u64, |n, sequence| {
-        let c = &sequence.profiles()[0];
-        n.checked_add(
-            (c.source_depths_m.len() as u64)
-                .checked_mul(c.receiver_depths_m.len() as u64)?
-                .checked_mul(c.receiver_ranges_m.len() as u64)?
-                .checked_mul(8)?,
-        )
-    });
-    if payload.is_none_or(|n| n > maximum) {
-        return Err(RunError::Output(format!(
-            "FIELD payload exceeds {maximum} bytes"
-        )));
-    }
+    check_field_payload(cases, maximum)?;
     super::directory::publish(
         output,
         &inputs.iter().map(|(_, p, _)| *p).collect::<Vec<_>>(),
